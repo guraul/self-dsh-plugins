@@ -1,0 +1,15 @@
+# 只上传 dsh-auto-upgrade/，其余一律忽略
+/*
+!/dsh-auto-upgrade/
+!/.gitignore
+!/README.md
+
+# 包内忽略：依赖与本地状态
+dsh-auto-upgrade/node_modules/
+dsh-auto-upgrade/.pnpm-store/
+
+# 系统 / 编辑器
+.DS_Store
+*.log
+.vscode/
+.idea/

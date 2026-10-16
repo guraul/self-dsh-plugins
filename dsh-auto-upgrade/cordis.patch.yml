@@ -1,0 +1,4 @@
+
+- insert:
+    - id: dsh-auto-upgrade
+      name: 'dsh-plugin-auto-upgrade'
