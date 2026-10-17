@@ -1,0 +1,50 @@
+# CHANGELOG
+
+记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
+
+## [Unreleased]
+
+### 待办（尚未做，不是"已完成"）
+
+- `GET /notes`（release notes）与 `POST /plugins/action`（写精确版本豁免 / 禁用插件）仍返回 `501`。
+- **真机升级链路尚未执行过**：备份 `~/.dsh` → 停服 → `npm install -g` → 对版 + 冒烟 → 重启交接。
+  只读半边与两条门禁已在真机验证，变更半边只有假 npm/dsh/launchctl 夹具下的证据（见 `docs/acceptance`）。
+- Windows 不支持（helper 是 POSIX sh 脚本）。
+
+## [0.1.0] — 2026-10-12
+
+### Added
+
+- **双面插件骨架**：宿主半边注册路由族 `/api/dsh-auto-upgrade/*`（14 个端点，全部 loopback-only，
+  有副作用的一律 POST）；浏览器半边手写注册 `shell.overlay` 浮层与 `settings.section` 设置页，无构建步骤。
+- **只读半边**：`status` / `check/auto` / `check/run` / `preflight` / `plugins` / `policy` / `settings` /
+  `task` / `restart/diagnostics`。
+- **变更半边**：门禁 → 备份 `~/.dsh` → 落 payload → fork 脱离进程的 helper → 宿主 `exit 0`；
+  helper 负责停服 / `npm install -g --allow-scripts=…` / 对版 + `--dump-default-config` 冒烟 / 拉起
+  （被 launchd 管理时用 `launchctl kickstart -k`，否则 detached spawn）。
+- **两条门禁**：有会话在跑 → `409`（`bypassable: true`，前端确认后可强制）；已装插件与**目标版本**不兼容
+  → `409`（`bypassable: false`，不可绕过）。
+- **用官方 API 判定兼容性**：`evaluatePluginCompatibility` / `readProfileVersionExemptions` /
+  `readProfilePlugins`，且用 `ctx.profileContext.installAnchor` 定位**运行时那一份** `dsh-app-boot`。
+- **35 个用例**：真 `node:http` 路由 + 假 npm registry；真官方 API；假 npm/dsh/launchctl + 真 `/bin/sh`
+  跑生成的 helper；假 `ModuleLoader` + 假 react 装载浏览器半边。
+
+### Changed
+
+- 2026-10-16 — 包管理转为 **pnpm**：`.npmrc` 指向共享 store（`store-dir=/Users/gubin/workspace/global_node_modules`），
+  `pnpm-lock.yaml` 只含 react（peer 自动安装）。
+- 2026-10-16 — 设置页样式全部改用 dsh 设计 token，数值逐条对齐官方设置页实测（字体 `--dsw-font-*`、
+  行布局照官方 `Pt1bsG_row`、按钮 36px / `0 14px` / `--dsw-alias-bg-module-platform`、开关逐字照
+  primitives `Switch.module.css`）。详见 `README.md` 的「UI 风格契约」。
+- 2026-10-17 — 浮层卡片对齐官方**浮层**语言：`--dsw-menu-surface-fill` + `blur(40px) saturate(150%)` +
+  `--dsw-elevation-prominent`（照 `MenuSurface` / `Menu.list`），动作按钮改用官方 `Button` 的 `sm` + `outline`。
+
+### Fixed
+
+- 2026-10-16 — 当天已检测过时，浮层永远停在「正在检查…」；现在直接用上次结论并标注「今天已检查过」。
+- 2026-10-16 — 点过「不再提示」后没有任何入口能恢复浮层；设置页新增「重新启用提示」。
+- 2026-10-16 — 豁免态误用错误红（改为警告琥珀）；那段官方英文诊断折进「不兼容详情」。
+- 2026-10-16 — 样式里三个**不存在**的 token（`--dsw-alias-label-warning/danger/success`）导致颜色静默退回硬编码。
+- 2026-10-17 — `official-compat` 用例原先读外部插件仓库的 manifest，对方挪位置/升级就会挂；
+  改为内联夹具（仍跑官方 API），并补了「同一插件在它自己声明的世代里必须判为兼容」的反向断言。
