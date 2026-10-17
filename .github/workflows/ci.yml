@@ -1,0 +1,127 @@
+# 本仓库的 CI 只跑**测试与语法检查**，没有任何部署步骤。
+# 对比 agent-mobile 的 deploy-web.yml：那边有 expo export / rsync / ssh / systemd restart / 线上 curl 验证，
+# 本仓库没有服务器，故全部不存在。
+#
+# 包管理：本仓库统一用 pnpm（全局约定禁用 npm / npx，npx 由 pnpm dlx 代替）。
+#
+# 另注：本仓库 .gitignore 是白名单（当前只收录 dsh-auto-upgrade/），
+# 因此 CI 检出后 4 个插件目录里通常只有 dsh-auto-upgrade 存在——
+# 其余目录走下面的"目录不存在 → ::warning:: 跳过"分支（这是预期行为，不是失败）。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dir: dsh-auto-upgrade
+            entry: |
+              lib/index.js
+              lib/client.js
+          - dir: dsh-external-discuss
+            entry: |
+              lib/index.js
+              lib/client.js
+              lib/host/http.js
+              lib/host/transcript.js
+              extension/background.js
+              extension/dsh-content.js
+              extension/qingyan-content.js
+          - dir: dsh-im-bridge-workspaces
+            entry: |
+              lib/index.js
+              lib/client.js
+          - dir: dsh-plugin-product-subagents
+            entry: |
+              lib/index.js
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 探测插件目录是否存在
+        id: presence
+        run: |
+          if [ -f "${{ matrix.dir }}/package.json" ]; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::warning::${{ matrix.dir }} 未被检出（本仓库 .gitignore 是白名单，或该插件是带独立 .git 的子仓），跳过本任务"
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.presence.outputs.exists == 'true'
+        with:
+          node-version: 24.21.0
+
+      - uses: pnpm/action-setup@v4
+        if: steps.presence.outputs.exists == 'true'
+        with:
+          version: 12
+
+      - name: 安装依赖
+        if: steps.presence.outputs.exists == 'true'
+        working-directory: ${{ matrix.dir }}
+        run: |
+          # 各插件 lockfile 现状（决定 frozen-lockfile 成败）：
+          #   * dsh-auto-upgrade          —— 只有 pnpm-lock.yaml → frozen 成功
+          #   * dsh-external-discuss      —— 无任何 lockfile    → frozen 失败，降级 pnpm install 必须成功
+          #   * dsh-im-bridge-workspaces  —— 只有 package-lock.json（npm 的 lockfile，pnpm 不认）→ frozen 失败 → 降级
+          #   * dsh-plugin-product-subagents —— pnpm-lock.yaml + package-lock.json 都有 → pnpm 读 pnpm-lock.yaml → frozen 成功
+          pnpm install --frozen-lockfile || pnpm install
+
+      - name: 运行测试（有 scripts.test 才跑）
+        if: steps.presence.outputs.exists == 'true'
+        working-directory: ${{ matrix.dir }}
+        run: |
+          if node -e 'process.exit(require("./package.json").scripts && require("./package.json").scripts.test ? 0 : 1)'; then
+            pnpm test
+          else
+            echo "  - 无 scripts.test，跳过"
+          fi
+
+      - name: 运行 typecheck（有 scripts.typecheck 才跑）
+        if: steps.presence.outputs.exists == 'true'
+        working-directory: ${{ matrix.dir }}
+        run: |
+          if node -e 'process.exit(require("./package.json").scripts && require("./package.json").scripts.typecheck ? 0 : 1)'; then
+            pnpm run typecheck
+          else
+            echo "  - 无 scripts.typecheck，跳过"
+          fi
+
+      - name: 运行 lint（有 scripts.lint 才跑）
+        if: steps.presence.outputs.exists == 'true'
+        working-directory: ${{ matrix.dir }}
+        run: |
+          if node -e 'process.exit(require("./package.json").scripts && require("./package.json").scripts.lint ? 0 : 1)'; then
+            pnpm run lint
+          else
+            echo "  - 无 scripts.lint，跳过"
+          fi
+
+      - name: 语法检查（node --check 逐个入口）
+        if: steps.presence.outputs.exists == 'true'
+        working-directory: ${{ matrix.dir }}
+        env:
+          ENTRIES: ${{ matrix.entry }}
+        run: |
+          printf '%s\n' "${ENTRIES}" | while IFS= read -r f; do
+            if [ -z "${f}" ]; then continue; fi
+            if [ ! -f "${f}" ]; then
+              echo "::warning::${{ matrix.dir }}: 入口不存在，跳过: ${f}"
+              continue
+            fi
+            node --check "${f}"
+            echo "  ✓ ${f}"
+          done

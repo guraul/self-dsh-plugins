@@ -1,18 +1,58 @@
-# 只上传 dsh-auto-upgrade/，其余一律忽略
+# ============================================================
+# 本仓库是「自维护 dsh 插件集合」，策略与旧版相反：
+#   旧版只上传 dsh-auto-upgrade/，其余一律忽略；
+#   现在所有插件源码、pipeline、文档、CI 全部入库（统一管理，与 GitHub 同步）。
+# 做法：先忽略一切（/*），再显式放行需要入库的顶层条目。
+# ============================================================
 /*
-!/dsh-auto-upgrade/
+
+# —— 顶层文件 ——
 !/.gitignore
 !/README.md
+!/AGENTS.md
+!/CHANGELOG.md
+!/LICENSE
+!/docs/
+!/scripts/
+!/.github/
 
-# 包内忽略：依赖与本地状态
-dsh-auto-upgrade/node_modules/
-dsh-auto-upgrade/.pnpm-store/
+# —— 运维脚本与 LaunchAgent ——
+!/upgrade-dsh.sh
+!/dsh-web-stop.sh
+!/.dsh-web/
+
+# —— 插件（每个子目录是一个独立插件，包名见各自 package.json）——
+!/dsh-auto-upgrade/
+!/dsh-external-discuss/
+!/dsh-im-bridge-workspaces/
+!/dsh-plugin-product-subagents/
+!/dsh-plugin-restart/
+
+# ============================================================
+# 以下内容一律不入库
+# ============================================================
+
+# 依赖与包管理器状态（任意深度）
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+
+# 构建产物
+dist/
+build/
+*.tsbuildinfo
+
+# 运行态与本地产物
+.worktrees/
+.tmp/
+*.log
+
+# 敏感 / 本机专属：dsh web 的 token URL（每次启动都会变，且是访问凭据）
+.dsh-web/url.txt
+.dsh-web/restart-once.log
+.dsh-web/*.log
 
 # 系统 / 编辑器
 .DS_Store
-*.log
 .vscode/
 .idea/
-
-# worktree（pipeline 用，不入库）
-.worktrees/

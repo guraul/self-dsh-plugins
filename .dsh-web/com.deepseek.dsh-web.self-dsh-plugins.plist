@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.deepseek.dsh-web.self-dsh-plugins</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/gubin/.nvm/versions/node/v24.21.0/bin/dsh</string>
+    <string>--profile</string>
+    <string>web</string>
+    <string>--no-open</string>
+    <string>--port</string>
+    <string>3080</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/gubin/workspace/self-dsh-plugins</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/gubin/.nvm/versions/node/v24.21.0/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/gubin</string>
+    <key>DSH_HOME</key>
+    <string>/Users/gubin/.dsh</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/gubin/workspace/self-dsh-plugins/.dsh-web/web.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/gubin/workspace/self-dsh-plugins/.dsh-web/web.err.log</string>
+</dict>
+</plist>
