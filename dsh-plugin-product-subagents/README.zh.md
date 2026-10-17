@@ -4,6 +4,8 @@
 
 面向 DeepSeek Harness 的**基于角色的 Codex / Claude Code / ACP 子代理插件**。把外部 Agent CLI 变成持久、可续聊的子代理:声明式角色库、按角色的产品权限、带权限天花板的委派、跨平台进程启动。
 
+> ⚠️ **DSH `0.2.1` 起,外部子代理变成一次性的。** 本插件注册的全部是外部 provider,而 `0.2.1` 明确规定「ACP、DSH SDK、Codex、Claude Code 只执行一次」—— 所以在 `0.2.1+` 上,被委派的子代理只跑一次执行:没有持久远端会话、不能续接,`product_submit` 也没有子代理可服务。**委派本身仍然可用**(插件会调用 runtime 实际暴露的那个启动方法)。下面描述的「可续聊」行为适用于 `0.2.0` 线。详见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
+
 ## 功能
 
 - **可续聊子代理** — 同步 one-shot 或异步连续式(用 `send_message` / `list_agents` / `interrupt_agent` 控制;用 `product_wait` 同步 attach)。

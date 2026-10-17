@@ -139,14 +139,23 @@ docs/COMPATIBILITY.md # DSH 版本矩阵，以及每个 verdict 是怎么产生�
 `unknown` 绝不在没有实跑的情况下被升格成 `compatible`。
 `unknown` 永远是「拿不到 / 测不了」，绝不是「跑不通」。
 
-### 与 DSH 兼容范围相关的两个坑
+### 与 DSH 兼容范围相关的三个坑
 
 - **范围要扩声明**：DSH 启动时按插件自己声明的 peer 范围判兼容。没覆盖就跳过该 bundle
   （表现是「插件莫名其妙没加载」）。所以要在 `peerDependencies` 与 `dsh.compatibility.dsh`
   里同时加上目标版本线。
-- **prerelease 陷阱**：`^0.2.0-rc.2` **不覆盖** `0.2.1-rc.1`。预发布版本只满足
-  major.minor.patch 完全相同的比较器，因此每条 `0.2.x` 线都要单独写一个锚点。
-  仓库里 0.4.0 → 0.4.1 就是只补声明、**未改任何业务代码**的例子。
+- **prerelease 陷阱（比看上去更细）**：预发布版本只满足 major.minor.patch **完全相同**的比较器。
+  所以 `^0.2.0-rc.2` 不覆盖 `0.2.1-rc.1`；同理 **`^0.2.1-rc.1` 也不覆盖 `0.2.1-alpha.5`**
+  （alpha 低于 rc）。规律是：**锚点要写在不高于你支持的最低预发布版本上** ——
+  `^0.2.1-alpha.5` 会把整条 `0.2.1` 线（含 `rc.1`）都覆盖进去，一条锚点就够。
+  仓库里 0.4.0 → 0.4.1 是「只补声明、未改业务代码」的例子；
+  0.4.2 则是**声明 + 真实 API 迁移**。
+- **验收脚本测不到「能不能真的起一个子代理」**：`scripts/verify-plugin.mjs` 的 `start` 步骤只断言
+  「6 个工具已注册 + provider 已注册 + `product_roles`/`product_agents` 能执行」，**从不真正发起委派**。
+  DSH `0.2.1` 把服务级 `startContinuable` 改名成 `startActivation` 时，插件照常加载、
+  六个工具都在，**只有真起子代理才炸** —— 于是所有 verdict 依然是 `compatible`。
+  现在这条由 **`test/delegate-start.test.js`** 在 CI 里守（免凭据），
+  但**每次发版仍要人工做一次真实委派**（见 `docs/COMPATIBILITY.md` 的「What the run does not prove」）。
 
 ## 本仓库对它的适配记录（fork 后改了什么）
 
@@ -154,3 +163,13 @@ docs/COMPATIBILITY.md # DSH 版本矩阵，以及每个 verdict 是怎么产生�
   `dshReleases` verdict（均有一次性 profile 验收背书）；
 - 版本 `0.4.0 → 0.4.1`，同步 `CHANGELOG.md` / `docs/COMPATIBILITY.md` / `README.md` + `README.zh.md`；
 - **业务代码未改**；并入本仓库统一管理（其内层 `.git` 已删除，上游历史见上文 commit）。
+- **`0.4.2`（适配 DSH `0.2.1` 线，本次唯一动业务代码的一次）**：
+  - `lib/tools/product-delegate.js` 新增 `pickStart()`：`startActivation`（DSH >= 0.2.1，补
+    `delivery: 'parent'`）与 `startContinuable`（0.2.0 线）**特征检测二选一**，两者都没有就**响亮报错**；
+  - `0.2.1` 路径不再发送 `persona` / `toolFilter`（这两个字段已被 runtime 删除）——
+    角色的 `instructions` 仍会拼在任务文本前面，那才是产品 CLI 真正读到的部分；
+  - 新增 `test/delegate-start.test.js` 守住这次改名（CI 可跑、免凭据）；
+  - 声明锚点从 `^0.2.1-rc.1` 改为 `^0.2.1-alpha.5`（见上文 prerelease 坑），
+    补 `0.2.1-alpha.5` verdict，并用 0.4.2 **复跑**了 `0.2.1-rc.1`；
+  - **能力变化（必须知道）**：`0.2.1+` 上外部子代理是一次性的，`product_submit`、durable 远端会话、
+    续接在 `0.2.1+` 上不可用；`0.2.0` 线行为不变。

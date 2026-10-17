@@ -7,6 +7,15 @@ Harness. Turns external agent CLIs into durable, continuable subagents with a
 declarative role library, per-role product permissions, delegation with a
 permission ceiling, and cross-platform process launching.
 
+> ⚠️ **DSH `0.2.1` makes external subagents one-shot.** Everything this plugin
+> registers is an external provider, and `0.2.1` states that "ACP, DSH SDK,
+> Codex, and Claude Code execute once" — so on `0.2.1+` a delegated child runs a
+> single execution: no durable remote session, no continuation, and
+> `product_submit` has no child to serve. Delegation itself works (the plugin
+> calls whichever start method the runtime exposes). The continuable behaviour
+> described below applies to the `0.2.0` line. See
+> [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+
 ## Features
 
 - **Continuable children** — one-shot sync or async continuable (control with

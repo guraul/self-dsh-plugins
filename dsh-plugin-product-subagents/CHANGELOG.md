@@ -2,6 +2,53 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.2] — 2026-10-17
+
+Delegation on the DSH `0.2.1` line, which renamed the service-level start call.
+
+### Fixed
+- **Every delegation threw `ctx.subagents.startContinuable is not a function` on
+  DSH `0.2.1-alpha.5`.** The plugin still loaded, registered all six tools and
+  answered `product_agents` / `product_roles` — only starting a child failed, so
+  the symptom looked like a broken product CLI rather than a renamed API.
+  `0.2.1` replaced `startContinuable` with `startActivation`, which additionally
+  requires `delivery`. `lib/tools/product-delegate.js` now selects the call the
+  mounted service actually exposes (`pickStart`) instead of assuming one:
+  - `startActivation` (DSH >= 0.2.1) → `delivery: 'parent'`, so a background
+    child's completion still reaches the delegating model;
+  - `startContinuable` (DSH 0.2.0 line) → unchanged, `persona` / `toolFilter`
+    included;
+  - neither → a loud error naming both methods, rather than delegating nothing.
+- The start request no longer carries `persona` / `toolFilter` on the `0.2.1`
+  path: `0.2.1` removed both fields, and the external one-shot execution has no
+  relay model to receive a persona. The role's `instructions` are still
+  prepended to the task text, which is what the product CLI reads.
+
+### Added
+- `test/delegate-start.test.js` — a credential-free regression guard for the
+  rename. This is the class of breakage the disposable-profile acceptance run
+  cannot see: its `start` step asserts registration and tool execution, never a
+  live delegation, which is why the `0.2.1-rc.1` verdict recorded in 0.4.1 did
+  not catch it.
+
+### Compatibility
+- `peerDependencies` / `dsh.compatibility.dsh` now end with
+  `|| ^0.2.1-alpha.5` (which also covers the rest of the `0.2.1` line, including
+  `0.2.1-rc.1`) instead of `|| ^0.2.1-rc.1`. A prerelease comparator only
+  matches its own `major.minor.patch` tuple, so the `rc.1` anchor never covered
+  `alpha.5`.
+- Recorded `0.2.1-alpha.5` as `compatible` in `dsh.compatibility.dshReleases`.
+
+### ⚠️ Behaviour change on DSH 0.2.1+
+- DSH `0.2.1` makes **external** subagents one-shot: "Local spawn and fork
+  children retain durable sessions for later messages; ACP, DSH SDK, Codex, and
+  Claude Code execute once." Everything this plugin registers is external, so on
+  `0.2.1+` a delegated child runs exactly once: no durable remote session, no
+  continuation, and `product_submit` has no child to serve. Those behaviours
+  remain intact on the `0.2.0` line. `product_wait` still attaches to the child
+  id; where the runtime no longer exposes a child Session, its trace fields are
+  simply absent (`stripUndefined`), not fabricated.
+
 ## [0.4.1] — 2026-10-17
 
 Compatibility release for the DSH `0.2.x` line.

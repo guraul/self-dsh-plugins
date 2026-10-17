@@ -6,6 +6,38 @@ import { parentCwd } from '../run.js'
 export const PERM_RANK = { readonly: 0, default: 1, full: 2 }
 
 /**
+ * Pick the child-start call supported by the mounted `@deepseek-ai/dsh-subagent`
+ * service and normalise it to one signature.
+ *
+ * - DSH `0.2.1` renamed the service-level `startContinuable` to
+ *   `startActivation`, which additionally requires `delivery`.
+ * - The `0.2.0` line only has `startContinuable`.
+ *
+ * Feature detection beats a version comparison here: a patched runtime keeps
+ * working, and a future rename fails loudly at delegation time (see the throw)
+ * instead of silently doing nothing. This function is exported because the
+ * rename is exactly the regression a unit test must catch — see
+ * `test/delegate-start.test.js`.
+ *
+ * @param {any} service the `ctx.subagents` service.
+ * @returns {{ kind: 'activation' | 'continuable', start: (spec: any) => Promise<any> }}
+ */
+export function pickStart(service) {
+  if (service && typeof service.startActivation === 'function') {
+    return {
+      kind: 'activation',
+      start: (spec) => service.startActivation({ ...spec, delivery: 'parent' }),
+    }
+  }
+  if (service && typeof service.startContinuable === 'function') {
+    return { kind: 'continuable', start: (spec) => service.startContinuable(spec) }
+  }
+  throw new Error(
+    'product_delegate: the mounted @deepseek-ai/dsh-subagent service exposes neither startActivation (DSH >= 0.2.1) nor startContinuable (DSH 0.2.0 line); this plugin cannot delegate on this DSH release',
+  )
+}
+
+/**
  * The delegation tool: role-aware sync one-shot or async continuable. The
  * role decides the REMOTE product's permissions, whether the child may
  * delegate, and its extra instructions; the relay model stays a read-only
@@ -107,19 +139,33 @@ export function registerProductDelegate(ctx, deps) {
       // product_delegate exactly when the role allows delegation. No
       // write-capable tool is ever exposed to the relay model.
       const allow = role.allowDelegation ? ['product_submit', 'product_delegate'] : ['product_submit']
-      const start = await ctx.subagents.startContinuable({
+      const label = `${role.id}: ${args.task.slice(0, 50)}`
+      // Feature-detect the service call instead of branching on a DSH version
+      // string (see pickStart below): 0.2.0-rc.x keeps the continuable relay
+      // child, 0.2.1+ delegates through one activation.
+      const picked = pickStart(ctx.subagents)
+      const start = await picked.start({
         // the id this plugin registered on ctx.subagents; `provider` stays the
         // plugin's own key everywhere the caller and the roles can see it
         provider: runtimeName(provider),
-        label: `${role.id}: ${args.task.slice(0, 50)}`,
-        request: {
-          prompt: [{ type: 'text', text: task }],
-          parent,
-          persona: providerPersona(provider, providers[provider]) + (role.allowDelegation
-            ? ' You MAY delegate subtasks to your own subagents via product_delegate (choose an appropriate role) and integrate the answers.'
-            : ''),
-          toolFilter: { allow },
-        },
+        label,
+        // `persona` / `toolFilter` exist only on the 0.2.0-line request shape.
+        // 0.2.1 removed both and made external children one-shot, so the relay
+        // persona has no addressee there — the role's `instructions` are still
+        // prepended to the task, which is what the product CLI actually reads.
+        request: picked.kind === 'activation'
+          ? {
+              prompt: [{ type: 'text', text: task }],
+              parent,
+            }
+          : {
+              prompt: [{ type: 'text', text: task }],
+              parent,
+              persona: providerPersona(provider, providers[provider]) + (role.allowDelegation
+                ? ' You MAY delegate subtasks to your own subagents via product_delegate (choose an appropriate role) and integrate the answers.'
+                : ''),
+              toolFilter: { allow },
+            },
         signal: exec.signal,
       })
       state.activeChildren += 1
