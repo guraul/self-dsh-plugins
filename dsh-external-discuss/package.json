@@ -1,0 +1,49 @@
+{
+  "name": "dsh-plugin-external-discuss",
+  "version": "0.1.0",
+  "description": "DSH 外部讨论：在助手消息操作栏放一个按钮，点开小部件把会话内容送到外部模型（当前：清言网页版；千问/DeepSeek 占位）。浏览器半边免构建，跨页投递由配套 Chrome 扩展完成。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "extension",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/host.test.mjs",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/host/http.js && node --check lib/host/transcript.js && node --check extension/background.js && node --check extension/dsh-content.js && node --check extension/qingyan-content.js"
+  },
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "chatglm",
+    "qingyan",
+    "discuss"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  }
+}

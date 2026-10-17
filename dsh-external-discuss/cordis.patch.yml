@@ -1,0 +1,6 @@
+# dsh-plugin-external-discuss 的 bundle patch：插入插件行。
+# 宿主半边注册 /api/dsh-external-discuss/* 路由，浏览器半边往消息操作栏注册按钮。
+- insert:
+    - id: external-discuss
+      name: dsh-plugin-external-discuss
+      config: {}

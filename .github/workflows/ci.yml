@@ -4,9 +4,9 @@
 #
 # 包管理：本仓库统一用 pnpm（全局约定禁用 npm / npx，npx 由 pnpm dlx 代替）。
 #
-# 另注：本仓库 .gitignore 是白名单（当前只收录 dsh-auto-upgrade/），
-# 因此 CI 检出后 4 个插件目录里通常只有 dsh-auto-upgrade 存在——
-# 其余目录走下面的"目录不存在 → ::warning:: 跳过"分支（这是预期行为，不是失败）。
+# 另注：本仓库 .gitignore 是白名单，现已放行全部 4 个插件目录 + docs/ + scripts/ + .github/，
+# 因此 CI 检出后 4 个插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
+# （例如新插件目录还没加进白名单），命中它是预期行为，不是失败。
 name: ci
 
 on:
@@ -74,10 +74,11 @@ jobs:
         working-directory: ${{ matrix.dir }}
         run: |
           # 各插件 lockfile 现状（决定 frozen-lockfile 成败）：
-          #   * dsh-auto-upgrade          —— 只有 pnpm-lock.yaml → frozen 成功
-          #   * dsh-external-discuss      —— 无任何 lockfile    → frozen 失败，降级 pnpm install 必须成功
-          #   * dsh-im-bridge-workspaces  —— 只有 package-lock.json（npm 的 lockfile，pnpm 不认）→ frozen 失败 → 降级
-          #   * dsh-plugin-product-subagents —— pnpm-lock.yaml + package-lock.json 都有 → pnpm 读 pnpm-lock.yaml → frozen 成功
+          #   * dsh-auto-upgrade            —— 只有 pnpm-lock.yaml → frozen 成功
+          #   * dsh-external-discuss        —— 无任何 lockfile   → frozen 失败，降级 pnpm install
+          #   * dsh-im-bridge-workspaces    —— 无任何 lockfile   → frozen 失败，降级 pnpm install
+          #   * dsh-plugin-product-subagents —— 只有 pnpm-lock.yaml → frozen 成功
+          # 本仓库只留 pnpm-lock.yaml：npm 的 package-lock.json 已按全局约定清掉，并被 .gitignore 挡下。
           pnpm install --frozen-lockfile || pnpm install
 
       - name: 运行测试（有 scripts.test 才跑）

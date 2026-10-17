@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "DSH 外部讨论桥",
+  "version": "0.1.0",
+  "description": "把 DSH 会话送到已登录的清言网页：新建对话、按会话标题重命名、粘贴并发送。",
+  "permissions": ["tabs"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://chatglm.cn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/*", "http://localhost/*"],
+      "js": ["dsh-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://chatglm.cn/*"],
+      "js": ["qingyan-content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

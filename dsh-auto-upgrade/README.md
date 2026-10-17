@@ -5,7 +5,7 @@
 
 设计权威文档：[`docs/design/dsh-auto-upgrade-T1.md`](./docs/design/dsh-auto-upgrade-T1.md)（接口清单 + 数据流图 + 拍板结论）。
 验收报告（含逐条证据与「没验证什么」）：[`docs/acceptance/dsh-auto-upgrade-acceptance.md`](./docs/acceptance/dsh-auto-upgrade-acceptance.md)。
-变更记录：[`CHANGELOG.md`](./CHANGELOG.md)（含待办）。面向 agent 的工作约定：[`AGENTS.md`](./AGENTS.md)。
+变更记录：[`CHANGELOG.md`](./CHANGELOG.md)（含待办）。面向 agent 的工作约定：[`../docs/plugins/dsh-auto-upgrade.md`](../docs/plugins/dsh-auto-upgrade.md)。
 
 ## 当前状态（诚实清单）
 
