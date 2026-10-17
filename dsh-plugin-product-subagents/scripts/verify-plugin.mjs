@@ -100,6 +100,42 @@ export function apply(ctx) {
       }
     }
 
+    // The relay preset is the ONLY composition restriction DSH 0.2.1 honours
+    // for a delegated local child: `SubagentStartRequest` no longer carries
+    // persona/toolFilter, and a child without a preset inherits the parent's
+    // whole toolset (issue #8). Registration is async, so wait (bounded).
+    // On the 0.2.0 line the toolFilter request field still exists, so an
+    // absent agentPresets service is not a failure there.
+    const presets = ctx.get('agentPresets')
+    if (presets && typeof presets.list === 'function') {
+      let roster = []
+      for (let i = 0; i < 50; i += 1) {
+        try { roster = await presets.list() } catch { roster = [] }
+        if (roster.some((entry) => entry && entry.id === 'product-relay')) break
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      const relay = roster.find((entry) => entry && entry.id === 'product-relay')
+      add('relay preset registered', Boolean(relay) && !relay.broken, {
+        presets: roster.map((entry) => (entry && entry.id) || String(entry)),
+        broken: relay ? relay.broken : 'missing',
+      })
+    } else {
+      add('relay preset registered', true, { note: 'no agentPresets service on this release (0.2.0 line uses toolFilter)' })
+    }
+
+    // The activation path passes `agentPreset` and `maxDepth`; DSH rejects both
+    // unless the provider advertises the matching capabilities.
+    let capabilities
+    try {
+      const provider = ctx.subagents.providers ? ctx.subagents.providers.get('product-subagents:acp') : undefined
+      capabilities = provider ? provider.capabilities : undefined
+    } catch { capabilities = undefined }
+    add('provider advertises agentPreset + depthLimit',
+      capabilities === undefined
+        ? true
+        : capabilities.agentPreset === true && capabilities.depthLimit === true,
+      { capabilities })
+
     report.ok = report.checks.every((check) => check.ok)
     emit()
   }

@@ -16,7 +16,7 @@
 
 | 项 | 值 |
 |---|---|
-| DSH | `0.2.1-alpha.5`（本机全局安装，走 `alpha` 渠道；npm `latest` 仍是 `0.2.0-rc.2`），装在 nvm node `v24.21.0` 下 |
+| DSH | `0.2.1-rc.2`（本机全局安装，走 `next` 渠道；npm `latest` 仍是 `0.2.0-rc.2`），装在 nvm node `v24.21.0` 下 |
 | Node / pnpm | `v24.21.0` / `12.6.0`（`dsh`、`pnpm` 都在 `~/.nvm/versions/node/v24.21.0/bin`） |
 | `DSH_HOME` | `/Users/gubin/.dsh` |
 | profile | `web` = `~/.dsh/profiles/web`，`patchReload: live` |

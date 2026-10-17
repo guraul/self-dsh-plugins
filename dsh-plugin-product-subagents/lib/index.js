@@ -1,9 +1,10 @@
 import { bindings, MARKER, recoverRemoteSessionId } from './bindings.js'
-import { detectAvailability } from './availability.js'
+import { buildBridgeSet } from './bridge-set.js'
 import { validateConfig } from './config.js'
 import { foldProgress, foldTrace, foldTokenUsage } from './progress.js'
-import { buildProviders, createBridgeFor, DEFAULT_PROVIDER_NAMESPACE, runtimeProviderName } from './providers.js'
+import { DEFAULT_PROVIDER_NAMESPACE, runtimeProviderName } from './providers.js'
 import { createRegistry } from './registry.js'
+import { registerRelayPreset } from './relay-preset.js'
 import { createRoleLibrary, defaultRolesDir } from './roles.js'
 import { parentCwd } from './run.js'
 import { registerProductSubmit } from './tools/product-submit.js'
@@ -40,13 +41,7 @@ export const inject = ['subagents', 'tools', 'sessions']
  */
 export function apply(ctx, config = {}) {
   const cfg = validateConfig(config)
-  const providers = buildProviders(cfg)
-  const availability = detectAvailability(providers)
-  const bridges = Object.fromEntries(
-    Object.entries(providers)
-      .filter(([name]) => availability[name].registered)
-      .map(([name, def]) => [name, createBridgeFor(def)]),
-  )
+  const { providers, availability, bridges } = buildBridgeSet(cfg)
   // Durable remote-session registry: survives binding disposal and restarts so
   // a cold-resumed child reconnects to the same product session.
   const registry = createRegistry(cfg.registryPath)
@@ -108,23 +103,24 @@ export function apply(ctx, config = {}) {
       name: runtimeName(providerName),
       inheritsParentContext: false,
       // The harness rejects a start-time feature unless the provider
-      // advertises it (`assertCapabilities`). Every key of
-      // `SubagentCapabilities` is stated explicitly rather than left to fall
-      // through as `undefined`, so a new capability added upstream is a
-      // deliberate decision here, not an accident of omission.
-      //   persona/toolFilter — required: for continuable children the manager
-      //     applies both itself (applyChildComposition); for one-shot remote
-      //     children they are trivially satisfied (no child tool surface).
+      // advertises it (`assertCapabilities`). DSH 0.2.1's
+      // `SubagentCapabilities` has exactly these four keys; every one is stated
+      // explicitly so a capability added upstream is a deliberate decision
+      // here, not an accident of omission.
+      //   agentPreset — REQUIRED on 0.2.1+: mounting the relay preset is the
+      //     ONLY way to give a delegated local child a restricted composition
+      //     (see lib/relay-preset.js). `assertCapabilities` also demands
+      //     `inheritsParentContext: false`, which this provider sets above.
+      //   depthLimit — REQUIRED to pass `maxDepth`; the delegation path sets a
+      //     cap so a product chain cannot nest without bound.
       //   agentOptions — false: model/reasoningEffort go to the REMOTE product
       //     CLI (bridge settings), never to a host Agent this provider owns.
-      //   outputSchema/depthLimit — false: the remote product returns free
-      //     text, and delegation depth is capped by the permission ceiling.
+      //   outputSchema — false: the remote product returns free text.
       capabilities: {
-        persona: true,
-        toolFilter: true,
         agentOptions: false,
+        agentPreset: true,
         outputSchema: false,
-        depthLimit: false,
+        depthLimit: true,
       },
       async start(request) {
         const cwd = parentCwd(request.parent)
@@ -167,12 +163,20 @@ export function apply(ctx, config = {}) {
   const availableProviders = Object.keys(bridges)
   const state = { activeChildren: 0 }
   const maxConcurrent = Math.max(1, Number(cfg.maxConcurrentChildren) || 8)
+  // DSH 0.2.1 restricts a delegated local child ONLY through an agent preset.
+  // Mount the relay-only composition so a background child cannot run the task
+  // with local tools; `relay.ready` resolves to the preset id, or to undefined
+  // when the profile exposes no agentPresets service (the delegation path then
+  // refuses to start an unrestricted child instead of degrading silently).
+  const relay = registerRelayPreset(ctx, cfg)
   const deps = {
     bindings, MARKER, recoverRemoteSessionId,
     bridges, availability, providers, roles,
     registry, persistRemote, cancelDispose,
     foldProgress, foldTrace, foldTokenUsage,
     state, maxConcurrent, availableProviders, runtimeName,
+    relayPreset: () => relay.ready,
+    maxDelegationDepth: cfg.maxDelegationDepth !== undefined ? cfg.maxDelegationDepth : 2,
   }
 
   registerProductSubmit(ctx, deps)

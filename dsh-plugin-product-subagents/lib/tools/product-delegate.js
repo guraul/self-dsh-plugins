@@ -6,6 +6,34 @@ import { parentCwd } from '../run.js'
 export const PERM_RANK = { readonly: 0, default: 1, full: 2 }
 
 /**
+ * Build the prompt of the LOCAL relay child (DSH 0.2.1+).
+ *
+ * The child is a local DSH agent that mounts only `product_submit`
+ * (lib/relay-preset.js). Its job is to hand the remote product the text
+ * verbatim — nothing else. `role.instructions` are addressed to the REMOTE
+ * product agent (e.g. "You have full file, command and permission access —
+ * do not ask for permission"), so they are delimited as such: a local child
+ * that reads them as its own brief concludes it may act locally, which is
+ * exactly the failure mode of issue #8.
+ *
+ * @param {string} provider plugin provider key (`claude-code` / `codex` / `acp`).
+ * @param {object} providerDef the provider definition (command/type).
+ * @param {string} remoteText role instructions + task, addressed to the remote.
+ * @returns {string} the relay child's prompt.
+ */
+export function buildRelayPrompt(provider, providerDef, remoteText) {
+  return [
+    providerPersona(provider, providerDef),
+    '',
+    'You are a relay. Your ONLY tool is `product_submit`. Call it exactly once, passing the text between the markers below VERBATIM, then return its answer unchanged. Do not run commands, do not read or write files: the remote product agent owns the workspace and the permissions.',
+    '',
+    '---- BEGIN TEXT ADDRESSED TO THE REMOTE PRODUCT AGENT (not to you) ----',
+    remoteText,
+    '---- END TEXT ADDRESSED TO THE REMOTE PRODUCT AGENT ----',
+  ].join('\n')
+}
+
+/**
  * Pick the child-start call supported by the mounted `@deepseek-ai/dsh-subagent`
  * service and normalise it to one signature.
  *
@@ -48,6 +76,7 @@ export function registerProductDelegate(ctx, deps) {
   const {
     bindings, bridges, availability, providers, roles,
     state, maxConcurrent, availableProviders, runtimeName,
+    relayPreset, maxDelegationDepth,
   } = deps
   const roleIds = roles.list().map((r) => r.id)
 
@@ -144,30 +173,48 @@ export function registerProductDelegate(ctx, deps) {
       // string (see pickStart below): 0.2.0-rc.x keeps the continuable relay
       // child, 0.2.1+ delegates through one activation.
       const picked = pickStart(ctx.subagents)
-      const start = await picked.start({
-        // the id this plugin registered on ctx.subagents; `provider` stays the
-        // plugin's own key everywhere the caller and the roles can see it
-        provider: runtimeName(provider),
-        label,
-        // `persona` / `toolFilter` exist only on the 0.2.0-line request shape.
-        // 0.2.1 removed both and made external children one-shot, so the relay
-        // persona has no addressee there — the role's `instructions` are still
-        // prepended to the task, which is what the product CLI actually reads.
-        request: picked.kind === 'activation'
-          ? {
-              prompt: [{ type: 'text', text: task }],
-              parent,
-            }
-          : {
-              prompt: [{ type: 'text', text: task }],
-              parent,
-              persona: providerPersona(provider, providers[provider]) + (role.allowDelegation
-                ? ' You MAY delegate subtasks to your own subagents via product_delegate (choose an appropriate role) and integrate the answers.'
-                : ''),
-              toolFilter: { allow },
-            },
-        signal: exec.signal,
-      })
+      let start
+      if (picked.kind === 'activation') {
+        // DSH 0.2.1 removed `persona` / `toolFilter` from the start request and
+        // builds a local child's composition from `agentPreset` alone. Without a
+        // preset the child inherits the parent's whole toolset and can silently
+        // run the task locally instead of handing it to the product CLI
+        // (issue #8). Refuse loudly rather than degrade silently.
+        const presetId = typeof relayPreset === 'function' ? await relayPreset() : undefined
+        if (presetId === undefined) {
+          throw new Error(
+            'product_delegate: refusing to start an unrestricted local subagent — on DSH >= 0.2.1 a delegated child is restricted only through an agent preset, and this profile exposes no agentPresets service (or the product-relay preset failed to register). Mount @deepseek-ai/dsh-agent-preset-registry, or delegate with background:false, which runs the product CLI directly and creates no local child.',
+          )
+        }
+        start = await picked.start({
+          // the id this plugin registered on ctx.subagents; `provider` stays the
+          // plugin's own key everywhere the caller and the roles can see it
+          provider: runtimeName(provider),
+          label,
+          request: {
+            prompt: [{ type: 'text', text: buildRelayPrompt(provider, providers[provider], task) }],
+            parent,
+            agentPreset: presetId,
+            // The provider advertises `depthLimit`, so DSH enforces this cap.
+            maxDepth: maxDelegationDepth,
+          },
+          signal: exec.signal,
+        })
+      } else {
+        start = await picked.start({
+          provider: runtimeName(provider),
+          label,
+          request: {
+            prompt: [{ type: 'text', text: task }],
+            parent,
+            persona: providerPersona(provider, providers[provider]) + (role.allowDelegation
+              ? ' You MAY delegate subtasks to your own subagents via product_delegate (choose an appropriate role) and integrate the answers.'
+              : ''),
+            toolFilter: { allow },
+          },
+          signal: exec.signal,
+        })
+      }
       state.activeChildren += 1
       const record = bindings.get(start.childId)
       if (record) record.settings = settings

@@ -5,10 +5,22 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
  * bound remote product session. Only children with a binding (created by
  * product_delegate) can call it; recovery reconnects a lost session from the
  * durable registry or the child's own log.
+ *
+ * The tool is built from `deps` instead of closing over the parent plugin
+ * instance, because on DSH 0.2.1+ the same tool is registered twice:
+ *
+ *  - in the parent context, as one of the six model-facing tools, and
+ *  - inside a relay child's limited composition (lib/relay.js), where it is
+ *    the child's ONLY tool. That child mounts an agent preset containing just
+ *    the relay entry, so it cannot touch local files or commands and must
+ *    forward the work to the remote product.
+ *
+ * `bindings` is a module-level singleton (lib/bindings.js), so both
+ * registrations observe the same child→remote map.
  */
-export function registerProductSubmit(ctx, deps) {
+export function createProductSubmitTool(deps) {
   const { bindings, MARKER, recoverRemoteSessionId, bridges, registry, persistRemote, cancelDispose } = deps
-  ctx.tools.register(defineTool({
+  return defineTool({
     name: 'product_submit',
     description: 'Submit one task to the persistent remote product session bound to this agent (Codex / Claude Code / ACP CLI) and return the product agent\'s answer. The remote session remembers the full conversation, so later submissions continue it. Use this for all task work while you are a product subagent.',
     parameters: {
@@ -28,7 +40,7 @@ export function registerProductSubmit(ctx, deps) {
       const childSessionId = agent.session.id
       // This child is being used again — cancel any pending idle disposal so a
       // fast continuation never pays a reconnect.
-      cancelDispose(childSessionId)
+      if (typeof cancelDispose === 'function') cancelDispose(childSessionId)
       let record = bindings.get(childSessionId)
       if (!record) {
         // The binding is gone (idle disposal or restart). Recovery order:
@@ -56,8 +68,13 @@ export function registerProductSubmit(ctx, deps) {
         // Persist the remote id whenever it becomes known (after a successful
         // submit, or after the claude bridge recovered it from disk on a
         // failed/interrupted submit).
-        persistRemote(childSessionId, record, cwd)
+        if (typeof persistRemote === 'function') persistRemote(childSessionId, record, cwd)
       }
     },
-  }))
+  })
+}
+
+/** Register `product_submit` in the current context (the parent plugin). */
+export function registerProductSubmit(ctx, deps) {
+  ctx.tools.register(createProductSubmitTool(deps))
 }
