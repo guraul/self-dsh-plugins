@@ -87,12 +87,15 @@ jobs:
         working-directory: ${{ matrix.dir }}
         run: |
           # 各插件 lockfile 现状（决定 frozen-lockfile 成败）：
-          #   * dsh-auto-upgrade            —— 只有 pnpm-lock.yaml → frozen 成功
-          #   * dsh-external-discuss        —— 无任何 lockfile   → frozen 失败，降级 pnpm install
-          #   * dsh-plugin-product-subagents —— 只有 pnpm-lock.yaml → frozen 成功
+          #   * dsh-auto-upgrade            —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
+          #   * dsh-external-discuss        —— 无任何 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
+          #   * dsh-plugin-product-subagents —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
+          #   * dsh-im-bridge-workspaces     —— 不进本步骤（install=false，见上面的说明步骤）
           # 本仓库只留 pnpm-lock.yaml：npm 的 package-lock.json 已按全局约定清掉，并被 .gitignore 挡下。
-          # dsh-im-bridge-workspaces 不在此列（install=false，见上面的说明步骤）。
-          pnpm install --frozen-lockfile || pnpm install
+          #
+          # ⚠️ CI 下 pnpm 默认 frozen-lockfile=true：兜底必须显式 --no-frozen-lockfile。
+          #    写成 `|| pnpm install` 在 GitHub Actions 里同样会冻锁、救不回来（PR #4 实测红过一次）。
+          pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
 
       - name: 运行测试（有 scripts.test 才跑）
         if: steps.presence.outputs.exists == 'true' && matrix.install
