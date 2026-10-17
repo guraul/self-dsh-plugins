@@ -29,13 +29,16 @@ require_gh() {
 }
 
 # 从 issue 标题生成文件名安全的短 slug（仅 [a-z0-9-]，截断 40）
-# 注意：非 ASCII 标题（中文）会被 sed 全部清掉，因此兜底为 "task"
+# 非 ASCII 标题（本仓库 issue 多为中文）会被 sed 清空，此时回退成标题 sha1 的前 8 位：
+# 确定性 —— 同一个 issue 重跑本脚本仍得到同一个分支名，worktree 判重才可靠。
 slugify() {
   local title="$1"
   local slug
   slug=$(printf '%s' "${title}" | tr '[:upper:]' '[:lower:]' \
     | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-40)
-  if [[ -z "${slug}" ]]; then slug="task"; fi
+  if [[ -z "${slug}" ]]; then
+    slug=$(printf '%s' "${title}" | shasum -a 1 | cut -c1-8)
+  fi
   printf '%s' "${slug}"
 }
 
