@@ -2,6 +2,74 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.3] — 2026-10-17
+
+Restores the read-only relay on DSH 0.2.1 — 0.4.2 silently handed delegated
+children the parent's whole toolset.
+
+### Fixed
+- **A delegated background child could run the task itself instead of calling
+  `product_submit`** (issue #8). 0.4.2 adapted to `startActivation` by sending
+  only `prompt` + `parent`, on the assumption that 0.2.1 made external children
+  one-shot. That assumption was wrong: this provider implements
+  `prepareContinuable`, and *method presence selects local activation
+  execution*, so DSH created a real local child Agent. With no composition
+  restriction it inherited the parent's full toolset (bash / read / write /
+  edit), and because a local child inherits the parent's model route, it did the
+  work on the DSH model — the remote product CLI and the requested `model` were
+  never used. Observed in a child session log as `{bash: 33, read: 5, edit: 8,
+  write: 1}` with zero `product_submit` calls.
+- **Root cause of the restriction loss**: 0.2.1 removed `persona` and
+  `toolFilter` from `SubagentStartRequest`, and a local child's composition is
+  built from `agentPreset` alone
+  (`dsh-subagent/lib/index.js: composition: { agentPreset: request.agentPreset }`).
+  `applyChildOverrides` still honours `composition.toolFilter`, but only a
+  historical descriptor (cold resume) can populate it — a fresh start cannot.
+- **Fix**: the plugin now registers a **`product-relay` agent preset** at load
+  (`ctx.agentPresets.register`). Its composition mounts one entry
+  (`lib/relay.js`) that registers exactly one tool, `product_submit`. The
+  delegation path passes `agentPreset: 'product-relay'`, so the child cannot
+  touch files or commands and the work necessarily goes to the remote product.
+  This is stricter than the old `toolFilter`, which inherited the parent
+  composition and then pruned it.
+- If the profile exposes no `agentPresets` service, background delegation now
+  **fails loudly** with an actionable message instead of starting an
+  unrestricted child. (`background: false` is unaffected: it never creates a
+  local child.)
+
+### Changed
+- The local relay's prompt no longer presents `role.instructions` as its own
+  brief. Those instructions are addressed to the REMOTE product ("You have full
+  file, command and permission access — do not ask for permission"), so
+  `buildRelayPrompt()` now delimits them as "addressed to the remote product
+  agent" and tells the relay to forward the text verbatim through
+  `product_submit`. Previously the local child read the grant as its own.
+- `maxDepth` is passed explicitly (`config.maxDelegationDepth`, default `2`) so
+  a product chain cannot nest without bound. The provider now advertises the
+  `agentPreset` and `depthLimit` capabilities (DSH rejects both request fields
+  otherwise); the stale `persona` / `toolFilter` capability keys — no longer in
+  `SubagentCapabilities` — are gone.
+
+### Added
+- `test/delegate-request.test.js`: asserts the **request content** of a
+  background delegation (`agentPreset`, `maxDepth`, delimited relay prompt) and
+  the loud refusal when no preset is available. The 0.4.2 test only asserted
+  *which* service method was called, which is why this regression shipped green.
+- `scripts/verify-plugin.mjs` now checks that the relay preset is registered
+  and that the provider advertises the capabilities the activation path uses.
+- `lib/bridge-set.js`: one bridge/provider construction shared by the parent
+  plugin and the relay entry, so both resolve the same providers.
+
+### Compatibility
+- Recorded `0.2.1-rc.2` as `compatible` (install · compose · start · uninstall,
+  with `@deepseek-ai/dsh-agent-preset-registry` installed alongside so the
+  relay-preset assertion is meaningful). The declared range already covered it
+  (`^0.2.1-alpha.5`).
+- **Background delegation needs the `agentPresets` service.** Profiles that
+  mount `@deepseek-ai/dsh-agent-preset-registry` (the `web` profile does) get
+  the restricted relay; profiles without it keep synchronous
+  `background: false` delegation and refuse background delegation by design.
+
 ## [0.4.2] — 2026-10-17
 
 Delegation on the DSH `0.2.1` line, which renamed the service-level start call.

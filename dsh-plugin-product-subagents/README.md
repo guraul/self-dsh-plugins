@@ -7,14 +7,20 @@ Harness. Turns external agent CLIs into durable, continuable subagents with a
 declarative role library, per-role product permissions, delegation with a
 permission ceiling, and cross-platform process launching.
 
-> ⚠️ **DSH `0.2.1` makes external subagents one-shot.** Everything this plugin
-> registers is an external provider, and `0.2.1` states that "ACP, DSH SDK,
-> Codex, and Claude Code execute once" — so on `0.2.1+` a delegated child runs a
-> single execution: no durable remote session, no continuation, and
-> `product_submit` has no child to serve. Delegation itself works (the plugin
-> calls whichever start method the runtime exposes). The continuable behaviour
-> described below applies to the `0.2.0` line. See
-> [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+> **How the relay stays read-only on DSH `0.2.1`.** `0.2.1` removed `persona`
+> and `toolFilter` from `SubagentStartRequest` and builds a delegated local
+> child's composition from `agentPreset` alone. Without a preset the child
+> inherits the parent's whole toolset (bash / read / write / edit) and can
+> silently do the task itself — the failure mode of
+> [issue #8](https://github.com/guraul/self-dsh-plugins/issues/8). This plugin
+> therefore registers a **`product-relay` agent preset** whose composition
+> mounts one entry (`lib/relay.js`) registering exactly one tool:
+> `product_submit`. The child cannot touch files or run commands, so the work
+> necessarily goes to the remote product CLI, and your `model` /
+> `permissionMode` reach it through the bridge. On the `0.2.0` line the same
+> guarantee comes from `toolFilter: { allow: ['product_submit'] }`. If the
+> profile exposes no `agentPresets` service, background delegation is **refused
+> loudly** rather than started unrestricted.
 
 ## Features
 

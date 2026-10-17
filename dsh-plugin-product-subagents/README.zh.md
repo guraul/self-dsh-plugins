@@ -4,7 +4,7 @@
 
 面向 DeepSeek Harness 的**基于角色的 Codex / Claude Code / ACP 子代理插件**。把外部 Agent CLI 变成持久、可续聊的子代理:声明式角色库、按角色的产品权限、带权限天花板的委派、跨平台进程启动。
 
-> ⚠️ **DSH `0.2.1` 起,外部子代理变成一次性的。** 本插件注册的全部是外部 provider,而 `0.2.1` 明确规定「ACP、DSH SDK、Codex、Claude Code 只执行一次」—— 所以在 `0.2.1+` 上,被委派的子代理只跑一次执行:没有持久远端会话、不能续接,`product_submit` 也没有子代理可服务。**委派本身仍然可用**(插件会调用 runtime 实际暴露的那个启动方法)。下面描述的「可续聊」行为适用于 `0.2.0` 线。详见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
+> **DSH `0.2.1` 下 relay 怎么保持只读。** `0.2.1` 从 `SubagentStartRequest` 删掉了 `persona` 与 `toolFilter`,并把被委派本地子代理的 composition 改为**只由 `agentPreset` 决定**。没有 preset 时子代理会继承父级的整套工具(bash / read / write / edit),于是它可以自己把活干完 —— 这就是 [issue #8](https://github.com/guraul/self-dsh-plugins/issues/8) 的失效模式。本插件因此注册了一个 **`product-relay` 预设**,它的 composition 只挂一个入口(`lib/relay.js`),该入口只注册一个工具:`product_submit`。子代理碰不到文件、也跑不了命令,任务必然被转交给远端产品 CLI,而你指定的 `model` / `permissionMode` 会经 bridge 生效。`0.2.0` 线上同样的保证来自 `toolFilter: { allow: ['product_submit'] }`。若 profile 没有 `agentPresets` 服务,**后台委派会被明确拒绝**,而不是以无约束状态启动。
 
 ## 功能
 

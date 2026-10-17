@@ -171,5 +171,31 @@ docs/COMPATIBILITY.md # DSH 版本矩阵，以及每个 verdict 是怎么产生�
   - 新增 `test/delegate-start.test.js` 守住这次改名（CI 可跑、免凭据）；
   - 声明锚点从 `^0.2.1-rc.1` 改为 `^0.2.1-alpha.5`（见上文 prerelease 坑），
     补 `0.2.1-alpha.5` verdict，并用 0.4.2 **复跑**了 `0.2.1-rc.1`；
-  - **能力变化（必须知道）**：`0.2.1+` 上外部子代理是一次性的，`product_submit`、durable 远端会话、
-    续接在 `0.2.1+` 上不可用；`0.2.0` 线行为不变。
+  - ~~**能力变化（必须知道）**：`0.2.1+` 上外部子代理是一次性的，`product_submit`、durable
+    远端会话、续接在 `0.2.1+` 上不可用~~ —— **这段结论是错的，已在 0.4.3 撤销**：本 provider
+    实现了 `prepareContinuable`，而「方法存在即选择本地 activation 执行」，所以 0.2.1 上子代理
+    仍然是**本地 relay**。`0.2.1` 真正删掉的是 `persona` / `toolFilter` 这两个**约束字段**。
+- **`0.4.3`（issue #8：把 relay 约束修回来）**：
+  - **事故**：0.4.2 的 activation 分支只发 `prompt` + `parent`，既没 `agentPreset` 也没
+    `toolFilter` → `applyChildComposition` 走 `composeFrom(childCtx, parent.ctx)` →
+    子代理继承父级全套工具（bash/read/write/edit）→ 它自己把活干完，`product_submit` 0 次，
+    实际跑在**继承来的会话模型**上，产品平面（opencode + 指定 model）从未启动；
+  - **根因**：`SubagentStartRequest` 无 `persona`/`toolFilter`；本地子代理的 composition 在
+    `dsh-subagent/lib/index.js` 里写死为 `composition: { agentPreset: request.agentPreset }`；
+    `applyChildOverrides` 虽仍处理 `composition.toolFilter`，但全新 start 没有入口能塞进去
+    （只有历史 descriptor / 冷恢复可以）——**一个无报错、无警告的迁移陷阱**；
+  - **修法**：插件加载时用 `ctx.agentPresets.register()` 注册 **`product-relay`** 预设，其
+    composition 只挂一个入口 `lib/relay.js`，后者只注册 `product_submit`；委派时传
+    `agentPreset` + `maxDepth`。preset 是"从零挂载"，比旧的 toolFilter（继承后裁剪）更严；
+  - **不能靠 toolFilter 加回来**：`grep request.toolFilter` 在 `dsh-subagent` 里**零命中**，
+    请求里硬塞也不会被读；
+  - **没有 preset 服务就拒绝**：后台委派会**明确报错**（`background:false` 不受影响，
+    它根本不建本地子代理）；
+  - **prompt 分离**：`role.instructions` 明确标注"给远端产品代理"，本地 relay 只被告知
+    "把标记之间的文本原样交给 `product_submit`"（原来它会把"你有全部权限"当成给自己的）；
+  - **`maxDepth`**：显式传（`config.maxDelegationDepth`，默认 2），并补 provider 能力声明
+    `agentPreset: true` / `depthLimit: true`（DSH 对这两个请求字段做能力校验）；
+  - **测试补缺口**：`test/delegate-request.test.js` 断言**请求内容**（`agentPreset`、
+    `maxDepth`、prompt 分隔、无 preset 时拒绝）——0.4.2 的测试只验证"调了哪个方法"，
+    所以这次回归是绿的。
+

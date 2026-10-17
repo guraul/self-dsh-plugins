@@ -96,8 +96,25 @@ as well**: its 0.4.1 verdict was earned before anyone noticed that the `start`
 step cannot see a renamed start call, so it is re-recorded here on a release
 whose delegation path is guarded by `test/delegate-start.test.js`.
 
+The `0.2.1-rc.2` row was recorded for plugin **0.4.3**. Note what the run can
+and cannot see on this line:
+
+- The disposable profile is `headless`, and
+  `@deepseek-ai/dsh-agent-preset-registry` **declares no `dsh.bundle`**, so
+  `dsh plugin add` installs it as a plain dependency instead of a profile
+  layer, and the `agentPresets` service is absent there. The verifier reports
+  the relay-preset check as a note, not as evidence.
+- Consequence: in a `headless`-like profile the plugin still loads and serves
+  every tool, but **background delegation is refused by design** (there is no
+  preset to restrict the child with). The restricted relay path is exercised
+  on the `web` profile, which mounts the preset registry.
+- The request-content contract (`agentPreset`, `maxDepth`, delimited relay
+  prompt, loud refusal without a preset) is covered credential-free by
+  `test/delegate-request.test.js` on every run.
+
 | `@deepseek-ai/dsh` | Verdict | Evidence |
 |---|---|---|
+| `0.2.1-rc.2` | `compatible` | install · compose · start · uninstall (headless profile has no `agentPresets` service, so background delegation is refused there by design — see above); request-content guarded by `test/delegate-request.test.js` |
 | `0.2.1-alpha.5` | `compatible` | install · compose · start · uninstall — delegation start-call shape guarded by `test/delegate-start.test.js` |
 | `0.2.1-rc.1` | `compatible` | install · compose · start · uninstall — re-run with 0.4.2 (see above) |
 | `0.2.0-rc.2` | `compatible` | install · compose · start · uninstall — also verified alongside the official `@deepseek-ai/dsh-subagent-claude-code` + `-codex` plugins in one profile, registering `claude-code`, `codex` and `product-subagents:acp` side by side |

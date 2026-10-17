@@ -22,6 +22,10 @@ export const pluginConfigSchema = z.object({
   registryPath: z.string().optional(),
   idleTimeoutMs: z.number().int().min(0).optional(),
   maxConcurrentChildren: z.number().int().positive().optional(),
+  // Hard cap on the delegation depth of a product chain. DSH validates
+  // `maxDepth` at start; the relay preset keeps a child from running the task
+  // locally, and this cap keeps a product chain from nesting without bound.
+  maxDelegationDepth: z.number().int().min(1).optional(),
   rolesDir: z.string().optional(),
 }).passthrough()
 
