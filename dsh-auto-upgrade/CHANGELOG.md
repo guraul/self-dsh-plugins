@@ -7,7 +7,7 @@
 
 ### 待办（尚未做，不是"已完成"）
 
-- `GET /notes`（release notes）与 `POST /plugins/action`（写精确版本豁免 / 禁用插件）仍返回 `501`。
+- `POST /plugins/action`（写精确版本豁免 / 禁用插件）仍返回 `501`——写豁免按仓库约定必须先拿到用户对具体版本组合的明确同意。
 - **真机升级链路尚未执行过**：备份 `~/.dsh` → 停服 → `npm install -g` → 对版 + 冒烟 → 重启交接。
   只读半边与两条门禁已在真机验证，变更半边只有假 npm/dsh/launchctl 夹具下的证据（见 `docs/acceptance`）。
 - Windows 不支持（helper 是 POSIX sh 脚本）。
@@ -31,6 +31,11 @@
   跑生成的 helper；假 `ModuleLoader` + 假 react 装载浏览器半边。
 
 ### Changed
+
+- 2026-10-17 — **接线 `GET /notes`**：从运行时那份 dsh manifest 推出 GitHub slug，按 `dsh-v<版本>` /
+  `v<版本>` / `<版本>` 依次取 release，`plainNotes()` 把正文的 HTML 与锚点链接压成纯文本，
+  确认卡上折叠显示「更新说明」并给出「在 GitHub 上查看完整说明」；拿不到时如实显示 `reason`，不影响升级。
+  注意：宿主半边改文件不会热重载，运行中的进程要等重启才提供这个端点。
 
 - 2026-10-16 — 包管理转为 **pnpm**：`.npmrc` 指向共享 store（`store-dir=/Users/gubin/workspace/global_node_modules`），
   `pnpm-lock.yaml` 只含 react（peer 自动安装）。

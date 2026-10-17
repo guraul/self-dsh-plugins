@@ -100,7 +100,7 @@ node --test "test/*.test.mjs"   # 35 用例
 
 - **真机的安装/升级/重启链路尚未执行**（属于需要用户点头的闸门）；只读半边与门禁已在真机验证。
 - 只支持 macOS / Linux：helper 是 POSIX sh 脚本。
-- `GET /notes`（release notes）与 `POST /plugins/action`（写豁免/禁用插件）尚未接线，如实返回 `501`。
+- `POST /plugins/action`（写豁免/禁用插件）尚未接线，如实返回 `501`；`GET /notes` 已实现（确认卡上显示更新说明，拿不到时如实说拿不到）。
 - 暂不做「静默自动升级」：`policy.mode` 只接受 `notify`。
 
 ## License

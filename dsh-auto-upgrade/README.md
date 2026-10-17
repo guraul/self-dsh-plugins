@@ -12,6 +12,7 @@
 | 能力 | 状态 |
 |---|---|
 | `GET /status`、`POST /check/auto`、`POST /check/run`、`GET /preflight`、`GET /plugins`、`GET|POST /policy`、`GET|POST /settings`、`GET /task`、`GET /restart/diagnostics` | ✅ 已实现并有单测 |
+| `GET /notes`（release notes，确认卡折叠显示 + 在 GitHub 上看完整说明） | ✅ 已实现并有单测；拿不到时如实显示原因，不影响升级 |
 | 会话门禁（`ctx.agents.list()` → `status==='running'`，可强制） | ✅ |
 | 插件兼容性门禁（对**目标版本**判定，不兼容则**不升级**，不可绕过） | ✅ |
 | 备份 `~/.dsh` → 停服 → `npm install -g --allow-scripts=…` → 对版 + 组合冒烟 → 拉起 | ✅ helper 脚本，已用假 npm/dsh 跑通成功/失败/校验失败三条路径 |
@@ -19,7 +20,7 @@
 | detached 重启交接（launchd 在管时用 `kickstart -k`，否则 detached spawn） | ✅ |
 | 任务进度流（阶段 + 日志尾轮询）、页面重连 watchdog | ✅ |
 | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页 | ✅ |
-| `GET /notes`（release notes）、`POST /plugins/action`（写豁免/禁用插件） | ⛔ 未接线，如实返回 `501` |
+| `POST /plugins/action`（写豁免/禁用插件） | ⛔ 未接线，如实返回 `501`（写豁免按仓库约定必须先拿到用户对具体版本组合的同意） |
 | 静默自动升级 | ⛔ 按用户拍板暂不做（`policy.mode` 只接受 `notify`） |
 | Windows | ⛔ 不支持（helper 是 POSIX sh），能力位已关闭 |
 

@@ -81,7 +81,8 @@ node --test "test/*.test.mjs"                    # 35 用例
 | 真机停服 / 重启交接 / 页面重连 | 会断开当前 Web 会话 | 同上 |
 | 插件真的被 profile 挂载（`dsh plugin add` + 重启） | 会改 `~/.dsh/profiles/web` | 同上 |
 | 端到端「检测 → 点升级 → 新版起来」全链 | 依赖上面三条 | 同上 |
-| `GET /notes`（release notes）、`POST /plugins/action`（豁免/禁用插件） | 本轮未接线，如实返回 501 | 下一轮或用户点单 |
+| `POST /plugins/action`（豁免/禁用插件） | 本轮未接线，如实返回 501（写豁免按仓库约定需先拿到用户对具体版本组合的同意） | 下一轮或用户点单 |
+| `GET /notes` 的**真机**调用 | 已实现并有 7 条用例（含真 http 路由 + 假 GitHub）、也对**真 GitHub API** 单独验过；但运行中的宿主进程加载的是旧代码，接线后的真机 HTTP 响应要等下一次宿主重启才能看到 | 下次重启后 curl 一次 |
 | Windows | helper 是 POSIX sh 脚本 | 未支持，能力位已关闭 |
 
 ---
@@ -126,6 +127,18 @@ launchctl kickstart -k gui/$(id -u)/com.deepseek.dsh-web.self-dsh-plugins
 ---
 
 ## 6. 更新记录
+
+### 2026-10-17 — 接线 `GET /notes`（确认卡显示更新说明）
+
+- 新增 `lib/host/notes.js`：从**运行时那份** `dsh` manifest 的 `repository.url` 推出 `owner/repo`，
+  按 `dsh-v<版本>` / `v<版本>` / `<版本>` 依次试 GitHub release；只读、可失败、绝不抛给路由。
+- 正文里混着 `<h3 id=…>` 与 `[中文](#…)` 这类 HTML/锚点，`plainNotes()` 压成纯文本（去标签、
+  链接留文字、压空行、截断 1200 字），浮层显示 `plain` 并给一个「在 GitHub 上查看完整说明」的出口。
+- 拿不到就说拿不到：`{available:false, reason}` 直接显示在确认卡上，**不影响能不能升级**；10 分钟内走内存缓存。
+- 验证：7 条新用例（`repositorySlug` 各种写法 / 命中 `dsh-v` 前缀 / 三个候选都 404 / 503 / 网络不可达 /
+  真 http 路由 + 假 GitHub + 缓存命中 + 版本号 400）；另外单独对**真 GitHub API** 跑过
+  `0.2.1-alpha.5`（命中 `dsh-v0.2.1-alpha.5`，压出 1135 字）与 `9.9.9`（如实报没有）。
+- ⚠️ 宿主半边改文件**不会热重载**：运行中的进程仍返回 501，重启后才生效。
 
 ### 2026-10-17 — 右下角浮层对齐官方浮层语言
 

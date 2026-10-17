@@ -52,6 +52,9 @@ window.__ModuleLoader__.load({
       'overlay.dismiss': '不再提示',
       'overlay.later': '稍后',
       'overlay.preflightTitle': '升级落点',
+      'overlay.releaseNotes': '更新说明',
+      'overlay.noReleaseNotes': '拿不到更新说明（{reason}）',
+      'overlay.openOnGithub': '在 GitHub 上查看完整说明',
       'overlay.confirm': '确认升级',
       'overlay.cancel': '取消',
       'overlay.backup': '升级前备份 {path}',
@@ -107,6 +110,9 @@ window.__ModuleLoader__.load({
       'overlay.dismiss': 'Do not show again',
       'overlay.later': 'Later',
       'overlay.preflightTitle': 'Upgrade plan',
+      'overlay.releaseNotes': 'Release notes',
+      'overlay.noReleaseNotes': 'Release notes unavailable ({reason})',
+      'overlay.openOnGithub': 'View full notes on GitHub',
       'overlay.confirm': 'Confirm upgrade',
       'overlay.cancel': 'Cancel',
       'overlay.backup': 'Backup before upgrading: {path}',
@@ -262,6 +268,11 @@ window.__ModuleLoader__.load({
         '.dsh-au-details>summary{cursor:pointer;color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xs-13,13px/20px var(--dsw-font-family));}',
         '.dsh-au-details>summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color);outline-offset:1px;}',
         '.dsh-au-detail-body{color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xxs-12,12px/18px var(--dsw-font-family));word-break:break-word;margin:4px 0 0;}',
+        '.dsh-au-notes{max-height:160px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:4px 0 0;',
+        'color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xxs-12,12px/18px var(--dsw-font-family));}',
+        '.dsh-au-notes-link{display:inline-block;margin-top:6px;color:var(--dsw-alias-state-business-primary);',
+        'font:var(--dsw-font-xxs-12,12px/18px var(--dsw-font-family));text-decoration:none;}',
+        '.dsh-au-notes-link:hover{text-decoration:underline;}',
         '.dsh-au-pre{max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-word;',
         'font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px;',
         'color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-1);border-radius:var(--dsw-radius-sm,8px);',
@@ -400,7 +411,12 @@ window.__ModuleLoader__.load({
           setNotice(result.error ?? 'preflight failed')
           return
         }
-        setPlan({ facts: result.preflight, target: check?.target ?? null })
+        const target = check?.target ?? null
+        setPlan({ facts: result.preflight, target, notes: undefined })
+        if (target === null) return
+        // 更新说明是「锦上添花」：拿不到就如实显示拿不到，绝不影响能不能升级
+        const notes = await request(`${API.notes}?version=${encodeURIComponent(target)}`)
+        setPlan((previous) => (previous === null ? previous : { ...previous, notes }))
       }
 
       /**
@@ -493,6 +509,25 @@ window.__ModuleLoader__.load({
               h('li', { key: 'n' }, `npm: ${facts.npm?.command ?? '?'}${facts.npm?.matchesInstall === false ? ' ⚠' : ''}`),
               h('li', { key: 'b' }, t('overlay.backup', { path: facts.paths?.backupBase ?? '?' })),
             ]),
+            plan.notes === undefined || plan.notes === null
+              ? null
+              : plan.notes.available === true
+                ? h('details', { key: 'notes', className: 'dsh-au-details' }, [
+                  h('summary', { key: 's' }, `${t('overlay.releaseNotes')}${plan.notes.tag === undefined ? '' : ` · ${plan.notes.tag}`}`),
+                  (plan.notes.plain ?? plan.notes.notes ?? '') === ''
+                    ? h('div', { key: 'b', className: 'dsh-au-notes' }, t('overlay.noReleaseNotes', { reason: 'empty body' }))
+                    : h('div', { key: 'b', className: 'dsh-au-notes' }, plan.notes.plain ?? plan.notes.notes),
+                  plan.notes.url === undefined
+                    ? null
+                    : h('a', {
+                      key: 'u',
+                      className: 'dsh-au-notes-link',
+                      href: plan.notes.url,
+                      target: '_blank',
+                      rel: 'noreferrer noopener',
+                    }, t('overlay.openOnGithub')),
+                ])
+                : h('div', { key: 'notes', className: 'dsh-au-caption' }, t('overlay.noReleaseNotes', { reason: plan.notes.reason ?? '?' })),
             h('div', { key: 'actions', className: 'dsh-au-row' }, [
               h('button', { key: 'go', className: 'dsh-au-btn dsh-au-primary', disabled: busy, onClick: () => submitUpgrade(false) }, t('overlay.confirm')),
               h('button', { key: 'no', className: 'dsh-au-btn', onClick: () => setPlan(null) }, t('overlay.cancel')),

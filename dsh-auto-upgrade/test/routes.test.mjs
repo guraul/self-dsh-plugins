@@ -85,8 +85,35 @@ async function makeRegistry(tags) {
 }
 
 /**
+ * 起一个假 GitHub release API。
+ * @param {Record<string,object>} releases tag → release；没列出的 tag 返回 404。
+ * @returns {Promise<{url:string, calls:string[], close:()=>Promise<void>}>} 服务信息。
+ */
+async function makeGithub(releases) {
+  const calls = []
+  const server = createServer((req, res) => {
+    calls.push(String(req.url))
+    const tag = decodeURIComponent(String(req.url).split('/releases/tags/')[1] ?? '')
+    const release = releases[tag]
+    if (release === undefined) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end('{"message":"Not Found"}')
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(release))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    calls,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  }
+}
+
+/**
  * 用假 ctx 挂载插件，并把注册出来的路由接到真 http 服务上。
- * @param {{anchor:string, profileDir:string, registry:string, agents?:object, home:string, stateDir:string}} options 输入。
+ * @param {{anchor:string, profileDir:string, registry:string, githubApiBase?:string, agents?:object, home:string, stateDir:string}} options 输入。
  * @returns {Promise<{base:string, routes:any[], close:()=>Promise<void>}>} 服务信息。
  */
 async function startHost(options) {
@@ -112,6 +139,7 @@ async function startHost(options) {
   }
   apply(ctx, {
     registry: options.registry,
+    githubApiBase: options.githubApiBase,
     stateDir: options.stateDir,
     exit: (code) => exits.push(code),
     scheduleHelper: async ({ stateDir, payload }) => {
@@ -156,10 +184,14 @@ async function makeEnvironment(options = {}) {
   await mkdir(home, { recursive: true })
   const profileDir = await makeProfile({ plugins: options.plugins ?? [] })
   const registry = await makeRegistry({ latest: '9.9.9', next: '9.9.9' })
+  const github = await makeGithub({
+    'dsh-v9.9.9': { name: 'dsh v9.9.9', body: '## 亮点\n- 假 registry 里的更新说明', html_url: 'https://example.invalid/releases/tag/dsh-v9.9.9' },
+  })
   const host = await startHost({
     anchor,
     profileDir,
     registry: registry.url,
+    githubApiBase: github.url,
     agents: options.agents,
     home,
     stateDir,
@@ -171,9 +203,11 @@ async function makeEnvironment(options = {}) {
     stateDir,
     profileDir,
     host,
+    github,
     async close() {
       await host.close()
       await registry.close()
+      await github.close()
     },
   }
 }
@@ -208,6 +242,49 @@ test('GET /status 报告真实安装版本与本机事实', async (t) => {
     assert.equal(body.capabilities.update, process.platform !== 'win32')
     assert.equal(body.helperSupported, process.platform !== 'win32')
     assert.equal(body.sessions.available, false)
+  } finally {
+    await env.close()
+  }
+})
+
+test('GET /notes 取到假 GitHub 的更新说明，第二次走内存缓存', async (t) => {
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const first = await (await fetch(`${env.host.base}${API.notes}?version=9.9.9`)).json()
+    assert.equal(first.ok, true)
+    assert.equal(first.version, '9.9.9')
+    assert.equal(first.slug, 'deepseek-ai/deepseek-harness')
+    assert.equal(first.available, true)
+    assert.equal(first.tag, 'dsh-v9.9.9')
+    assert.match(first.notes, /假 registry 里的更新说明/)
+    assert.equal(first.cached, false)
+    assert.equal(env.github.calls.length, 1)
+
+    const second = await (await fetch(`${env.host.base}${API.notes}?version=9.9.9`)).json()
+    assert.equal(second.cached, true)
+    assert.equal(env.github.calls.length, 1, '缓存命中时不该再打 GitHub')
+  } finally {
+    await env.close()
+  }
+})
+
+test('GET /notes：没有这个版本时如实说没有；版本号不合法则 400', async (t) => {
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const missing = await (await fetch(`${env.host.base}${API.notes}?version=1.2.3`)).json()
+    assert.equal(missing.ok, true)
+    assert.equal(missing.available, false)
+    assert.match(missing.reason, /dsh-v1\.2\.3/)
+
+    const bad = await fetch(`${env.host.base}${API.notes}?version=not-a-version`)
+    assert.equal(bad.status, 400)
+
+    // 不给 version 时退回「当前安装版本」，本机装的是 0.2.x，假 GitHub 上也没有
+    const fallback = await (await fetch(`${env.host.base}${API.notes}`)).json()
+    assert.equal(fallback.version, installedVersion(env.anchor))
+    assert.equal(fallback.available, false)
   } finally {
     await env.close()
   }

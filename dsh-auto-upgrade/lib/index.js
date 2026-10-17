@@ -11,12 +11,14 @@
  * @module dsh-plugin-auto-upgrade
  */
 import { readFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
+import { DEFAULT_GITHUB_API, fetchReleaseNotes, repositorySlug } from './host/notes.js'
 import { loadOfficialAppBoot } from './host/official.js'
 import { ALLOW_SCRIPTS, API, CHANNELS, CODE, DECISION, DEFAULT_REGISTRY, DSH_PACKAGE } from './host/protocol.js'
 import { fetchPackument } from './host/registry.js'
@@ -57,6 +59,12 @@ function tailLines(path, bytes = RESTART_LOG_TAIL_BYTES) {
     return []
   }
 }
+
+/**
+ * release notes 的内存缓存时长：同一天里反复打开确认卡不必反复打 GitHub。
+ * 只缓存「这次请求的结果」，不落盘——它随时可以再取。
+ */
+const NOTES_CACHE_TTL_MS = 10 * 60 * 1000
 
 /**
  * 校验请求体是 JSON 对象。
@@ -103,6 +111,10 @@ export function apply(ctx, config = {}) {
     : join(process.env.HOME ?? '', '.dsh')
   const stateDir = typeof config.stateDir === 'string' && config.stateDir !== '' ? config.stateDir : resolveStateDir()
   const registry = typeof config.registry === 'string' && config.registry !== '' ? config.registry : DEFAULT_REGISTRY
+  /** GitHub API 基址；只读、只为取 release notes，单测会指到假服务器。 */
+  const githubApiBase = typeof config.githubApiBase === 'string' && config.githubApiBase !== ''
+    ? config.githubApiBase
+    : DEFAULT_GITHUB_API
   const stores = openStores(stateDir)
   const tasks = new TaskRegistry()
   const restartLogPath = join(stateDir, LOG_FILE)
@@ -116,6 +128,8 @@ export function apply(ctx, config = {}) {
 
   let installation
   let installationError
+  /** release notes 缓存：`<slug>@<version>` → `{at, value}`。 */
+  const notesCache = new Map()
   try {
     installation = resolveInstallation(profileContext)
   } catch (error) {
@@ -666,8 +680,43 @@ export function apply(ctx, config = {}) {
     })
 
     route(API.notes, {
-      GET: async (_req, res) => {
-        throw new RequestError(501, CODE.NOT_IMPLEMENTED, 'release notes 尚未实现')
+      GET: async (req, res) => {
+        if (installation === undefined) {
+          throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'dsh installation is unresolved')
+        }
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        const requested = url.searchParams.get('version')
+        const version = requested === null || requested === ''
+          ? await readInstalledVersion(installation.manifestPath)
+          : expectVersion(requested, 'version')
+        if (version === undefined) {
+          throw new RequestError(400, CODE.BAD_REQUEST, 'version is required')
+        }
+
+        let manifest
+        try {
+          manifest = JSON.parse(await readFile(installation.manifestPath, 'utf8'))
+        } catch (error) {
+          throw new RequestError(500, CODE.INTERNAL, `cannot read ${installation.manifestPath}: ${error instanceof Error ? error.message : String(error)}`)
+        }
+        const slug = repositorySlug(manifest)
+        if (slug === undefined) {
+          writeJson(res, 200, {
+            ok: true,
+            version,
+            slug: null,
+            available: false,
+            reason: 'the installed dsh package declares no GitHub repository',
+          })
+          return
+        }
+
+        const cacheKey = `${slug}@${version}`
+        const cached = notesCache.get(cacheKey)
+        const fresh = cached !== undefined && Date.now() - cached.at < NOTES_CACHE_TTL_MS
+        const result = fresh ? cached.value : await fetchReleaseNotes({ slug, version, apiBase: githubApiBase })
+        if (!fresh) notesCache.set(cacheKey, { at: Date.now(), value: result })
+        writeJson(res, 200, { ok: true, version, slug, cached: fresh, ...result })
       },
     })
 
