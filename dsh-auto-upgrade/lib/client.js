@@ -527,7 +527,7 @@ window.__ModuleLoader__.load({
                       rel: 'noreferrer noopener',
                     }, t('overlay.openOnGithub')),
                 ])
-                : h('div', { key: 'notes', className: 'dsh-au-caption' }, t('overlay.noReleaseNotes', { reason: plan.notes.reason ?? '?' })),
+                : h('div', { key: 'notes', className: 'dsh-au-caption' }, t('overlay.noReleaseNotes', { reason: plan.notes.reason ?? plan.notes.error ?? '?' })),
             h('div', { key: 'actions', className: 'dsh-au-row' }, [
               h('button', { key: 'go', className: 'dsh-au-btn dsh-au-primary', disabled: busy, onClick: () => submitUpgrade(false) }, t('overlay.confirm')),
               h('button', { key: 'no', className: 'dsh-au-btn', onClick: () => setPlan(null) }, t('overlay.cancel')),

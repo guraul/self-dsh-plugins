@@ -13,3 +13,6 @@ dsh-auto-upgrade/.pnpm-store/
 *.log
 .vscode/
 .idea/
+
+# worktree（pipeline 用，不入库）
+.worktrees/
