@@ -44,6 +44,36 @@
 
 ## 怎么验证
 
+### ⚠️ 干净 checkout 里装不上依赖（跟踪 issue #3）
+
+**在干净的 checkout 里 `pnpm install` 必然失败，不是配置错**：
+
+- 本插件的 `peerDependencies` 用 `*` 声明 `@deepseek-ai/dsh-session` 等（连同
+  `@deepseek-ai/cordis` / `dsh-agent` / `dsh-llm` / `dsh-settings` / `schemastery`）。
+- `*` 会解析到 npm 上**陈旧的 `@deepseek-ai/dsh-session@0.0.1-rc.1`**，而它依赖**未发布的内部包**
+  `@deepseek-ai/dsh-type-meta`——**npmjs 与 npmmirror 都是 404**。
+- DSH 真正在用的 `dsh-session@0.2.0-rc.2` **并没有单独发布到公共 registry**。
+- 已试无效：`pnpm install --config.auto-install-peers=false` 仍报同一个 404。
+
+后果：本机之所以能跑，是因为 `node_modules` 早就装好（`~/.dsh/profiles/web` 的解析层提供 peer），
+**CI 在干净 checkout 里装不上**。因此 `.github/workflows/ci.yml` 里这一项
+`install: false`——**只跑 `node --check` 语法门禁**（两个入口已入库，无需依赖），
+并在 job 里打印明确的跳过原因。收紧 `peerDependencies` 范围是 issue #3 的备选方案之一，
+需用户拍板，**不在本仓库统一治理（#1）范围内**。
+
+### 真实验收怎么走
+
+在一次性 DSH profile 里验证装配（**绝不碰真实 `~/.dsh`**）——这是本插件唯一可信的完整校验：
+
+```sh
+scripts/pipeline/install-check.sh dsh-im-bridge-workspaces
+```
+
+它新建 `mktemp -d` 的 `DSH_HOME`，`pnpm dlx @deepseek-ai/dsh@<当前版本> plugin --profile headless add <插件绝对路径>`，
+再用 `--dump-config` grep 到包名 `@mhfire/dsh-im-bridge` 即「装配成功」，装完即删。
+
+### 本机开发命令（依赖已装好时）
+
 > ⚠️ 本插件 README §4 的开发命令写的是 **npm**，属历史遗留（早于本仓库 pnpm 约定）。
 > 本仓库一律用 pnpm 等价命令，见下表。
 

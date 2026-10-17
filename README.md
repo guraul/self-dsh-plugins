@@ -180,8 +180,14 @@ scripts/pipeline/install-check.sh dsh-plugin-product-subagents
 - **本仓库的「交付物」不是线上服务，而是「插件被本机 DSH profile 正确装配」**——对应 `install-check.sh`，
   它每个插件新建一个 `mktemp -d` 的 `DSH_HOME`，`pnpm dlx @deepseek-ai/dsh@<当前版本> plugin --profile headless add <插件>`
   后用 `--dump-config` 校验，装完即删。
+- ⚠️ **`dsh-im-bridge-workspaces` 无法独立 `pnpm install`**（干净 checkout 里必然失败，原因见
+  [issue #3](https://github.com/guraul/self-dsh-plugins/issues/3)：其 `peerDependencies` 用 `*` 会解析到陈旧的
+  `@deepseek-ai/dsh-session@0.0.1-rc.1`，后者依赖未发布的内部包 `@deepseek-ai/dsh-type-meta`）。
+  所以它**不进 `check-all.sh` 的常规测试路径**，CI 里也**只做 `node --check` 语法门禁**并打印跳过原因；
+  完整校验走 `scripts/pipeline/install-check.sh dsh-im-bridge-workspaces`（一次性 DSH profile 里装配）。
 - 只读状态一览：`scripts/pipeline/status.sh`。
-- CI（`.github/workflows/ci.yml`）只跑测试 + `node --check`，**零部署步骤**。
+- CI（`.github/workflows/ci.yml`）只跑测试 + `node --check`，**零部署步骤**；`dsh-im-bridge-workspaces`
+  那一项 `install: false`，即跳过安装 / 测试 / typecheck，只跑语法门禁。
 
 ## 开发流程
 
