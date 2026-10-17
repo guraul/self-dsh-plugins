@@ -96,3 +96,7 @@ node --test test/official-compat.test.mjs        # 需要本机装有 @deepseek-
 - `policy.json` — `{channel, exactVersion, mode, dailyCheck}`
 - `settings.json` — `{overlay, dismissed, locale}`
 - `restart.log` — 重启交接日志（变更半边接线后写入）
+
+另：重启交接成功后，helper 会把 **dsh web 的 token URL** 写回该实例日志目录下的 `url.txt`
+（本机是 `<repo>/.dsh-web/url.txt`）。token 是进程级的、每次启动都变，只打印到 stdout，
+所以只能从日志里取（`launchctl print` 的 `stdout path` → 最后一条 `?token=…`）。

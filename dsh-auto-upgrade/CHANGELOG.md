@@ -3,6 +3,23 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] — 2026-10-17
+
+### 修复
+
+- **重启后 `.dsh-web/url.txt` 仍是旧 token。** 访问 token 是**进程级**的、每次启动都变，且只打印到
+  stdout；`url.txt` 因此永远停在历史值（本机停在 10-14 那次）。现在 helper 拉起新宿主后，从
+  launchd job 的 stdout 日志里取**最后一条** `?token=…` 写回 `url.txt`（日志路径通过
+  `launchctl print` 的 `stdout path` 取得，拿不到时退回 helper 自己的 `$OUT`），最多重试 30 秒。
+- 抓取逻辑抽成纯函数 `lib/host/token-url.js` + CLI 包装 `lib/host/refresh-url.mjs`，由
+  `test/token-url.test.mjs` 覆盖（多条历史 token 取最后一条、按端口过滤、无命中返回 undefined）。
+
+### 说明
+
+- **没有新增任何 UI**：设置页的「重启服务」本来就是完整重启链路
+  （`POST /api/dsh-auto-upgrade/restart` → 门禁 → detached helper → `launchctl kickstart -k`），
+  本次只补了它的一个副作用缺陷。
+
 ## [Unreleased]
 
 ### 待办（尚未做，不是"已完成"）
