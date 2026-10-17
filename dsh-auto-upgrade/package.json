@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-auto-upgrade",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Self-upgrade for the DeepSeek Harness Web UI: detect a new dsh release and installed-plugin compatibility on the day's first page load, notify in a non-blocking overlay, then back up, install, verify and restart on one explicit click.",
   "type": "module",
   "main": "lib/index.js",

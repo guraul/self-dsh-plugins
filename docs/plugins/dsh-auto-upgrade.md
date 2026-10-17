@@ -70,6 +70,14 @@ pnpm run check                                # node --check
 调试升级失败的现场顺序：`result.json`（哪一步失败）→ `restart.log`（helper 全量日志含 npm 输出）→
 `helper-payload.json`（这次交接的完整输入：argv、目标版本、备份路径）。
 
+**另有两处不在状态目录里、但重启链路会碰的文件**：
+
+- dsh web 实例日志目录下的 `url.txt`（本机 `<repo>/.dsh-web/url.txt`）：helper 拉起新宿主后，
+  从 `launchctl print` 给出的 `stdout path` 里取**最后一条** `?token=…` 写回；拿不到 launchd
+  路径时退回 helper 自己的 `$OUT`。token 是进程级的，别指望它跨重启不变。
+- 抓取逻辑在 `lib/host/token-url.js`（纯函数）+ `lib/host/refresh-url.mjs`（CLI），
+  单测见 `test/token-url.test.mjs`。**别在 shell 里重新实现一份**。
+
 ## 另需注意的两条设计约束
 
 - **本包故意不声明 `@deepseek-ai/dsh*` peerDependencies**（只声明 `react`）：否则升级之后，平台闸门会把

@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
@@ -321,6 +322,10 @@ export function apply(ctx, config = {}) {
       logPath: restartLogPath,
       resultPath: restartResultPath,
       outLog: join(stateDir, 'web.out.log'),
+      // The helper refreshes `<log dir>/url.txt` after a restart: the launch
+      // token is process-scoped and only ever printed to stdout, so the log is
+      // the one durable source for the current URL.
+      refreshScript: fileURLToPath(new URL('./host/refresh-url.mjs', import.meta.url)),
       smokeOut: join(stateDir, 'smoke.out'),
       allowScripts: ALLOW_SCRIPTS,
     })
