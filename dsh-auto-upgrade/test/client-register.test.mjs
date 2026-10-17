@@ -105,8 +105,18 @@ test('样式继承 dsh 字体，且只用主题里真实存在的 token', async 
   assert.match(source, /var\(--dsw-font-family,/, 'font-family 只作为 token 的兜底出现')
   // 曾经抄了不存在的语义色 token，导致颜色静默退回硬编码
   assert.doesNotMatch(source, /--dsw-alias-label-(warning|danger|success)/)
-  // 按钮尺寸必须照 primitives（md=36px / 0 14px），不要再自造 32px
-  assert.match(source, /\.dsh-au-btn\{[^}]*height:36px;padding:0 14px;/)
+  // 设置页按钮照官方「模块平台」按钮（36px / 0 14px / radius-md）
+  assert.match(source, /\.dsh-au-selectbtn\{[^}]*height:36px;padding:0 14px;/)
+  // 浮层卡片照官方浮层（MenuSurface + Menu.list）：半透明填充 + 背景模糊 + elevation-prominent
+  assert.match(source, /\.dsh-au-card\{[^}]*background:var\(--dsw-menu-surface-fill/)
+  assert.match(source, /\.dsh-au-card\{[^}]*backdrop-filter:var\(--dsw-menu-backdrop-filter/)
+  assert.match(source, /\.dsh-au-card\{[^}]*box-shadow:var\(--dsw-elevation-prominent/)
+  // 浮层里的动作照官方 Button 的 sm + outline（28px / 0 10px / radius-sm / 12-18 / 0.5px border-l3）
+  assert.match(source, /\.dsh-au-btn\{[^}]*height:28px;padding:0 10px;/)
+  assert.match(source, /\.dsh-au-btn\{[^}]*font:var\(--dsw-font-xxs-12/)
+  assert.match(source, /\.dsh-au-btn\{[^}]*border:0\.5px solid var\(--dsw-alias-border-l3\)/)
+  assert.match(source, /\.dsh-au-primary\{[^}]*background:var\(--dsw-alias-button-primary-fill\)/)
+  assert.doesNotMatch(source, /dsh-au-btn-outline/, '不该再自造描边变体类名（统一走 .dsh-au-btn 的 outline 规格）')
   // 开关照 primitives 的 Switch（36x20 胶囊 + aria-checked）
   assert.match(source, /\.dsh-au-switch\{[^}]*width:36px;height:20px/)
   assert.match(source, /\.dsh-au-switch\[aria-checked="true"\]/)

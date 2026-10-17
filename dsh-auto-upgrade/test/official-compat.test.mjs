@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { loadOfficialAppBoot } from '../lib/host/official.js'
@@ -43,15 +42,29 @@ test('dsh.client.inject 里的包在运行的那版 dsh 里真实存在', async 
   assert.match(source, /ctx\.inject\(\['slots', 'locale'\]/)
 })
 
-test('真实 API：product-subagents 的 peer 范围在 0.2.0 上判不兼容，写豁免后可放行', async (t) => {
+/**
+ * 夹具 manifest：一个「落后一个世代」的第三方插件。
+ *
+ * 真实世界的同一案例是 `dsh-plugin-product-subagents`（它的 peer 范围曾长期不含 0.2.x，
+ * 在 0.2.0-rc.2 上纯靠 `compatibility.json` 里的精确版本豁免活着）。这里不依赖那个外部仓库——
+ * 它会挪位置、会升级——而是用内联夹具，保证测的是**官方 API 的语义**：
+ * 范围不含运行时 → 判不兼容；写了精确版本豁免 → 报不兼容但标记 exempted。
+ * @type {object}
+ */
+const FIXTURE_MANIFEST = {
+  name: 'fixture-plugin',
+  version: '0.4.0',
+  peerDependencies: {
+    '@deepseek-ai/dsh-subagent': '^0.0.1-rc.5 || ^0.1.0-rc.2 || ^0.1.5-alpha.1',
+  },
+}
+
+test('真实 API：peer 范围不含运行时 → 判不兼容；写精确版本豁免后仍报不兼容但标记 exempted', async (t) => {
   const anchor = findInstallAnchor()
   if (anchor === undefined) return t.skip('no global @deepseek-ai/dsh installation found')
-  const manifestPath = process.env.DSH_TEST_PLUGIN_MANIFEST
-    ?? join(homedir(), 'workspace', 'dsh-plugin-product-subagents', 'package.json')
-  if (!existsSync(manifestPath)) return t.skip(`fixture plugin not found: ${manifestPath}`)
 
   const official = await loadOfficialAppBoot(anchor)
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  const manifest = FIXTURE_MANIFEST
 
   const bare = official.evaluatePluginCompatibility(manifest, {}, '0.2.0')
   assert.notEqual(bare, undefined, 'expected the declared peer range to reject dsh 0.2.0')
@@ -66,4 +79,7 @@ test('真实 API：product-subagents 的 peer 范围在 0.2.0 上判不兼容，
   assert.notEqual(exempted, undefined, 'an exemption still reports the mismatch, but flags it as exempted')
   assert.equal(exempted.exempted, true)
   assert.match(official.pluginCompatibilityWarning(bare), /incompatible/)
+
+  // 同一个插件在它自己声明的世代里必须是兼容的（否则夹具本身就是坏的）
+  assert.equal(official.evaluatePluginCompatibility(manifest, {}, '0.1.5-alpha.1'), undefined)
 })

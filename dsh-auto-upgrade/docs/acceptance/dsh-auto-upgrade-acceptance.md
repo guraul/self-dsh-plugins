@@ -127,6 +127,23 @@ launchctl kickstart -k gui/$(id -u)/com.deepseek.dsh-web.self-dsh-plugins
 
 ## 6. 更新记录
 
+### 2026-10-17 — 右下角浮层对齐官方浮层语言
+
+设置页改完后又把浮层（`shell.overlay` 卡片）按官方**浮层**而不是官方设置页的规格重做了一遍：
+
+| 项 | 改前 | 改后（依据） |
+|---|---|---|
+| 卡片表面 | `--dsw-alias-bg-overlay` + 0.5px `border-l2` | `--dsw-menu-surface-fill`（半透明）+ `blur(40px) saturate(150%)` + `--dsw-elevation-prominent`（描边走 `border-l1`）—— 照官方 `MenuSurface` + `Menu.list` |
+| 内边距 / 圆角 | `14px 16px` | `12px 16px` + `--dsw-radius-lg`（照 Toast / HoverCard） |
+| 主信息字号 | 12/18 tertiary（太弱） | 14/22 `label-primary`（全对比度） |
+| 动作按钮 | 36px 实心块 / 自造描边类名 | 官方 `Button` 的 `sm` + `outline`：28px / `0 10px` / `--dsw-radius-sm` / `0.5px border-l3`；主操作同尺寸 `primary` |
+
+中途试过「模块平台灰底」（和设置页按钮同款）：`#f5f6f7` 落在浮层的 `#f8f9fa` 卡片上几乎看不见，于是改用官方描边变体。
+
+另外把 `official-compat` 用例的夹具从「外部仓库 `dsh-plugin-product-subagents` 的 manifest」
+换成内联夹具——该仓库会挪位置、会升级，测试不该依赖它的当前状态；换成内联后仍然跑的是**官方 API**，
+并补了一条「同一插件在它自己声明的世代里必须判为兼容」的反向断言。
+
 ### 2026-10-16 — UI 风格对齐 dsh 设计系统
 
 原先的设置页/浮层样式是"照着感觉写"的近似值，实测后逐项改为官方实现的值：

@@ -188,17 +188,20 @@ window.__ModuleLoader__.load({
       if (document.querySelector('style[data-plugin-css="dsh-auto-upgrade"]') !== null) return
       const tag = document.createElement('style')
       tag.dataset.pluginCss = 'dsh-auto-upgrade'
-      // 全部走 dsh 自己的设计 token（字体/字号/圆角/控件尺寸/语义色），
-      // 数值逐条对齐官方设置页实测：正文 14/22、描述 12/18 tertiary、按钮 md=36px/radius 12/0 14px、
-      // 开关 36x20 胶囊（照抄 primitives 的 Switch.module.css）、输入框 32px/border-l4。
+      // 全部走 dsh 自己的设计 token（字体/字号/圆角/控件尺寸/语义色）。
+      // 设置页对齐官方设置行/模块平台按钮；浮层卡片对齐官方浮层（MenuSurface + Menu.list）：
+      // 半透明填充 + 40px 背景模糊 + elevation-prominent（描边走 border-l1）+ radius-lg + 12/16 内边距。
       tag.textContent = [
         '.dsh-au-card,.dsh-au-section{font:var(--dsw-font-s-14,14px/22px var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif));',
         'color:var(--dsw-alias-label-primary);-webkit-font-smoothing:antialiased;}',
         '.dsh-au-card *,.dsh-au-section *{box-sizing:border-box;}',
-        '.dsh-au-card{position:fixed;right:16px;bottom:16px;z-index:9999;pointer-events:auto;width:min(420px,calc(100vw - 32px));',
-        'background:var(--dsw-alias-bg-overlay);border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg,16px);',
-        'box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.35));padding:14px 16px;}',
+        '.dsh-au-card{position:fixed;right:16px;bottom:16px;z-index:9999;pointer-events:auto;width:min(400px,calc(100vw - 32px));',
+        'padding:12px 16px;border:0;border-radius:var(--dsw-radius-lg,16px);',
+        'background:var(--dsw-menu-surface-fill,rgba(255,255,255,.92));',
+        'backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));',
+        '--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.35));}',
         '.dsh-au-title{font:var(--dsw-font-s-strong-14,500 14px/22px var(--dsw-font-family));color:var(--dsw-alias-label-primary);}',
+        '.dsh-au-line{font:var(--dsw-font-s-14,14px/22px var(--dsw-font-family));color:var(--dsw-alias-label-primary);}',
         '.dsh-au-rowtitle{font:var(--dsw-font-s-14);color:var(--dsw-alias-label-primary);}',
         '.dsh-au-muted{font:var(--dsw-font-xxs-12,12px/18px var(--dsw-font-family));color:var(--dsw-alias-label-tertiary);}',
         '.dsh-au-caption{font:var(--dsw-font-xxs-12,12px/18px var(--dsw-font-family));color:var(--dsw-alias-label-tertiary);}',
@@ -206,16 +209,16 @@ window.__ModuleLoader__.load({
         '.dsh-au-bad{color:var(--dsw-alias-state-error-primary);}',
         '.dsh-au-ok{color:var(--dsw-alias-state-success-primary);}',
         '.dsh-au-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;}',
-        // 按钮：数值照 primitives/Button.module.css 的 md（36px / radius-md / 0 14px）
-        '.dsh-au-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:36px;padding:0 14px;',
-        'border:none;border-radius:var(--dsw-radius-md,12px);background:transparent;color:var(--dsw-alias-label-primary);',
-        'font:var(--dsw-font-s-14,14px/22px var(--dsw-font-family));cursor:pointer;}',
+        // 浮层里的动作：官方 Button 的小尺寸 + 描边变体（sm = 28px / radius-sm / 12-18 /
+        // border 0.5px border-l3 + hover 填充）；主操作是同一尺寸的 primary 实心。
+        '.dsh-au-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:28px;padding:0 10px;',
+        'border:0.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary);',
+        'font:var(--dsw-font-xxs-12,12px/18px var(--dsw-font-family));cursor:pointer;white-space:nowrap;}',
         '.dsh-au-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);}',
         '.dsh-au-btn:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active);}',
         '.dsh-au-btn:disabled{cursor:not-allowed;opacity:.4;}',
         '.dsh-au-btn:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px;}',
-        '.dsh-au-btn-outline{border:0.5px solid var(--dsw-alias-border-l3);}',
-        '.dsh-au-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);}',
+        '.dsh-au-primary{border:none;background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);}',
         '.dsh-au-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover);}',
         // 输入控件：文本输入照 primitives/Input.module.css，下拉照官方的「模块平台」灰底按钮
         '.dsh-au-input{height:32px;padding:0 8px;border:0.5px solid var(--dsw-alias-border-l4);',
@@ -456,7 +459,7 @@ window.__ModuleLoader__.load({
 
       const children = [h('div', { key: 'title', className: 'dsh-au-title' }, t('overlay.title'))]
       if (line !== '') {
-        children.push(h('div', { key: 'line', className: decision === 'update-with-plugin-risk' ? 'dsh-au-warn' : 'dsh-au-muted' }, line))
+        children.push(h('div', { key: 'line', className: decision === 'update-with-plugin-risk' ? 'dsh-au-warn dsh-au-line' : 'dsh-au-line' }, line))
       }
       if (check?.cached === true) children.push(h('div', { key: 'cached', className: 'dsh-au-muted' }, t('overlay.cached')))
       if (notice !== null) children.push(h('div', { key: 'notice', className: 'dsh-au-warn' }, notice))
@@ -492,7 +495,7 @@ window.__ModuleLoader__.load({
             ]),
             h('div', { key: 'actions', className: 'dsh-au-row' }, [
               h('button', { key: 'go', className: 'dsh-au-btn dsh-au-primary', disabled: busy, onClick: () => submitUpgrade(false) }, t('overlay.confirm')),
-              h('button', { key: 'no', className: 'dsh-au-btn dsh-au-btn-outline', onClick: () => setPlan(null) }, t('overlay.cancel')),
+              h('button', { key: 'no', className: 'dsh-au-btn', onClick: () => setPlan(null) }, t('overlay.cancel')),
             ]),
           ]),
         )
@@ -506,9 +509,9 @@ window.__ModuleLoader__.load({
             onClick: openUpgradePlan,
           }, t('overlay.upgrade')))
         }
-        actions.push(h('button', { key: 're', className: 'dsh-au-btn dsh-au-btn-outline', disabled: busy, onClick: () => runCheck(true) }, t('overlay.recheck')))
-        actions.push(h('button', { key: 'di', className: 'dsh-au-btn dsh-au-btn-outline', onClick: dismissForever }, t('overlay.dismiss')))
-        actions.push(h('button', { key: 'la', className: 'dsh-au-btn dsh-au-btn-outline', onClick: () => setHidden(true) }, t('overlay.later')))
+        actions.push(h('button', { key: 're', className: 'dsh-au-btn', disabled: busy, onClick: () => runCheck(true) }, t('overlay.recheck')))
+        actions.push(h('button', { key: 'di', className: 'dsh-au-btn', onClick: dismissForever }, t('overlay.dismiss')))
+        actions.push(h('button', { key: 'la', className: 'dsh-au-btn', onClick: () => setHidden(true) }, t('overlay.later')))
         children.push(h('div', { key: 'actions', className: 'dsh-au-row' }, actions))
       }
 

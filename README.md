@@ -62,8 +62,9 @@ dsh plugin --profile web add <本仓库路径>/dsh-auto-upgrade
   自己判成不兼容（自锁）。本包只声明 `react`（浏览器半边需要）。
 - **安全边界**：路由族能读 npm、重写全局安装树、覆盖 `~/.dsh`、结束本进程，所以一律 loopback-only
   （socket 地址为准，不信任 `X-Forwarded-For`），并且**有副作用的一律 POST**。
-- **UI 吃 dsh 的设计 token**：字体 `--dsw-font-*`、圆角 `--dsw-radius-*`、语义色 `--dsw-alias-state-*`、
-  开关逐字照 primitives `Switch.module.css`，按钮尺寸照官方设置页规则（36px / `0 14px` / `bg-module-platform`）。
+- **UI 吃 dsh 的设计 token**：字体 `--dsw-font-*`、圆角 `--dsw-radius-*`、语义色 `--dsw-alias-state-*`；
+  开关逐字照 primitives `Switch.module.css`；设置行/按钮照官方设置页（36px / `0 14px` / `bg-module-platform`）；
+  右下角浮层照官方浮层（`menu-surface-fill` + 40px 背景模糊 + `elevation-prominent`，动作按钮取 `Button.sm` 的描边变体）。
   详见包内 README 的「UI 风格契约」。
 
 ### 状态目录

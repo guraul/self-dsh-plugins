@@ -76,11 +76,14 @@ node --test test/official-compat.test.mjs        # 需要本机装有 @deepseek-
 | 正文 / 强调 / 描述 | `--dsw-font-s-14` / `--dsw-font-s-strong-14` / `--dsw-font-xxs-12` | 14/22 · **500** 14/22 · 12/18 |
 | 设置行 | 官方 `Pt1bsG_row` | `space-between` + `gap:24px` + `padding:16px 0` + `0.5px solid var(--dsw-alias-border-l2)` |
 | 设置页按钮 / 下拉 | 官方模块平台按钮规则 | `height:36px` + `padding:0 14px` + `--dsw-radius-md` + `--dsw-alias-bg-module-platform`，**无边框** |
+| **浮层卡片** | 官方浮层 `MenuSurface` + `Menu.list` | `--dsw-menu-surface-fill` + `blur(40px) saturate(150%)` + `--dsw-elevation-prominent`（描边走 `border-l1`）+ `--dsw-radius-lg` + `padding:12px 16px` |
+| **浮层动作按钮** | primitives `Button.module.css` 的 `sm` + `outline` | `28px` + `padding:0 10px` + `--dsw-radius-sm` + `0.5px solid var(--dsw-alias-border-l3)`；主操作同尺寸 `primary` 实心 |
 | 文本输入 | primitives `Input.module.css` | `32px` + `0.5px solid var(--dsw-alias-border-l4)` + `--dsw-alias-bg-layer-1` |
 | 开关 | primitives `Switch.module.css` | `36x20` 胶囊 + `aria-checked` 驱动 + `--dsw-alias-brand-primary` |
 | 颜色 | 语义 token | `label-primary/secondary/tertiary`、`state-warn-label`、`state-error-primary`、`state-success-primary` |
 
-`test/client-register.test.mjs` 里有守卫：根规则必须用 `--dsw-font-s-14`、按钮必须是 36px/`0 14px`、
+`test/client-register.test.mjs` 里有守卫：根规则必须用 `--dsw-font-s-14`、设置页按钮必须是 36px/`0 14px`、
+浮层卡片必须用 `menu-surface-fill` + `backdrop-filter` + `elevation-prominent`、浮层按钮必须是 28px 的 outline、
 开关必须是 36x20、用到的每个 `var(--dsw-*)` 必须在主题里真实存在（或自带 fallback）。
 
 ## 状态目录
