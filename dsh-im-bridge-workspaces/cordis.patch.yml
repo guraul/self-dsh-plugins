@@ -1,0 +1,95 @@
+# dsh-im-bridge bundle patch: 插入插件行并给出非密钥默认配置。
+# botId/secret 由 profile 层 ($DSH_HOME/profiles/<name>/cordis.patch.yml) 或 Settings 覆盖。
+- insert:
+    - id: im-bridge
+      name: '@mhfire/dsh-im-bridge'
+      config:
+        workspace: !!js process.cwd()
+        # /ws 多工作区：列表与切换
+        workspaceSwitch: true
+        # 空 = 所有已授权发送者都可切换
+        workspaceAllowFrom: []
+        # true 才允许 /ws add <路径>
+        workspaceAdd: false
+        allowFrom: []
+        startHint: '🧠 正在思考...'
+        agentTimeoutSec: 600
+        agentPreset: standard
+        # 空 = 跟随 GUI 的 agent-default-model; provider 与 model 同时填写才只影响企微
+        provider: ''
+        model: ''
+        reasoningEffort: ''
+        persona: ''
+        personaFile: ''
+        maxReplyBytes: 20000
+        deniedMessage: '无权访问本服务'
+        welcomeMessage: '👋 办公助手已就绪。直接发消息即可，例如查文件、整理文档、查资料或处理日常事务。'
+        wecomCli:
+          enabled: false
+          skillsDir: ''
+          allowFrom: []
+          # skillsDir 空 = $DSH_HOME/wecom-cli-skills（不要用工作区 .dsh/skills）
+          # configDir: ''   # 空 = <workspace>/.dsh/wecom-cli
+        thinking:
+          eggAfterSec: 240
+          intervalMs: 1500
+          activityPrefix: '🛠️ 正在执行 '
+          toolLabels:
+            pwsh: PowerShell
+            bash: Shell
+            read_file: 读文件
+            read: 读文件
+            write_file: 写文件
+            write: 写文件
+            edit_file: 编辑文件
+            str_replace: 编辑文件
+            glob: 查找文件
+            grep: 搜索内容
+            web_search: 网页搜索
+            web_fetch: 抓取网页
+            todo_write: 更新待办
+          reasoningStatus:
+            - '💭 助手思考中…'
+            - '🧠 深入分析中…'
+            - '✨ 梳理思路中…'
+          outputStatus:
+            - '✍️ 正在输出回复…'
+            - '📝 组织文字中…'
+            - '💬 生成回答中…'
+          reasoningSpin:
+            - '💭'
+            - '🧠'
+            - '🌀'
+            - '✨'
+          outputSpin:
+            - '✍️'
+            - '📝'
+            - '💬'
+            - '⚡'
+          spin:
+            - '🧠'
+            - '💭'
+            - '✨'
+            - '🔎'
+            - '⚡'
+          eggs:
+            - '📎 顺手把要点整理好了，稍后一起给你'
+            - '📶 网络有点忙，让它慢慢跑'
+            - '🎯 结果快出来了，坚持一下'
+            - '🗂️ 资料较多，正在汇总中'
+            - '🌙 别盯着了，完成会自动通知你'
+          phases:
+            - atSec: 0
+              text: '🤔 正在理解你的需求…'
+            - atSec: 8
+              text: '📋 正在整理任务清单'
+            - atSec: 25
+              text: '🔍 正在查找相关资料'
+            - atSec: 55
+              text: '✍️ 正在处理文档/数据'
+            - atSec: 120
+              text: '🧠 正在思考最佳方案…'
+            - atSec: 240
+              text: '⏳ 任务较繁琐，请稍候…'
+            - atSec: 420
+              text: '☕ 快好了，正在收尾…'

@@ -1,12 +1,14 @@
 # AGENTS.md — self-dsh-plugins
 
-给在本仓库工作的 AI agent 的说明。**每个子项目可能有自己的 `AGENTS.md`，它更具体、优先级更高** ——
-改某个插件前先读那一个。
+**Updated:** 2026-10-17
+
+给在本仓库工作的 AI agent 的说明。本文件只承担**路由**与**强制规定**两个职责：
+插件细节、流程细节、历史细节一律在 `docs/` 里（见下面的路由表），**不要在本文重复**。
 
 ## 这是什么
 
-自研 / 自维护的 [DeepSeek Harness](https://github.com/deepseek-ai)（`dsh`）插件集合。每个子目录是
-一个独立插件，通过 profile 的 `link:` 依赖挂到本机 DSH 上，没有发布流程。
+自研 / 自维护 / fork 来的 [DeepSeek Harness](https://github.com/deepseek-ai)（`dsh`）插件集合。
+每个子目录是一个独立插件，通过 profile 的 `link:` 依赖挂到本机 DSH 上，**没有发布流程**。
 
 这个仓库同时是**本机 dsh web GUI 的工作目录** —— 你很可能正跑在这个进程里。
 
@@ -22,128 +24,78 @@
 | 进程管理 | LaunchAgent `com.deepseek.dsh-web.self-dsh-plugins`，plist 在 [`.dsh-web/`](./.dsh-web) |
 | 运行日志 | [`.dsh-web/web.out.log`](./.dsh-web)、[`.dsh-web/web.err.log`](./.dsh-web) |
 
-> ⚠️ **重启这个进程会终止当前会话。** 不要顺手重启；需要重启时用
-> [`.dsh-web/restart-once.sh`](./.dsh-web/restart-once.sh)（它会延迟执行，让当前回复先发出去，并在重启后自检健康路由）。
+> ⚠️ **重启这个进程会终止当前会话。** 不要顺手重启；需要时用
+> [`.dsh-web/restart-once.sh`](./.dsh-web/restart-once.sh)（延迟执行，让当前回复先发出去，
+> 并在重启后自检健康路由、写 `.dsh-web/restart-once.log`）。
 
-## 目录
+## 知识库路由（优先查阅）
 
-| 目录 | 包名 | 作用 | 自己的说明 |
+| 场景 | 加载文档 |
+|---|---|
+| 全局认知：仓库是什么、插件清单、运行环境 | 本文件 + [`README.md`](./README.md) |
+| **改某个插件前**：它改哪里、注意什么、怎么验证 | [`docs/plugins/<插件>.md`](./docs/plugins/README.md) |
+| 插件文档总索引（插件 → 文档 → 包名） | [`docs/plugins/README.md`](./docs/plugins/README.md) |
+| 交付流程、worktree 纪律、pipeline 脚本用法 | [`docs/pipeline/README.md`](./docs/pipeline/README.md) |
+| pipeline 进度台账、已定决策（D1–D6） | [`docs/pipeline/PROGRESS.md`](./docs/pipeline/PROGRESS.md) |
+| 历史归档（已废弃的方案，仅存档） | [`docs/archive/`](./docs/archive/README.md) |
+| 某插件的安装 / 配置 / 已知限制（面向使用者） | 各插件目录的 `README.md` |
+| dsh 升级 / 回滚 / 恢复 | [`upgrade-dsh.sh`](./upgrade-dsh.sh) + dsh-auto-upgrade 插件 |
+| DSH 版本兼容与版本豁免 | [`docs/plugins/dsh-plugin-product-subagents.md`](./docs/plugins/dsh-plugin-product-subagents.md)（发版纪律）+ [pipeline 手册 §四红线 4](./docs/pipeline/README.md) |
+
+## 插件索引
+
+| 目录 | 包名 | 一句话作用 | 来源 |
 |---|---|---|---|
-| [`dsh-auto-upgrade/`](./dsh-auto-upgrade) | `dsh-plugin-auto-upgrade` | dsh Web UI 自升级：检测 → 兼容性预检 → 非阻塞浮层 → 备份/安装/校验/重启；本机插件兼容表 | [`README.md`](./dsh-auto-upgrade/README.md)、`docs/design/`、`docs/acceptance/` |
-| [`dsh-external-discuss/`](./dsh-external-discuss) | `dsh-plugin-external-discuss` | 把 DSH 会话一键送到外部模型（清言网页版）继续讨论 | [`README.md`](./dsh-external-discuss/README.md) |
-| [`dsh-im-bridge-workspaces/`](./dsh-im-bridge-workspaces) | `@mhfire/dsh-im-bridge` | 上游 `@mhfire/dsh-im-bridge@0.4.4` 的本地 fork，加多工作区 `/ws` 切换 | [`README.md`](./dsh-im-bridge-workspaces/README.md)、`README.upstream.md` |
-| [`dsh-plugin-product-subagents/`](./dsh-plugin-product-subagents) | `dsh-plugin-product-subagents` | 把 Claude Code / Codex / 任意 ACP CLI 变成基于角色的可续接 subagent | [`AGENTS.md`](./dsh-plugin-product-subagents/AGENTS.md) |
-| [`bb-browser-src/`](./bb-browser-src) | — | 上游快照，**带自己的 `.git`**，一般不动 | [`AGENTS.md`](./bb-browser-src/AGENTS.md) |
+| [`dsh-auto-upgrade/`](./dsh-auto-upgrade) | `dsh-plugin-auto-upgrade` | dsh Web UI 自升级：检测 → 兼容性预检 → 非阻塞浮层 → 备份/安装/校验/重启 | **原创** |
+| [`dsh-external-discuss/`](./dsh-external-discuss) | `dsh-plugin-external-discuss` | 把 DSH 会话一键送到外部模型（清言网页版）继续讨论 | **原创** |
+| [`dsh-im-bridge-workspaces/`](./dsh-im-bridge-workspaces) | `@mhfire/dsh-im-bridge` | 企业微信 ⇄ DSH Agent 桥接，本地 fork 加多工作区 `/ws` 切换 | **fork**（npm `@mhfire/dsh-im-bridge@0.4.4`） |
+| [`dsh-plugin-product-subagents/`](./dsh-plugin-product-subagents) | `dsh-plugin-product-subagents` | 把 Claude Code / Codex / 任意 ACP CLI 变成基于角色的可续接 subagent | **fork**（`shaokeyibb/dsh-plugin-product-subagents` v0.4.0） |
 
 顶层其它文件：[`README.md`](./README.md)（对外说明）、[`upgrade-dsh.sh`](./upgrade-dsh.sh)（全局 dsh 升级/回滚/恢复）、
-[`dsh-web-stop.sh`](./dsh-web-stop.sh)（停服）、[`dsh-upgrade-plan.md`](./dsh-upgrade-plan.md)、`docs/screenshots/`、`.tmp/`（临时草稿，不入库）。
+[`dsh-web-stop.sh`](./dsh-web-stop.sh)（停服）、[`.dsh-web/`](./.dsh-web)（LaunchAgent 与重启脚本）、
+[`docs/`](./docs)（插件文档 / pipeline / 归档）、[`scripts/pipeline/`](./scripts/pipeline)（交付脚本）。
 
-## profile 是怎么接上去的
+## 强制规定
 
-`~/.dsh/profiles/web/package.json` 里两处必须一致：
+以下硬性规则适用于所有任务：
 
-```jsonc
-{
-  "dependencies": {
-    "dsh-plugin-auto-upgrade": "link:/Users/gubin/workspace/self-dsh-plugins/dsh-auto-upgrade"
-  },
-  "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "dsh-plugin-auto-upgrade", /* … */] } }
-}
-```
-
-- `dependencies` 用 `link:` 指向本仓库子目录 —— **不是**从 npm 下载的。
-- `dsh.profile.bundles` 决定装配顺序；插件不在这个列表里就不会被加载。
-- 新增插件：`dsh plugin --profile web add /Users/gubin/workspace/self-dsh-plugins/<dir>`
-  （插件 `package.json` 声明了 `dsh.bundle.patch` 时会自动挂上 patch 层，无需手改 `cordis.patch.yml`）。
-- 卸载：`dsh plugin --profile web remove <包名>`。
-- `patchReload: live`：装完/改完通常**不用重启**，刷新页面即可。
-- **改了 `link:` 目标路径后，必须在 `~/.dsh/profiles/web` 跑一次 `pnpm install`**，否则
-  `node_modules/<包名>` 的软链会悬空（今天搬迁 `dsh-plugin-product-subagents` 时就遇到了）。
-
-## 兼容性与版本豁免（最容易踩的坑）
-
-DSH 启动时会检查每个 bundle **自己声明的** DSH peer 范围；不满足就把它变成 `disabled: true` 的行或
-跳过该 bundle，并列入 `skippedBundles` —— 表现为"插件莫名其妙没加载"，而不是崩溃。
-
-判定顺序是：**先看 `package.json` 的声明范围，再谈豁免**。
-
-版本豁免（version exemption）是逃生舱，不是常规手段：
-
-- 落在 `~/.dsh/profiles/web/compatibility.json`，是 `包名@版本 → 允许的 DSH 运行时版本` 的精确映射。
-- **插件升版本、DSH 升版本都会让它自动失效**，于是插件会立刻重新变成"不兼容"。
-- 写豁免等于明知未验证还强行加载，**只在拿到用户对具体版本组合的明确同意后**才用；CLI 需要 `--accept-risk`。
-
-正确流程（2026-10-17 对 `dsh-plugin-product-subagents` 就是这么做的，可当模板）：
-
-1. 先扩声明：`peerDependencies` + `dsh.compatibility.dsh` 加上目标版本；
-2. 跑该插件自己的验收，拿到证据；
-3. 把 verdict 写进 `dsh.compatibility.dshReleases`（该插件同时要求写进 `docs/COMPATIBILITY.md`），再 bump 插件版本；
-4. 撤销豁免，确认 `version-exemptions` 为空。
-
-⚠️ **prerelease 陷阱**：`^0.2.0-rc.2` **不覆盖** `0.2.1-rc.1`。预发布版本只满足
-major.minor.patch 完全相同的比较器，所以每条 `0.2.x` 线都要单独写一个锚点。
-
-常用命令：
-
-```bash
-dsh plugin --profile web version-exemptions
-dsh plugin --profile web allow-version '<包名@版本>' --dsh-version <运行时版本> --accept-risk
-dsh plugin --profile web revoke-version '<包名@版本>' --dsh-version <运行时版本>
-```
-
-## 怎么验证（别拿正在跑的服务器做实验）
-
-一次性 `$DSH_HOME` 里验证 install + compose，完全不碰真实 `~/.dsh`：
-
-```bash
-V=$(dsh --version)
-H=$(mktemp -d /tmp/dsh-check-XXXX)
-DSH_HOME=$H npx -y @deepseek-ai/dsh@$V plugin --profile headless add \
-  /Users/gubin/workspace/self-dsh-plugins/<dir>
-DSH_HOME=$H npx -y @deepseek-ai/dsh@$V --profile headless --dump-config | grep '<包名>'
-rm -rf "$H"
-```
-
-更完整的端到端验收（install → compose → boot → uninstall）：`dsh-plugin-product-subagents` 自带
-`scripts/verify-dsh-profile.mjs`，直接照用或仿写。
-
-各插件自己的检查：
-
-| 目录 | 命令 |
-|---|---|
-| `dsh-auto-upgrade` | `npm test`、`npm run check` |
-| `dsh-external-discuss` | `npm test`、`npm run check` |
-| `dsh-im-bridge-workspaces` | `npm test`、`npm run typecheck`、`npm run build` |
-| `dsh-plugin-product-subagents` | `npm test`、`npm run lint` |
-
-## 运维
-
-- **重启**：`.dsh-web/restart-once.sh [延迟秒]`（默认 30s；延迟是为了让当前回复先发出去），之后自检
-  `/api/dsh-external-discuss/health` 并写 `.dsh-web/restart-once.log`。
-- **停服**：`./dsh-web-stop.sh`（按 label bootout，覆盖本仓库与 `dshdiscussion` 两个 label）。
-- **升级 dsh**：`./upgrade-dsh.sh`（交互式），或 UI 里的 `dsh-auto-upgrade` 插件。升级前会备份 `~/.dsh`，
-  升级后校验版本号并做组合冒烟；日志在 `~/.dsh-upgrade-logs/`。
-- **升级 dsh 之后的 checklist**：跑各插件测试/验收 → 看 `version-exemptions` 是否为空 →
-  必要时补插件的版本声明（见上节流程）。
-
-## 约定
-
-- 目录名是插件短名，**包名以各自 `package.json` 为准**（如 `dsh-im-bridge-workspaces/` → `@mhfire/dsh-im-bridge`）。
-- 多数插件**无构建步骤**（纯 ESM；浏览器半边手写在 `lib/client.js` 里，通过
-  `window.__ModuleLoader__.load({ id, factory })` 注册）。`dsh-im-bridge-workspaces` 是例外，需要 build。
-- 客户端半边改动：同 checkout 有 `pnpm run dev:web` 监听时走 HMR，否则重建产物 + 刷新页面。
-- 每个插件在自己目录内维护 README、CHANGELOG，需要时加 `AGENTS.md`；
-  面向用户的中英双语文档要**同时**改（如 `dsh-plugin-product-subagents` 的 `README.md` + `README.zh.md`）。
-- 顶层 [`.gitignore`](./.gitignore) 是白名单（`/*` 加 `!` 例外），目前只收录 `dsh-auto-upgrade/`。
-  **要把新插件纳入顶层版本管理，必须显式加例外**；带自己 `.git` 的子目录（`bb-browser-src/`、
-  `dsh-plugin-product-subagents/`）按现状被顶层忽略，各自独立版本管理。
-- `dsh-plugin-product-subagents/` 保留上游 git 仓库（origin = `shaokeyibb/dsh-plugin-product-subagents`），
-  提交身份用 `HikariLan <i@hikarilan.life>`。
+1. **全仓库只允许根目录一份 `AGENTS.md`。** 任何子目录**不得**再新增 `AGENTS.md` / `CLAUDE.md`。
+   插件级说明一律写进 [`docs/plugins/`](./docs/plugins/README.md)。
+2. **包管理器只用 pnpm**，禁 npm / yarn / bun / npx：装依赖 `pnpm add` / `pnpm remove`，
+   跑脚本 `pnpm <script>` / `pnpm exec <bin>`，临时二进制 `pnpm dlx`。不提交
+   `package-lock.json` / `yarn.lock`，只留 `pnpm-lock.yaml`。这也是全局约定
+   （`~/.config/opencode/AGENTS.md`），本仓库脚本 / CI / 文档一律照此写。
+3. **所有改动走 pipeline**：开 issue → `scripts/pipeline/new-task.sh <号>` → 在 worktree 里开发 →
+   `scripts/pipeline/open-pr.sh` → **拿到用户对 review 的明确同意**后 `scripts/pipeline/merge-pr.sh`。
+   **禁止直接改 main 并 push。** worktree 与分支命名契约、清理纪律见
+   [`docs/pipeline/README.md`](./docs/pipeline/README.md)。
+4. **subagent 委派约定**（照 agent-mobile 规则 11/12 适配）：
+   - **DSH 主模型 = 控制面**：产品决策、审阅 diff、验收、落档、单条只读小探针。
+   - **执行类工作**（改代码、跑门禁、git / gh 远端操作）**委派给 opencode 子代理**；「小改动」不构成自做的理由。
+   - **每次委派必须显式传 `model`**（角色库不 pin 模型）：首选 `opencode/deepseek-v4.1-flash-free`，
+     回退链 `opencode/glm-5.3-flash-free` → `opencode/mimo-v2.6-flash-free` → `opencode-go/longcat-2.5-preview-free`。
+     只有**限流 / 429 / 偶发不通**才按链回退；**非限流故障**（鉴权、模型不存在、报错、无响应）
+     **停下报告，不降级、不换 provider、不绕道**。model id 必须写全 `provider/model` 形式。
+   - **大任务只起一个子代理**（不拆并行；验证可以自己做）。
+   - 委派一律用**任务书六段式**：背景 / 步骤（可直接复制的命令 + 期望输出）/ 红线 /
+     交付（原始输出 + 退出码，不许折叠成摘要）/ 材料与已知坑 / 模型不可用怎么办。
+5. **禁止随意重启 dsh web**（重启会终止当前会话）；需要时用
+   [`.dsh-web/restart-once.sh`](./.dsh-web/restart-once.sh)。同理：不要自作主张执行
+   `dsh plugin add/remove`、`npm install -g`——都要先拿到用户明确同意。
+6. **DSH 版本兼容**：插件声明的 peer 范围不覆盖当前 DSH 时，profile 会**跳过该 bundle**
+   （表现是「插件莫名其妙没加载」，不是崩溃）。**版本豁免是逃生舱**，必须按顺序来：
+   先在插件里扩声明 → 跑该插件的一次性 profile 验收 → 把 verdict 同时写进 `package.json` 的
+   `dsh.compatibility.dshReleases` 与 `docs/COMPATIBILITY.md` → bump 插件 SemVer → 最后撤销豁免。
+   完整纪律与 ⚠️ prerelease 陷阱（`^0.2.0-rc.2` 不覆盖 `0.2.1-rc.1`）见
+   [`docs/plugins/dsh-plugin-product-subagents.md`](./docs/plugins/dsh-plugin-product-subagents.md)。
 
 ## 已知坑
 
-- macOS 自带没有 `timeout`；用 `curl --max-time` 或后台任务 + `job_output` 控时。
-- 长命令一律丢后台跑，别阻塞当前轮次。
-- 改了 `link:` 目标后忘记 `pnpm install` → 软链悬空、插件加载失败。
-- **不要 `rm -rf` 已装插件的目录**：正在运行的宿主已把模块载入内存，但任何重组合/重启都会失败。
-- 仓库工作区里可能已有别人的未提交改动（例如 `dsh-auto-upgrade/`）；动手前先 `git status` 看清归属。
+- **macOS 自带 bash 3.2**：脚本里不要用 bash 4 语法（关联数组、`mapfile`、`${var^^}`、`declare -A`、
+  `${VAR:-默认值}` 在 UTF-8 相邻时会出乱码）；默认值改用 `if [[ -z ... ]]`。
+- **macOS 自带没有 `timeout`**：用 `curl --max-time` 或后台任务控时；长命令一律丢后台跑，别阻塞当前轮次。
+- **改了 profile 的 `link:` 目标路径后，必须在 `~/.dsh/profiles/web` 跑一次 `pnpm install`**，
+  否则 `node_modules/<包名>` 软链悬空、插件加载失败。
+- **不要 `rm -rf` 已装插件的目录**：正在运行的宿主已把模块载入内存，但任何重组合 / 重启都会失败。
+- **动手前先 `git status`**：本仓库可能有并发会话在写（例如 `dsh-auto-upgrade/`），先看清改动归属，
+  不要顺手提交别人的文件。

@@ -37,6 +37,10 @@ node_modules/
 .pnpm-store/
 .pnpm-debug.log*
 
+# 只留 pnpm-lock.yaml（全局约定禁用 npm / yarn），误装的其它 lockfile 一律不入库
+package-lock.json
+yarn.lock
+
 # 构建产物
 dist/
 build/
@@ -46,6 +50,10 @@ build/
 .worktrees/
 .tmp/
 *.log
+
+# 补丁残留 / 编辑器 / 系统垃圾
+*.orig
+*.rej
 
 # 敏感 / 本机专属：dsh web 的 token URL（每次启动都会变，且是访问凭据）
 .dsh-web/url.txt
