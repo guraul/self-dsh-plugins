@@ -10,7 +10,7 @@
 | [`dsh-auto-upgrade/`](./dsh-auto-upgrade) | `dsh-plugin-auto-upgrade` | dsh Web UI 自升级：检测 → 兼容性预检 → 非阻塞浮层 → 一键备份 / 安装 / 校验 / 重启 | 可用（真机升级链路待验证） |
 | [`dsh-external-discuss/`](./dsh-external-discuss) | `dsh-plugin-external-discuss` | 把 DSH 会话一键送到外部模型（清言网页版）继续讨论 | 可用（需配套 Chrome 扩展；仅清言接通） |
 | [`dsh-im-bridge-workspaces/`](./dsh-im-bridge-workspaces) | `@mhfire/dsh-im-bridge` | 企业微信智能机器人 ⇄ DSH Agent 桥接，本地 fork 增加多工作区 `/ws` 切换 | 可用（本机已接入 profile） |
-| [`dsh-plugin-product-subagents/`](./dsh-plugin-product-subagents) | `dsh-plugin-product-subagents` | 把 Claude Code / Codex / 任意 ACP CLI 变成基于角色的可续接 subagent | 可用（DSH `0.2.x` 已通过一次性 profile 验收） |
+| [`dsh-plugin-product-subagents/`](./dsh-plugin-product-subagents) | `dsh-plugin-product-subagents` | 把 Claude Code / Codex / 任意 ACP CLI 变成基于角色的 subagent（`0.2.0` 线可续接；`0.2.1+` 外部子代理为一次性） | 可用（DSH `0.2.0-rc.2` / `0.2.1-alpha.5` / `0.2.1-rc.1` 均通过一次性 profile 验收） |
 
 ---
 

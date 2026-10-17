@@ -63,6 +63,17 @@ to a product CLI (that needs a real `claude` / `codex` / ACP session and the
 credentials behind it). Bridge behaviour is covered by `npm test` against a
 fake bridge.
 
+> ⚠️ **The `start` step never starts a child.** It asserts that the six tools
+> registered, that the providers reached the real `SubagentRuntime`, and that
+> `product_roles` / `product_agents` execute. Starting a child is not part of it
+> — and that blind spot is exactly how DSH `0.2.1` broke delegation while every
+> verdict still read `compatible`: `0.2.1` renamed the service-level start call
+> to `startActivation`, so the plugin loaded fine and failed only when a child
+> was actually requested. Since 0.4.2 the call shape is covered credential-free
+> by `test/delegate-start.test.js`, which fails if the mounted service exposes
+> neither start call or if `delivery` stops being supplied. A **live** delegation
+> is still verified by hand, per release, on the machine that has a product CLI.
+
 ## Recorded results
 
 Every result below comes from `scripts/verify-dsh-profile.mjs` on macOS 26.5.2
@@ -79,9 +90,16 @@ without those CLIs, so the id-collision assertion still had something to
 collide with; `-acp@0.2.0-rc.2` declares no `dsh.bundle` and installs as a
 plain dependency, not a profile layer.
 
+The `0.2.1-alpha.5` row was recorded 2026-10-17 for plugin **0.4.2**, same
+machine and toolchain as the `0.2.x` rows. `0.2.1-rc.1` was **re-run with 0.4.2
+as well**: its 0.4.1 verdict was earned before anyone noticed that the `start`
+step cannot see a renamed start call, so it is re-recorded here on a release
+whose delegation path is guarded by `test/delegate-start.test.js`.
+
 | `@deepseek-ai/dsh` | Verdict | Evidence |
 |---|---|---|
-| `0.2.1-rc.1` | `compatible` | install · compose · start · uninstall |
+| `0.2.1-alpha.5` | `compatible` | install · compose · start · uninstall — delegation start-call shape guarded by `test/delegate-start.test.js` |
+| `0.2.1-rc.1` | `compatible` | install · compose · start · uninstall — re-run with 0.4.2 (see above) |
 | `0.2.0-rc.2` | `compatible` | install · compose · start · uninstall — also verified alongside the official `@deepseek-ai/dsh-subagent-claude-code` + `-codex` plugins in one profile, registering `claude-code`, `codex` and `product-subagents:acp` side by side |
 | `0.1.5-rc.1` | `compatible` | install · compose · start · uninstall — also verified alongside the official `@deepseek-ai/dsh-subagent-claude-code` + `-codex` plugins in one profile |
 | `0.1.5-alpha.2` | `compatible` | install · compose · start · uninstall — also verified in a `web` profile, and alongside the official claude-code + codex subagent plugins in one profile |
