@@ -16,7 +16,7 @@
 | 路径 | 作用 |
 |---|---|
 | `lib/index.js` | 宿主入口：14 条路由、两条门禁、交接调度 |
-| `lib/client.js` | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页 + 重连 watchdog |
+| `lib/client.js` | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页（含常驻升级入口与降级护栏出路）+ 重连 watchdog |
 | `lib/host/*.js` | 纯逻辑：协议常量 / loopback 围栏 / HTTP 管道 / SemVer / 工具链 / registry / 兼容性 / 会话 / 状态 / 任务 / 备份 / helper |
 | `docs/design/` | T1 设计：接口清单 + 数据流图 + 用户拍板结论 |
 | `docs/acceptance/` | 验收报告：逐条证据 + **明确没验证什么** |
@@ -24,11 +24,18 @@
 
 ## 动手前必读
 
-1. **先看 `docs/acceptance/` 的「明确没有验证的部分」**：真机升级链路（备份 → `npm install -g` → 校验 →
-   重启）从未执行过，只有假 npm/dsh 夹具下的证据。别把它当成「已经跑通了」。
-2. **别自作主张执行这三件事**：`dsh plugin add/remove`（改 profile）、重启 dsh web（会杀掉当前会话）、
+1. **先看 `docs/acceptance/`**：真机升级链路（备份 → `npm install -g` → 对版/冒烟 → 重启交接）**已经真实跑通**
+   （2026-10-17 两次，证据见验收报告 §3.1），但验收报告里其余「明确没有验证的部分」仍然成立，别把没验的当成跑通了。
+2. **升级入口有两处**：右下角浮层（`shell.overlay`）与设置页（`settings.section`）。设置页的入口**常驻**，
+   不受浮层 `dismissed` / `hidden` 影响；两处的**计划卡渲染与升级流程是同一份代码**
+   （`renderPlanPanel` / `createUpgradeFlow` / `renderDowngradeExit`），改一处即改两处——**不要再抄一份**，
+   `test/client-upgrade-entry.test.mjs` 有计数守卫盯着。
+3. **`downgrade-guard` 是设计里的护栏，不要拆**：本机版本高于发布源时不给升级按钮；
+   插件要做的是**给出路**（点出建议渠道 + 「切到」按钮，`POST /policy` → `POST /check/run`），
+   而不是绕过护栏。宿主侧判定在 `lib/index.js`，改行为要同步门禁测试。
+4. **别自作主张执行这三件事**：`dsh plugin add/remove`（改 profile）、重启 dsh web（会杀掉当前会话）、
    `npm install -g`（替换正在运行的那棵树）。都要先拿到用户明确同意。
-3. **改 UI 前读 `README.md` 的「UI 风格契约」**：尺寸/颜色/字重一律从 dsh 的设计 token 与官方实现里量出来，
+5. **改 UI 前读 `README.md` 的「UI 风格契约」**：尺寸/颜色/字重一律从 dsh 的设计 token 与官方实现里量出来，
    不要自己估；改完必须让 `test/client-register.test.mjs` 里的守卫通过。
 
 ## 命令
@@ -47,7 +54,9 @@ pnpm run check                                # node --check
   升级 helper 用假 npm/dsh/launchctl 配**真 `/bin/sh`** 跑生成出来的脚本。
 - **夹具必须自包含**：不要依赖其它仓库或外部插件的当前状态——它们会挪位置、会升级，
   就会让测试假失败（2026-10-17 就踩过一次，见 `CHANGELOG.md`）。
-- 浏览器半边没有构建产物可验，只能靠 `client-register` / `client-protocol` 两条守卫 + 真浏览器冒烟。
+- 浏览器半边没有构建产物可验，只能靠 `client-register` / `client-protocol` / `client-upgrade-entry`
+  三条守卫 + 真浏览器冒烟；其中 `client-upgrade-entry` 用一个迷你 react 替身**真渲染**成文本，
+  断言「有更新才出现升级入口」「降级护栏要点名建议渠道」这类行为，而不只是源码里有没有字符串。
 
 ## 两条门禁（改行为要同步测试与文档）
 

@@ -2,6 +2,8 @@
 
 给 dsh Web UI 加一个**自升级**入口：当天首次打开页面时自动检测 dsh 新版本 + 已装插件的兼容性，
 用一个**不打断当前工作**的浮层提示，用户点「升级」后再走「会话门禁 → 体检 → 备份 → 安装 → 校验 → 重启」。
+升级入口有**两处**：右下角浮层，以及设置页「自动升级」里的常驻入口（浮层被「不再提示」关掉也照样能发起）；
+两处共用同一份计划卡与提交流程，两条门禁行为一致。
 
 设计权威文档：[`docs/design/dsh-auto-upgrade-T1.md`](./docs/design/dsh-auto-upgrade-T1.md)（接口清单 + 数据流图 + 拍板结论）。
 验收报告（含逐条证据与「没验证什么」）：[`docs/acceptance/dsh-auto-upgrade-acceptance.md`](./docs/acceptance/dsh-auto-upgrade-acceptance.md)。
@@ -18,13 +20,18 @@
 | 备份 `~/.dsh` → 停服 → `npm install -g --allow-scripts=…` → 对版 + 组合冒烟 → 拉起 | ✅ helper 脚本，已用假 npm/dsh 跑通成功/失败/校验失败三条路径 |
 | 回滚（重装指定旧版本） | ✅ |
 | detached 重启交接（launchd 在管时用 `kickstart -k`，否则 detached spawn） | ✅ |
+| **真机**升级链路（备份 → 停服 → `npm install -g` → 对版 + 冒烟 → `kickstart` 拉起） | ✅ 2026-10-17 真机成功两次（见验收报告 §3.1） |
 | 任务进度流（阶段 + 日志尾轮询）、页面重连 watchdog | ✅ |
 | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页 | ✅ |
+| **设置页常驻升级入口**（浮层被「不再提示」关掉也有地方升级；与浮层同一份计划卡/流程） | ✅ |
+| **降级护栏出路**（`downgrade-guard` 时点名建议渠道 + 「切到 `<渠道>`」按钮） | ✅ |
 | `POST /plugins/action`（写豁免/禁用插件） | ⛔ 未接线，如实返回 `501`（写豁免按仓库约定必须先拿到用户对具体版本组合的同意） |
 | 静默自动升级 | ⛔ 按用户拍板暂不做（`policy.mode` 只接受 `notify`） |
 | Windows | ⛔ 不支持（helper 是 POSIX sh），能力位已关闭 |
 
-**真机安装、升级、重启尚未执行**——那三件事是用户授权闸门，见验收报告 §4。
+**真机安装、升级、重启已执行**：2026-10-17 两次走完全链（`0.2.0-rc.2 → 0.2.1-alpha.5`、
+`0.2.1-alpha.5 → 0.2.1-rc.2`），证据见 [`docs/acceptance/dsh-auto-upgrade-acceptance.md`](./docs/acceptance/dsh-auto-upgrade-acceptance.md) §3.1；
+其余「明确没有验证的部分」见同一文件 §3。
 
 ## 安装（**属于用户授权闸门，需用户自己执行**）
 
@@ -61,7 +68,7 @@ package.json）推出**宿主此刻真正执行的** `dsh-app-boot` 绝对路径
 
 ```sh
 node --check lib/index.js lib/client.js          # 语法
-node --test "test/*.test.mjs"                    # 14+ 用例，含真 http 服务与假 registry
+node --test "test/*.test.mjs"                    # 56 用例，含真 http 服务与假 registry
 node --test test/official-compat.test.mjs        # 需要本机装有 @deepseek-ai/dsh
 ```
 

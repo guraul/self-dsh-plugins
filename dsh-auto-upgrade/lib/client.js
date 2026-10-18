@@ -45,6 +45,9 @@ window.__ModuleLoader__.load({
       'overlay.available': '有新版本 {target}（当前 {installed}）',
       'overlay.pluginRisk': '有 {target}，但 {count} 个插件不兼容，按策略不升级',
       'overlay.downgrade': '本机版本高于发布源（{installed} > {target}）',
+      'overlay.downgradeDetail': '当前渠道 {channel} 最新 {target}，本机 {installed}',
+      'overlay.downgradeHint': '把发布渠道改成 {channel} 就能继续升级',
+      'overlay.switchChannel': '切到 {channel}',
       'overlay.unknown': '无法确认是否有更新（{error}）',
       'overlay.cached': '今天已检查过',
       'overlay.upgrade': '升级',
@@ -93,6 +96,7 @@ window.__ModuleLoader__.load({
       'settings.restartService': '重启服务',
       'settings.empty': '（暂无）',
       'settings.pendingRestart': '上次交接：{mode} {from} → {to}',
+      'settings.updateAvailable': '发现新版本 {target}（当前 {installed}）',
     }
 
     const EN = {
@@ -103,6 +107,9 @@ window.__ModuleLoader__.load({
       'overlay.available': 'New version {target} (current {installed})',
       'overlay.pluginRisk': '{target} is available but {count} plugins are incompatible; not upgrading by policy',
       'overlay.downgrade': 'Installed version is ahead of the release source ({installed} > {target})',
+      'overlay.downgradeDetail': 'Channel {channel} latest is {target}; installed {installed}',
+      'overlay.downgradeHint': 'Switch the release channel to {channel} to keep upgrading',
+      'overlay.switchChannel': 'Switch to {channel}',
       'overlay.unknown': 'Cannot confirm updates ({error})',
       'overlay.cached': 'already checked today',
       'overlay.upgrade': 'Upgrade',
@@ -151,6 +158,7 @@ window.__ModuleLoader__.load({
       'settings.restartService': 'Restart service',
       'settings.empty': '(none)',
       'settings.pendingRestart': 'Last handoff: {mode} {from} → {to}',
+      'settings.updateAvailable': 'New version {target} (current {installed})',
     }
 
     /**
@@ -162,6 +170,83 @@ window.__ModuleLoader__.load({
       const template = dict[key] ?? key
       if (params === undefined) return template
       return template.replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? `{${name}}`))
+    }
+
+    const VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/
+
+    /**
+     * 解析版本号。规则与 `lib/host/semver.js` 一致——浏览器半边没有构建步骤、没法 import 宿主模块，
+     * 只能在本地复刻这一小段；`test/client-upgrade-entry.test.mjs` 用宿主那份做逐对比对，防止两处漂移。
+     * @param {unknown} value 版本文本。
+     * @returns {{major:number,minor:number,patch:number,pre:Array<string|number>}|undefined} 解析结果；非法返回 undefined。
+     */
+    function parseVersion(value) {
+      if (typeof value !== 'string') return undefined
+      const m = VERSION_RE.exec(value.trim())
+      if (m === null) return undefined
+      const pre = m[4] === undefined ? [] : m[4].split('.').map((part) => (/^\d+$/.test(part) ? Number(part) : part))
+      return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre }
+    }
+
+    /**
+     * 比较两个版本（semver.org §11，语义与宿主 `compareVersions` 相同）。
+     * @param {string} a 左值。
+     * @param {string} b 右值。
+     * @returns {number} a<b 返回负数，a>b 返回正数，相等或不可比返回 0。
+     */
+    function compareVersions(a, b) {
+      const left = parseVersion(a)
+      const right = parseVersion(b)
+      if (left === undefined || right === undefined) return 0
+      for (const key of ['major', 'minor', 'patch']) {
+        if (left[key] !== right[key]) return left[key] < right[key] ? -1 : 1
+      }
+      const lp = left.pre
+      const rp = right.pre
+      if (lp.length === 0 && rp.length === 0) return 0
+      if (lp.length === 0) return 1 // 正式版 > 预发布版
+      if (rp.length === 0) return -1
+      const len = Math.max(lp.length, rp.length)
+      for (let i = 0; i < len; i += 1) {
+        const l = lp[i]
+        const r = rp[i]
+        if (l === undefined) return -1
+        if (r === undefined) return 1
+        if (l === r) continue
+        const ln = typeof l === 'number'
+        const rn = typeof r === 'number'
+        if (ln && rn) return l < r ? -1 : 1
+        if (ln) return -1 // 数字标识符优先级低于字母数字
+        if (rn) return 1
+        return l < r ? -1 : 1
+      }
+      return 0
+    }
+
+    /**
+     * 降级护栏的出路：从检测结果 `tags`（渠道 → 版本）里挑版本号最高的那个渠道。
+     * 全相等、缺失或都不可比时返回 undefined——没有「更好的渠道」可以指，就不给误导性的建议。
+     * @param {Record<string,string>|null|undefined} tags 渠道表。
+     * @returns {string|undefined} 建议渠道名。
+     */
+    function suggestChannel(tags) {
+      if (tags === null || tags === undefined || typeof tags !== 'object') return undefined
+      const entries = Object.keys(tags)
+        .filter((channel) => parseVersion(tags[channel]) !== undefined)
+        .map((channel) => [channel, tags[channel]])
+      if (entries.length === 0) return undefined
+      let best = entries[0]
+      let distinct = false
+      for (let i = 1; i < entries.length; i += 1) {
+        const delta = compareVersions(entries[i][1], best[1])
+        if (delta > 0) {
+          best = entries[i]
+          distinct = true
+        } else if (delta < 0) {
+          distinct = true
+        }
+      }
+      return distinct ? best[0] : undefined
     }
 
     /**
@@ -244,6 +329,9 @@ window.__ModuleLoader__.load({
         '.dsh-au-selectbtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);}',
         '.dsh-au-selectbtn:disabled{cursor:not-allowed;opacity:.4;}',
         '.dsh-au-selectbtn:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px;}',
+        // 设置页里的主操作（升级 / 确认升级）：同样是 36px 模块平台尺寸，但走 primary 实心
+        '.dsh-au-selectbtn-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);}',
+        '.dsh-au-selectbtn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover);}',
         // 设置行：照官方 Pt1bsG_row（space-between / 16px 0 / 0.5px 分隔线）
         '.dsh-au-setting{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:16px 0;',
         'border-bottom:0.5px solid var(--dsw-alias-border-l2);}',
@@ -315,6 +403,185 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 交接后跟着任务日志走，直到宿主把手交出去（请求失败即视为交接窗口开始）。
+     * 浮层与设置页共用同一份实现，只注入各自的 state setter。
+     * @param {(updater:any)=>void} setHandoff 交接状态 setter。
+     * @returns {(taskId:string)=>void} 跟随函数。
+     */
+    function makeTaskFollower(setHandoff) {
+      return (taskId) => {
+        let cursor = 0
+        const step = async () => {
+          const result = await request(`${API.task}?taskId=${taskId}&since=${cursor}`)
+          if (result.ok !== true) return
+          cursor = result.task?.cursor ?? cursor
+          setHandoff((previous) => ({
+            step: result.task?.phase ?? 'unknown',
+            log: [...(previous?.log ?? []), ...(result.task?.log ?? [])].slice(-12),
+          }))
+          if (result.task?.finishedAt === null) setTimeout(step, 700)
+        }
+        void step()
+      }
+    }
+
+    /**
+     * 升级流程控制器：预检 → 更新说明 → 提交 → 两条门禁 → 交接 watchdog。
+     * 浮层与设置页各自造一个，但跑的是**同一份代码**（只注入各自的 state），避免两处漂移。
+     * @param {object} io 界面接口：`t` / `watchRef` / `getTarget` 与各自的 state setter。
+     * @returns {{openPlan:(target:string|null)=>Promise<void>, submit:(force:boolean)=>Promise<void>, switchChannel:(channel:string)=>Promise<void>}} 控制器。
+     */
+    function createUpgradeFlow(io) {
+      const followTask = makeTaskFollower(io.setHandoff)
+
+      /**
+       * 打开升级确认卡：先看落点，再交给用户点头。
+       * @param {string|null} target 目标版本。
+       * @returns {Promise<void>} 完成后刷新界面。
+       */
+      const openPlan = async (target) => {
+        const result = await request(API.preflight)
+        if (result.ok !== true) {
+          io.setNotice(result.error ?? 'preflight failed')
+          return
+        }
+        io.setPlan({ facts: result.preflight, target, notes: undefined })
+        if (target === null || target === undefined) return
+        // 更新说明是「锦上添花」：拿不到就如实显示拿不到，绝不影响能不能升级
+        const notes = await request(`${API.notes}?version=${encodeURIComponent(target)}`)
+        io.setPlan((previous) => (previous === null ? previous : { ...previous, notes }))
+      }
+
+      /**
+       * 提交升级；会话门禁是「警告可强制」，插件不兼容则拒绝且不可绕过。
+       * @param {boolean} force 是否已在会话警告上确认。
+       * @returns {Promise<void>} 完成后刷新界面。
+       */
+      const submit = async (force) => {
+        io.setBusy(true)
+        const result = await request(API.update, {
+          method: 'POST',
+          body: { version: io.getTarget(), force: force === true },
+        })
+        io.setBusy(false)
+        if (result.ok === true) {
+          io.setNotice(null)
+          io.setPlan(null)
+          if (typeof io.setLastResult === 'function') io.setLastResult(null)
+          io.setHandoff({ step: 'preflight', log: [] })
+          if (typeof result.taskId === 'string') followTask(result.taskId)
+          startWatchdog(io.watchRef, io.getTarget() ?? null, (state) => io.setHandoff((previous) => ({ ...(previous ?? { log: [] }), step: state })))
+          return
+        }
+        if (result.code === 'E_SESSIONS_RUNNING' && result.detail?.bypassable === true && force !== true) {
+          const count = result.detail?.sessions?.length ?? 0
+          if (window.confirm(io.t('overlay.sessionsWarning', { count }))) {
+            await submit(true)
+          }
+          return
+        }
+        if (result.code === 'E_PLUGIN_INCOMPATIBLE') {
+          io.setNotice(io.t('overlay.pluginBlocked', { count: result.detail?.plugins?.length ?? 0 }))
+          return
+        }
+        io.setNotice(result.error ?? 'update failed')
+      }
+
+      /**
+       * 换渠道并立刻重跑检测——降级护栏的出路。这是用户显式点击，允许改自己的策略。
+       * @param {string} channel 渠道名。
+       * @returns {Promise<void>} 完成。
+       */
+      const switchChannel = async (channel) => {
+        io.setBusy(true)
+        const saved = await request(API.policy, { method: 'POST', body: { channel } })
+        if (saved.ok !== true) {
+          io.setBusy(false)
+          io.setNotice(saved.error ?? 'policy failed')
+          return
+        }
+        const checked = await request(API.checkRun, { method: 'POST', body: { force: true } })
+        io.setBusy(false)
+        if (checked.ok === true) {
+          if (typeof io.onChecked === 'function') io.onChecked(checked)
+        } else {
+          io.setNotice(checked.error ?? 'check failed')
+        }
+      }
+
+      return { openPlan, submit, switchChannel }
+    }
+
+    /**
+     * 升级计划卡：版本对比 / npm 路径 / 备份路径 + 更新说明 + 确认/取消。
+     * 浮层与设置页共用同一份渲染（按钮各自传自己的类名，尺寸才跟各自界面一致）。
+     * @param {{t:Function, plan:any, busy:boolean, confirmClass:string, cancelClass:string, onConfirm:Function, onCancel:Function}} props 输入。
+     * @returns {any} React 元素。
+     */
+    function renderPlanPanel({ t, plan, busy, confirmClass, cancelClass, onConfirm, onCancel }) {
+      const facts = plan.facts ?? {}
+      return h('div', { key: 'plan', className: 'dsh-au-panel' }, [
+        h('div', { key: 'l', className: 'dsh-au-title' }, t('overlay.preflightTitle')),
+        h('ul', { key: 'ul', className: 'dsh-au-list' }, [
+          h('li', { key: 'v' }, `${facts.dsh?.version ?? '?'} → ${plan.target ?? '?'}`),
+          h('li', { key: 'n' }, `npm: ${facts.npm?.command ?? '?'}${facts.npm?.matchesInstall === false ? ' ⚠' : ''}`),
+          h('li', { key: 'b' }, t('overlay.backup', { path: facts.paths?.backupBase ?? '?' })),
+        ]),
+        plan.notes === undefined || plan.notes === null
+          ? null
+          : plan.notes.available === true
+            ? h('details', { key: 'notes', className: 'dsh-au-details' }, [
+              h('summary', { key: 's' }, `${t('overlay.releaseNotes')}${plan.notes.tag === undefined ? '' : ` · ${plan.notes.tag}`}`),
+              (plan.notes.plain ?? plan.notes.notes ?? '') === ''
+                ? h('div', { key: 'b', className: 'dsh-au-notes' }, t('overlay.noReleaseNotes', { reason: 'empty body' }))
+                : h('div', { key: 'b', className: 'dsh-au-notes' }, plan.notes.plain ?? plan.notes.notes),
+              plan.notes.url === undefined
+                ? null
+                : h('a', {
+                  key: 'u',
+                  className: 'dsh-au-notes-link',
+                  href: plan.notes.url,
+                  target: '_blank',
+                  rel: 'noreferrer noopener',
+                }, t('overlay.openOnGithub')),
+            ])
+            : h('div', { key: 'notes', className: 'dsh-au-caption' }, t('overlay.noReleaseNotes', { reason: plan.notes.reason ?? plan.notes.error ?? '?' })),
+        h('div', { key: 'actions', className: 'dsh-au-row' }, [
+          h('button', { key: 'go', className: confirmClass, disabled: busy, onClick: onConfirm }, t('overlay.confirm')),
+          h('button', { key: 'no', className: cancelClass, onClick: onCancel }, t('overlay.cancel')),
+        ]),
+      ])
+    }
+
+    /**
+     * 降级护栏的出路：本机版本 / 当前渠道最新版，以及「把渠道改成 <建议渠道>」与按钮。
+     * 浮层与设置页共用同一份渲染。
+     * @param {{t:Function, check:any, channel:any, suggested:string|undefined, busy:boolean, buttonClass:string, onSwitch:Function}} props 输入。
+     * @returns {any[]} 节点数组（详情行 + 可选的提示行与动作行）。
+     */
+    function renderDowngradeExit({ t, check, channel, suggested, busy, buttonClass, onSwitch }) {
+      const nodes = [
+        h('div', { key: 'downgrade-detail', className: 'dsh-au-muted' }, t('overlay.downgradeDetail', {
+          channel: channel ?? '?',
+          target: check?.target ?? '?',
+          installed: check?.installed ?? '?',
+        })),
+      ]
+      if (suggested !== undefined) {
+        nodes.push(h('div', { key: 'downgrade-hint', className: 'dsh-au-line' }, t('overlay.downgradeHint', { channel: suggested })))
+        nodes.push(h('div', { key: 'downgrade-switch', className: 'dsh-au-row' }, [
+          h('button', {
+            key: 'sw',
+            className: buttonClass,
+            disabled: busy,
+            onClick: () => onSwitch(suggested),
+          }, t('overlay.switchChannel', { channel: suggested })),
+        ]))
+      }
+      return nodes
+    }
+
+    /**
      * 浮层：检测结果 + 升级入口，不打断当前工作。
      * @param {{t?:Function}} props 框架注入的属性。
      * @returns {any} React 元素。
@@ -381,78 +648,18 @@ window.__ModuleLoader__.load({
         }
       }, [loadStatus, runCheck])
 
-      /**
-       * 交接后跟着任务日志走，直到宿主把手交出去（请求失败即视为交接窗口开始）。
-       * @param {string} taskId 任务 id。
-       * @returns {void}
-       */
-      const followTask = (taskId) => {
-        let cursor = 0
-        const step = async () => {
-          const result = await request(`${API.task}?taskId=${taskId}&since=${cursor}`)
-          if (result.ok !== true) return
-          cursor = result.task?.cursor ?? cursor
-          setHandoff((previous) => ({
-            step: result.task?.phase ?? 'unknown',
-            log: [...(previous?.log ?? []), ...(result.task?.log ?? [])].slice(-12),
-          }))
-          if (result.task?.finishedAt === null) setTimeout(step, 700)
-        }
-        void step()
-      }
-
-      /**
-       * 打开升级确认卡：先看落点，再交给用户点头。
-       * @returns {Promise<void>} 完成后刷新界面。
-       */
-      const openUpgradePlan = async () => {
-        const result = await request(API.preflight)
-        if (result.ok !== true) {
-          setNotice(result.error ?? 'preflight failed')
-          return
-        }
-        const target = check?.target ?? null
-        setPlan({ facts: result.preflight, target, notes: undefined })
-        if (target === null) return
-        // 更新说明是「锦上添花」：拿不到就如实显示拿不到，绝不影响能不能升级
-        const notes = await request(`${API.notes}?version=${encodeURIComponent(target)}`)
-        setPlan((previous) => (previous === null ? previous : { ...previous, notes }))
-      }
-
-      /**
-       * 提交升级；会话门禁是「警告可强制」，插件不兼容则拒绝且不可绕过。
-       * @param {boolean} force 是否已在会话警告上确认。
-       * @returns {Promise<void>} 完成后刷新界面。
-       */
-      const submitUpgrade = async (force) => {
-        setBusy(true)
-        const result = await request(API.update, {
-          method: 'POST',
-          body: { version: plan?.target, force: force === true },
-        })
-        setBusy(false)
-        if (result.ok === true) {
-          setNotice(null)
-          setPlan(null)
-          setLastResult(null)
-          setHandoff({ step: 'preflight', log: [] })
-          if (typeof result.taskId === 'string') followTask(result.taskId)
-          startWatchdog(watchRef, plan?.target ?? null, (state) => setHandoff((previous) => ({ ...(previous ?? { log: [] }), step: state })))
-          return
-        }
-        if (result.code === 'E_SESSIONS_RUNNING' && result.detail?.bypassable === true && force !== true) {
-          const count = result.detail?.sessions?.length ?? 0
-          if (window.confirm(t('overlay.sessionsWarning', { count }))) {
-            await submitUpgrade(true)
-          }
-          return
-        }
-        if (result.code === 'E_PLUGIN_INCOMPATIBLE') {
-          setNotice(t('overlay.pluginBlocked', { count: result.detail?.plugins?.length ?? 0 }))
-          return
-        }
-        setNotice(result.error ?? 'update failed')
-      }
+      // 升级流程（预检 → 计划 → 提交 → 门禁 → 交接）与设置页共用同一份实现。
+      const flow = createUpgradeFlow({
+        t,
+        watchRef,
+        getTarget: () => plan?.target ?? null,
+        setBusy,
+        setNotice,
+        setPlan,
+        setHandoff,
+        setLastResult,
+        onChecked: (result) => { setCheck(result); setHidden(false) },
+      })
 
       const dismissForever = async () => {
         setHidden(true)
@@ -480,6 +687,19 @@ window.__ModuleLoader__.load({
       if (check?.cached === true) children.push(h('div', { key: 'cached', className: 'dsh-au-muted' }, t('overlay.cached')))
       if (notice !== null) children.push(h('div', { key: 'notice', className: 'dsh-au-warn' }, notice))
 
+      // 降级护栏只说现象会让人无路可走：点出跨线的渠道，并给一个「切过去」的出口。
+      if (decision === 'downgrade-guard') {
+        children.push(...renderDowngradeExit({
+          t,
+          check,
+          channel: check?.channel,
+          suggested: suggestChannel(check?.tags),
+          busy,
+          buttonClass: 'dsh-au-btn dsh-au-primary',
+          onSwitch: (channel) => flow.switchChannel(channel),
+        }))
+      }
+
       if (lastResult !== null && handoff === null) {
         children.push(h('div', {
           key: 'result',
@@ -500,40 +720,15 @@ window.__ModuleLoader__.load({
           children.push(h('div', { key: 'log', className: 'dsh-au-pre' }, handoff.log.join('\n')))
         }
       } else if (plan !== null) {
-        const facts = plan.facts ?? {}
-        children.push(
-          h('div', { key: 'plan', className: 'dsh-au-panel' }, [
-            h('div', { key: 'l', className: 'dsh-au-title' }, t('overlay.preflightTitle')),
-            h('ul', { key: 'ul', className: 'dsh-au-list' }, [
-              h('li', { key: 'v' }, `${facts.dsh?.version ?? '?'} → ${plan.target ?? '?'}`),
-              h('li', { key: 'n' }, `npm: ${facts.npm?.command ?? '?'}${facts.npm?.matchesInstall === false ? ' ⚠' : ''}`),
-              h('li', { key: 'b' }, t('overlay.backup', { path: facts.paths?.backupBase ?? '?' })),
-            ]),
-            plan.notes === undefined || plan.notes === null
-              ? null
-              : plan.notes.available === true
-                ? h('details', { key: 'notes', className: 'dsh-au-details' }, [
-                  h('summary', { key: 's' }, `${t('overlay.releaseNotes')}${plan.notes.tag === undefined ? '' : ` · ${plan.notes.tag}`}`),
-                  (plan.notes.plain ?? plan.notes.notes ?? '') === ''
-                    ? h('div', { key: 'b', className: 'dsh-au-notes' }, t('overlay.noReleaseNotes', { reason: 'empty body' }))
-                    : h('div', { key: 'b', className: 'dsh-au-notes' }, plan.notes.plain ?? plan.notes.notes),
-                  plan.notes.url === undefined
-                    ? null
-                    : h('a', {
-                      key: 'u',
-                      className: 'dsh-au-notes-link',
-                      href: plan.notes.url,
-                      target: '_blank',
-                      rel: 'noreferrer noopener',
-                    }, t('overlay.openOnGithub')),
-                ])
-                : h('div', { key: 'notes', className: 'dsh-au-caption' }, t('overlay.noReleaseNotes', { reason: plan.notes.reason ?? plan.notes.error ?? '?' })),
-            h('div', { key: 'actions', className: 'dsh-au-row' }, [
-              h('button', { key: 'go', className: 'dsh-au-btn dsh-au-primary', disabled: busy, onClick: () => submitUpgrade(false) }, t('overlay.confirm')),
-              h('button', { key: 'no', className: 'dsh-au-btn', onClick: () => setPlan(null) }, t('overlay.cancel')),
-            ]),
-          ]),
-        )
+        children.push(renderPlanPanel({
+          t,
+          plan,
+          busy,
+          confirmClass: 'dsh-au-btn dsh-au-primary',
+          cancelClass: 'dsh-au-btn',
+          onConfirm: () => flow.submit(false),
+          onCancel: () => setPlan(null),
+        }))
       } else {
         const actions = []
         if (decision === 'update-available' || decision === 'update-with-plugin-risk') {
@@ -541,7 +736,7 @@ window.__ModuleLoader__.load({
             key: 'up',
             className: 'dsh-au-btn dsh-au-primary',
             disabled: busy || decision === 'update-with-plugin-risk',
-            onClick: openUpgradePlan,
+            onClick: () => flow.openPlan(target),
           }, t('overlay.upgrade')))
         }
         actions.push(h('button', { key: 're', className: 'dsh-au-btn', disabled: busy, onClick: () => runCheck(true) }, t('overlay.recheck')))
@@ -568,6 +763,8 @@ window.__ModuleLoader__.load({
       const [saved, setSaved] = react.useState(false)
       const [busy, setBusy] = react.useState(false)
       const [notice, setNotice] = react.useState(null)
+      const [plan, setPlan] = react.useState(null)
+      const [progress, setProgress] = react.useState(null)
       const watchRef = react.useRef(null)
 
       const refresh = react.useCallback(async () => {
@@ -594,6 +791,25 @@ window.__ModuleLoader__.load({
       const policy = state?.policy ?? { channel: 'latest', exactVersion: '', dailyCheck: true }
       const settings = state?.settings ?? { overlay: true, dismissed: false }
       const capabilities = state?.capabilities ?? {}
+
+      // 检测结论直接用上次那一次（设置页不重复打 registry）；点「立即检查」会刷新它。
+      const check = state?.lastCheck ?? null
+      const decision = check?.decision
+      const target = check?.target ?? null
+      const installed = check?.installed ?? state?.dsh?.installed ?? '?'
+      const hasUpdate = decision === 'update-available' || decision === 'update-with-plugin-risk'
+
+      // 升级流程与浮层共用同一份实现；浮层是否被 dismissed / hidden 都不影响这里。
+      const flow = createUpgradeFlow({
+        t,
+        watchRef,
+        getTarget: () => plan?.target ?? null,
+        setBusy,
+        setNotice,
+        setPlan,
+        setHandoff: setProgress,
+        onChecked: () => { void refresh() },
+      })
 
       const savePolicy = async (patch) => {
         setBusy(true)
@@ -706,6 +922,51 @@ window.__ModuleLoader__.load({
 
       return h('div', { 'data-dsh-auto-upgrade': 'settings', className: 'dsh-au-section' }, [
         notice === null ? null : h('div', { key: 'notice', className: 'dsh-au-warn' }, notice),
+        progress === null ? null : h('div', { key: 'progress', className: 'dsh-au-panel' }, [
+          h('div', { key: 'l', className: 'dsh-au-warn' }, progress.step === 'reconnecting'
+            ? t('overlay.reconnecting')
+            : t('overlay.handingOff', { step: progress.step ?? '…' })),
+          (progress.log ?? []).length === 0 ? null : h('div', { key: 'pre', className: 'dsh-au-pre' }, progress.log.join('\n')),
+        ]),
+        // 升级入口在设置页常驻（浮层被 dismissed / hidden 都不影响这里）；计划卡与浮层同一份渲染。
+        hasUpdate ? h('div', { key: 'update', className: 'dsh-au-panel' }, [
+          settingRow(
+            'available',
+            t('settings.updateAvailable', { target: target ?? '?', installed }),
+            h('button', {
+              key: 'up',
+              className: 'dsh-au-selectbtn dsh-au-selectbtn-primary',
+              disabled: busy || decision === 'update-with-plugin-risk',
+              onClick: () => flow.openPlan(target),
+            }, t('overlay.upgrade')),
+            decision === 'update-with-plugin-risk'
+              ? t('overlay.pluginRisk', { target: target ?? '?', count: check?.incompatible?.length ?? 0 })
+              : undefined,
+          ),
+        ]) : null,
+        plan !== null ? renderPlanPanel({
+          t,
+          plan,
+          busy,
+          confirmClass: 'dsh-au-selectbtn dsh-au-selectbtn-primary',
+          cancelClass: 'dsh-au-selectbtn',
+          onConfirm: () => flow.submit(false),
+          onCancel: () => setPlan(null),
+        }) : null,
+        // 降级护栏的出路：本机 / 渠道最新版 + 「切到 <建议渠道>」。
+        decision === 'downgrade-guard' ? h('div', { key: 'downgrade', className: 'dsh-au-panel' }, [
+          h('div', { key: 'l', className: 'dsh-au-title' }, t('overlay.title')),
+          h('div', { key: 'line', className: 'dsh-au-line' }, t('overlay.downgrade', { installed, target: target ?? '?' })),
+          ...renderDowngradeExit({
+            t,
+            check,
+            channel: check?.channel,
+            suggested: suggestChannel(check?.tags),
+            busy,
+            buttonClass: 'dsh-au-selectbtn dsh-au-selectbtn-primary',
+            onSwitch: (channel) => flow.switchChannel(channel),
+          }),
+        ]) : null,
         h('div', { key: 'channel', className: 'dsh-au-panel' }, [
           settingRow('channel', t('settings.channel'), h('select', {
             key: 's',
@@ -816,6 +1077,8 @@ window.__ModuleLoader__.load({
 
     exports.apply = apply
     exports.inject = ['slots']
+    // 导出给单测（`test/client-upgrade-entry.test.mjs`）：降级护栏「建议渠道」的纯函数。
+    exports.suggestChannel = suggestChannel
     return module.exports
   },
 })
