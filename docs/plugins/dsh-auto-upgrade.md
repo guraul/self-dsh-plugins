@@ -104,6 +104,14 @@ pnpm run check                                # node --check
 | 有会话在跑 | `409 E_SESSIONS_RUNNING`，`detail.bypassable = true` —— 前端弹警告，确认后可带 `force` 继续 |
 | 已装插件与**目标版本**不兼容 | `409 E_PLUGIN_INCOMPATIBLE`，`detail.bypassable = false` —— 不可绕过 |
 
+## `/plugins` 响应的 `peers` 字段
+
+`GET /api/dsh-auto-upgrade/plugins` 里每个插件带的 `peers` 是「未满足的 peer 明细」，取自官方
+`evaluatePluginCompatibility()` 的返回。**0.2.1 起官方把该字段从 `peers` 改名成 `requirements`**，
+所以 `lib/host/compat.js` 取值时**两个名字都认**（`issue.requirements ?? issue.peers ?? {}`）。
+本插件对外的字段名**仍是 `peers`**（客户端契约不变）；改这里要同步 `test/official-compat.test.mjs`
+的「映射保真」守卫——官方将来再改字段名，那条用例会红。
+
 ## 测试缝（不是公开配置）
 
 `apply(ctx, { stateDir, registry, exit, scheduleHelper })` 里的 `exit` / `scheduleHelper` 只给单测用；

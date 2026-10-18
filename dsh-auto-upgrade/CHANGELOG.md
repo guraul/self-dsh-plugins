@@ -3,6 +3,25 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] — 2026-10-18
+
+### 修复
+
+- **`/plugins` 响应里不兼容插件的 `peers` 恒为空（官方 0.2.1 字段改名）。** 官方
+  `evaluatePluginCompatibility()` 返回对象里的「未满足项」字段在 0.2.1 从 `peers` 改名为 `requirements`，
+  而 `lib/host/compat.js` 仍读 `issue.peers ?? {}`，于是每个**不兼容**插件在
+  `GET /api/dsh-auto-upgrade/plugins` 的 `peers` 都成了 `{}`。现在取值时**两个官方名字都认**
+  （`issue.requirements ?? issue.peers ?? {}`）；**本插件对外的响应字段名仍是 `peers`**（不随官方改名，
+  客户端契约不变），**判定逻辑一行未动**（`compatible` / `exempted` / `incompatible` 均不受影响）。
+  影响面仅限「接口保真 / 信息缺失」——不崩溃、不影响门禁判定，客户端今天也还没读这个字段。
+
+### 内部
+
+- `test/official-compat.test.mjs` 新增一条守卫：用真官方 API + 内联不兼容夹具，让**本插件的映射**
+  （`evaluatePlugins`）走一遍，断言响应里的 `peers` 非空且**等于**官方未满足项；并断言官方返回对象里
+  **至少存在 `requirements` 或 `peers` 之一**，两者都没有就当场清晰失败（说明官方 API 契约又变了），
+  而不是让断言静默空转。**官方将来再改字段名，这条用例必须红。**
+
 ## [0.2.1] — 2026-10-18
 
 ### 修复
@@ -76,8 +95,6 @@
 - `POST /plugins/action`（写精确版本豁免 / 禁用插件）仍返回 `501`——写豁免按仓库约定必须先拿到用户对具体版本组合的明确同意。
 - Windows 不支持（helper 是 POSIX sh 脚本）。
 - 设置页升级入口的**真机点击**尚未验收（本轮只到「真渲染 + 假 fetch」的单测）。
-- `lib/host/compat.js` 仍读 `issue.peers ?? {}`（0.2.1 已改名 `requirements`），「不兼容插件」明细里的
-  peers 列表因此恒为空；不崩溃、仅信息缺失，留待后续处理。
 
 ## [0.1.1] — 2026-10-17
 
