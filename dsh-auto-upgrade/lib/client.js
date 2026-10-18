@@ -51,9 +51,8 @@ window.__ModuleLoader__.load({
       'overlay.unknown': '无法确认是否有更新（{error}）',
       'overlay.cached': '今天已检查过',
       'overlay.upgrade': '升级',
-      'overlay.recheck': '重新检查',
       'overlay.dismiss': '不再提示',
-      'overlay.later': '稍后',
+      'overlay.close': '关闭',
       'overlay.preflightTitle': '升级落点',
       'overlay.releaseNotes': '更新说明',
       'overlay.noReleaseNotes': '拿不到更新说明（{reason}）',
@@ -113,9 +112,8 @@ window.__ModuleLoader__.load({
       'overlay.unknown': 'Cannot confirm updates ({error})',
       'overlay.cached': 'already checked today',
       'overlay.upgrade': 'Upgrade',
-      'overlay.recheck': 'Re-check',
       'overlay.dismiss': 'Do not show again',
-      'overlay.later': 'Later',
+      'overlay.close': 'Close',
       'overlay.preflightTitle': 'Upgrade plan',
       'overlay.releaseNotes': 'Release notes',
       'overlay.noReleaseNotes': 'Release notes unavailable ({reason})',
@@ -280,19 +278,29 @@ window.__ModuleLoader__.load({
       const tag = document.createElement('style')
       tag.dataset.pluginCss = 'dsh-auto-upgrade'
       // 全部走 dsh 自己的设计 token（字体/字号/圆角/控件尺寸/语义色）。
-      // 设置页对齐官方设置行/模块平台按钮；浮层卡片对齐官方浮层（MenuSurface + Menu.list）：
-      // 半透明填充 + 40px 背景模糊 + elevation-prominent（描边走 border-l1）+ radius-lg + 12/16 内边距。
+      // 设置页对齐官方设置行 /「模块平台」按钮；浮层**逐字照抄**官方账号通知卡
+      // （@deepseek-ai/dsh-client-ui-settings-account 的 AccountNotice.module.css，前缀 zwW4-W_ → dsh-au-）：
+      // 280px 白卡 + elevation-panel + 16px 圆角 + 20px 内边距 + 14/22 正文 + 右上 18×18 关闭。
       tag.textContent = [
         '.dsh-au-card,.dsh-au-section{font:var(--dsw-font-s-14,14px/22px var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif));',
         'color:var(--dsw-alias-label-primary);-webkit-font-smoothing:antialiased;}',
         '.dsh-au-card *,.dsh-au-section *{box-sizing:border-box;}',
-        '.dsh-au-card{position:fixed;right:16px;bottom:16px;z-index:9999;pointer-events:auto;width:min(400px,calc(100vw - 32px));',
-        'padding:12px 16px;border:0;border-radius:var(--dsw-radius-lg,16px);',
-        'background:var(--dsw-menu-surface-fill,rgba(255,255,255,.92));',
-        'backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));',
-        '--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.35));}',
+        // 浮层：官方 AccountNotice.module.css 原文（zwW4-W_ → dsh-au-）。相对原文只多两处，均为
+        // 宿主环境/内容形态所需：卡片根 pointer-events:auto（overlayLayer 是 pointer-events:none，
+        // 卡片必须自己吃点击）；.copy 的滚动上限（本插件内容可能比一条通知长）。
+        '.dsh-au-stack{z-index:40;isolation:isolate;width:280px;max-width:calc(100vw - 16px);position:fixed;}',
+        '.dsh-au-card{box-sizing:border-box;background:var(--dsw-specific-input-major);width:100%;box-shadow:var(--dsw-elevation-panel);color:var(--dsw-alias-label-secondary);z-index:calc(0 - var(--notice-depth));transform:translateY(calc(-4px * var(--notice-depth))) scaleX(var(--notice-scale));transform-origin:top;border:0;border-radius:16px;padding:20px;font-size:14px;line-height:22px;transition:transform .25s ease-out;position:relative;pointer-events:auto;}',
+        '.dsh-au-card[data-front="false"]{pointer-events:none;height:100%;position:absolute;inset:0;overflow:hidden;}',
+        '@media (prefers-reduced-motion:reduce){.dsh-au-card{transition:none;}}',
+        '.dsh-au-copy{overflow-wrap:anywhere;flex-direction:column;gap:2px;display:flex;max-height:calc(100vh - 200px);overflow:auto;}',
+        '.dsh-au-copy p{white-space:pre-wrap;margin:0;}',
+        // 标题行：官方原文，但只作用于浮层卡片内 —— `.dsh-au-title` 也被设置页的分组标题复用，
+        // 设置页必须保持原样（`strong-14` 500/22、块级），所以官方那套只加 `.dsh-au-card` 后代限定。
         '.dsh-au-title{font:var(--dsw-font-s-strong-14,500 14px/22px var(--dsw-font-family));color:var(--dsw-alias-label-primary);}',
-        '.dsh-au-line{font:var(--dsw-font-s-14,14px/22px var(--dsw-font-family));color:var(--dsw-alias-label-primary);}',
+        '.dsh-au-card .dsh-au-title{align-items:flex-start;gap:2px;font-weight:500;line-height:20px;display:flex;}',
+        '.dsh-au-icon{width:14px;height:14px;color:var(--dsw-alias-brand-primary-new-colorprimary-new-color);flex:none;margin-top:1px;display:flex;}',
+        '.dsh-au-close{width:18px;height:18px;color:var(--dsw-alias-label-caption);cursor:pointer;background:0 0;border:0;justify-content:center;align-items:center;padding:4px;display:flex;position:absolute;top:6px;right:6px;}',
+        '.dsh-au-close:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px;border-radius:4px;}',
         '.dsh-au-rowtitle{font:var(--dsw-font-s-14);color:var(--dsw-alias-label-primary);}',
         '.dsh-au-muted{font:var(--dsw-font-xxs-12,12px/18px var(--dsw-font-family));color:var(--dsw-alias-label-tertiary);}',
         '.dsh-au-caption{font:var(--dsw-font-xxs-12,12px/18px var(--dsw-font-family));color:var(--dsw-alias-label-tertiary);}',
@@ -554,6 +562,30 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 官方账号通知卡的铃铛图标（14×14，两条 path 从 AccountNotice 的 JSX 逐字取出）。
+     * @param {number} size 边长（px）。
+     * @returns {any} SVG 元素。
+     */
+    function noticeIcon(size) {
+      return h('svg', { width: size, height: size, viewBox: '0 0 14 14', fill: 'none', 'aria-hidden': 'true' }, [
+        h('path', {
+          key: 'body',
+          d: 'M3.6355 6.93969C3.6355 4.8398 5.33779 3.1375 7.43768 3.1375C9.53757 3.1375 11.23987 4.8398 11.23987 6.93968V11.363H3.6355V6.93969Z',
+          fill: 'currentColor',
+          fillOpacity: '0.2',
+          stroke: 'currentColor',
+          strokeWidth: '0.875',
+        }),
+        h('path', {
+          key: 'base',
+          d: 'M1.641 11.3645H12.36M5.053 13.3095H8.9479M7.4375 4.27422V2.70137912',
+          stroke: 'currentColor',
+          strokeWidth: '0.875',
+        }),
+      ])
+    }
+
+    /**
      * 降级护栏的出路：本机版本 / 当前渠道最新版，以及「把渠道改成 <建议渠道>」与按钮。
      * 浮层与设置页共用同一份渲染。
      * @param {{t:Function, check:any, channel:any, suggested:string|undefined, busy:boolean, buttonClass:string, onSwitch:Function}} props 输入。
@@ -582,6 +614,24 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 关闭图标：官方用的是 `@deepseek-ai/dsh-client-ui-primitives` 的 `IconCloseOutlineRegular`（size 10），
+     * 该包在 dsh 0.2.1 的安装树里已不存在（实现被内联进各 bundle），所以按同尺寸内联一个等价的 10×10 ×。
+     * @param {number} size 边长（px）。
+     * @returns {any} SVG 元素。
+     */
+    function closeIcon(size) {
+      return h('svg', { width: size, height: size, viewBox: '0 0 10 10', fill: 'none' }, [
+        h('path', {
+          key: 'cross',
+          d: 'M1.75 1.75 8.25 8.25M8.25 1.75 1.75 8.25',
+          stroke: 'currentColor',
+          strokeWidth: '1.25',
+          strokeLinecap: 'round',
+        }),
+      ])
+    }
+
+    /**
      * 浮层：检测结果 + 升级入口，不打断当前工作。
      * @param {{t?:Function}} props 框架注入的属性。
      * @returns {any} React 元素。
@@ -598,6 +648,51 @@ window.__ModuleLoader__.load({
       const [handoff, setHandoff] = react.useState(null)
       const [lastResult, setLastResult] = react.useState(null)
       const watchRef = react.useRef(null)
+      const [position, setPosition] = react.useState(null)
+
+      // 位置逐条对齐官方 AccountNoticeStack：锚点是侧栏底部账号按钮的左边/上边，
+      // left = max(8, min(anchor.left, innerWidth - 288))，bottom = max(8, innerHeight - anchor.top + 4)；
+      // 量到之前整栈 visibility:hidden；锚点按「语义选择器 → 中文 aria-label → 左下角兜底」回退。
+      react.useEffect(() => {
+        if (typeof document === 'undefined') return undefined
+        let element = null
+        let observer = null
+        let timer = null
+        let attempts = 0
+        const update = () => {
+          if (element === null) return
+          const rect = element.getBoundingClientRect()
+          setPosition({
+            left: `${Math.max(8, Math.min(rect.left, window.innerWidth - 288))}px`,
+            bottom: `${Math.max(8, window.innerHeight - rect.top + 4)}px`,
+          })
+        }
+        const find = () => {
+          const node = document.querySelector('button[aria-haspopup="menu"][data-signed-out]')
+            ?? document.querySelector('button[aria-label="账号菜单"]')
+          if (node !== null) {
+            element = node
+            update()
+            if (typeof ResizeObserver === 'function') {
+              observer = new ResizeObserver(update)
+              observer.observe(node)
+            }
+            window.addEventListener('resize', update)
+            window.addEventListener('scroll', update, true)
+            return
+          }
+          attempts += 1
+          if (attempts < 60) timer = window.setTimeout(find, 250)
+          else setPosition({ left: '8px', bottom: '16px' })
+        }
+        find()
+        return () => {
+          if (timer !== null) window.clearTimeout(timer)
+          if (observer !== null) observer.disconnect()
+          window.removeEventListener('resize', update)
+          window.removeEventListener('scroll', update, true)
+        }
+      }, [])
 
       const loadStatus = react.useCallback(async () => {
         const result = await request(API.status)
@@ -680,16 +775,20 @@ window.__ModuleLoader__.load({
       else if (decision === 'downgrade-guard') line = t('overlay.downgrade', { installed, target: target ?? '?' })
       else line = t('overlay.unknown', { error: check?.registryError ?? 'unknown' })
 
-      const children = [h('div', { key: 'title', className: 'dsh-au-title' }, t('overlay.title'))]
+      const actions = []
+      const copy = [h('div', { key: 'title', className: 'dsh-au-title' }, [
+        h('span', { key: 'icon', className: 'dsh-au-icon', 'aria-hidden': 'true' }, noticeIcon(14)),
+        h('span', { key: 'text' }, t('overlay.title')),
+      ])]
       if (line !== '') {
-        children.push(h('div', { key: 'line', className: decision === 'update-with-plugin-risk' ? 'dsh-au-warn dsh-au-line' : 'dsh-au-line' }, line))
+        copy.push(h('p', { key: 'line', className: decision === 'update-with-plugin-risk' ? 'dsh-au-warn' : undefined }, line))
       }
-      if (check?.cached === true) children.push(h('div', { key: 'cached', className: 'dsh-au-muted' }, t('overlay.cached')))
-      if (notice !== null) children.push(h('div', { key: 'notice', className: 'dsh-au-warn' }, notice))
+      if (check?.cached === true) copy.push(h('p', { key: 'cached', className: 'dsh-au-muted' }, t('overlay.cached')))
+      if (notice !== null) copy.push(h('p', { key: 'notice', className: 'dsh-au-warn' }, notice))
 
       // 降级护栏只说现象会让人无路可走：点出跨线的渠道，并给一个「切过去」的出口。
       if (decision === 'downgrade-guard') {
-        children.push(...renderDowngradeExit({
+        copy.push(...renderDowngradeExit({
           t,
           check,
           channel: check?.channel,
@@ -701,7 +800,7 @@ window.__ModuleLoader__.load({
       }
 
       if (lastResult !== null && handoff === null) {
-        children.push(h('div', {
+        copy.push(h('p', {
           key: 'result',
           className: lastResult.ok === true ? 'dsh-au-ok' : 'dsh-au-warn',
         }, lastResult.ok === true
@@ -715,12 +814,12 @@ window.__ModuleLoader__.load({
         const stepText = handoff.step === 'reconnecting'
           ? t('overlay.reconnecting')
           : t('overlay.handingOff', { step: handoff.step ?? '…' })
-        children.push(h('div', { key: 'handoff', className: 'dsh-au-warn' }, stepText))
+        copy.push(h('p', { key: 'handoff', className: 'dsh-au-warn' }, stepText))
         if ((handoff.log ?? []).length > 0) {
-          children.push(h('div', { key: 'log', className: 'dsh-au-pre' }, handoff.log.join('\n')))
+          copy.push(h('pre', { key: 'log', className: 'dsh-au-pre' }, handoff.log.join('\n')))
         }
       } else if (plan !== null) {
-        children.push(renderPlanPanel({
+        copy.push(renderPlanPanel({
           t,
           plan,
           busy,
@@ -730,7 +829,6 @@ window.__ModuleLoader__.load({
           onCancel: () => setPlan(null),
         }))
       } else {
-        const actions = []
         if (decision === 'update-available' || decision === 'update-with-plugin-risk') {
           actions.push(h('button', {
             key: 'up',
@@ -739,13 +837,31 @@ window.__ModuleLoader__.load({
             onClick: () => flow.openPlan(target),
           }, t('overlay.upgrade')))
         }
-        actions.push(h('button', { key: 're', className: 'dsh-au-btn', disabled: busy, onClick: () => runCheck(true) }, t('overlay.recheck')))
         actions.push(h('button', { key: 'di', className: 'dsh-au-btn', onClick: dismissForever }, t('overlay.dismiss')))
-        actions.push(h('button', { key: 'la', className: 'dsh-au-btn', onClick: () => setHidden(true) }, t('overlay.later')))
-        children.push(h('div', { key: 'actions', className: 'dsh-au-row' }, actions))
       }
 
-      return h('div', { className: 'dsh-au-card', 'data-shell-overlay': 'dsh-auto-upgrade' }, children)
+      return h('div', {
+        className: 'dsh-au-stack',
+        style: position === null ? { visibility: 'hidden' } : position,
+      }, [
+        h('aside', {
+          key: 'card',
+          className: 'dsh-au-card',
+          'data-front': 'true',
+          'data-shell-overlay': 'dsh-auto-upgrade',
+          style: { '--notice-depth': 0, '--notice-scale': 1 },
+        }, [
+          h('div', { key: 'copy', role: 'status', className: 'dsh-au-copy' }, copy),
+          actions.length === 0 ? null : h('div', { key: 'actions', className: 'dsh-au-row' }, actions),
+          h('button', {
+            key: 'close',
+            type: 'button',
+            className: 'dsh-au-close',
+            'aria-label': t('overlay.close'),
+            onClick: () => setHidden(true),
+          }, closeIcon(10)),
+        ]),
+      ])
     }
 
     /**

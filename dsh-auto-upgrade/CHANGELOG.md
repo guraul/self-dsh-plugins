@@ -55,6 +55,22 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **浮层卡片改成官方账号通知卡（AccountNotice）同款外观。** 位置/宽度/圆角/阴影/内边距/正文排版/标题行
+  （铃铛图标 + 标题）/右上角关闭按钮/过渡动画逐条对齐官方 `AccountNotice.module.css`（前缀 `zwW4-W_` →
+  `dsh-au-`），差异只在内容与按钮区；定位改锚侧栏底部账号按钮（`button[aria-haspopup="menu"][data-signed-out]`
+  → `button[aria-label="账号菜单"]` → 左下角兜底）。`×` 只隐藏本次，「不再提示」仍是按钮。
+  检测/升级/备份/校验/重启/Host API/设置页行为零改动（官方标题那套限定在 `.dsh-au-card .dsh-au-title`，
+  避免波及设置页复用的 `.dsh-au-title`）。
+- 视觉验收脚本 `test/visual/`（probe-gui / render-cards）：真 GUI 抓 token 与锚点，真 React 渲染本插件 +
+  官方 CSS/DOM 复刻并排量 computed style；截图见 `docs/screenshots/overlay*.png`。
+- **浮层去掉「稍后」与「重新检查」两个按钮。** 右上角 `×` 就是「本次隐藏」（等价 `setHidden(true)`），
+  与「稍后」完全等价，所以不再重复显示「稍后」。手动重检的正式入口是**设置页的「立即检查」**，
+  因此浮层里**所有状态（含错误态）**都不再提供「重新检查」按钮——避免两处入口漂移。
+  随之删除不再被引用的字典键 `overlay.later` / `overlay.recheck`（中英两套）。
+  保留：升级（primary）、不再提示、右上角 `×`，以及升级计划卡的「确认升级 / 取消」。
+
 ### 待办（尚未做，不是"已完成"）
 
 - `POST /plugins/action`（写精确版本豁免 / 禁用插件）仍返回 `501`——写豁免按仓库约定必须先拿到用户对具体版本组合的明确同意。
