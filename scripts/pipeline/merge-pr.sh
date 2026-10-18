@@ -7,6 +7,9 @@
 # 用法:
 #   cd <worktree> && scripts/pipeline/merge-pr.sh        # 在 worktree 内：自动识别当前分支的 PR
 #   scripts/pipeline/merge-pr.sh <PR号|分支名>            # 任意位置（含主工作区）指定 PR
+#   scripts/pipeline/merge-pr.sh <PR号> --check-only      # 只跑到 CI 门槛为止（演练）：不合并、不清理
+#   scripts/pipeline/merge-pr.sh <PR号> --checks-file=<文件>
+#                                                        # 自测用：用文件内容替代 `gh pr checks` 原文
 #   scripts/pipeline/merge-pr.sh <PR号> --force           # CI 未过/未配置时仍合并（慎用）
 #
 # 行为: 定位 PR → CI checks 未过则拒绝 → gh pr merge --squash
@@ -19,10 +22,14 @@
 source "$(dirname "$0")/lib.sh"
 require_gh
 
-FORCE=0; TARGET=""
+FORCE=0; CHECK_ONLY=0; CHECKS_FILE=""; TARGET=""
 for a in "$@"; do
   case "${a}" in
     --force) FORCE=1 ;;
+    --check-only) CHECK_ONLY=1 ;;
+    --dry-run) CHECK_ONLY=1 ;;
+    --checks-file=*) CHECKS_FILE="${a#--checks-file=}" ;;
+    -*) die "未知参数: ${a} （可用: --check-only / --checks-file=<文件> / --force）" ;;
     *) TARGET="${a}" ;;
   esac
 done
@@ -83,19 +90,66 @@ fi
 [[ "${STATE}" == "OPEN" ]] || die "PR #${PR_NUM} 状态为 ${STATE} ，无法合并"
 
 # —— CI 门槛 ——
+# ⚠️ 不要用 `gh pr checks --fail-fast`（issue #5）：该 flag 只在 --watch 模式下有意义，
+#    不带 --watch 单独用会直接报 "cannot use `--fail-fast` flag without `--watch` flag"
+#    并 exit 1，把关卡误判成"有未通过的 checks"（本机 gh 2.42.1 实测）。
+# ⚠️ 也不要只信 `gh pr checks` 的退出码：它的语义在各 gh 版本间并不统一
+#    （0=全过 / 1=有失败**或**根本没有 checks / 8=有 pending …），故这里
+#    **以输出文本判定为主、退出码只做兜底**，并把两份原始证据都留痕。
+#
+# ci_judge <checks原文>：无阻塞项 → 返回 0；有阻塞项 → 打印原文并返回 1。
+#   阻塞状态: fail / pending / cancel（pending 覆盖 queued 与 in_progress）
+#   放行状态: pass / skipping（skipping 是主动跳过，不算失败）
+#   状态列两侧恒有制表符（形如 `name \t status \t elapsed \t url`），
+#   所以用 `\t(status)\t` 匹配即可绕开 check 名里夹带换行的情况（本仓库的
+#   `check (...)` 名就带换行，逐行按列切会切错）。
+ci_judge() {
+  local txt="$1" blockers
+  blockers=$(printf '%s\n' "${txt}" \
+    | grep -E "$(printf '\t')(fail|pending|cancel)$(printf '\t')" || true)
+  if [[ -n "${blockers}" ]]; then
+    printf '%s\n' "${blockers}" | sed 's/^/      /'
+    return 1
+  fi
+  return 0
+}
+
 if [[ "${FORCE}" -eq 1 ]]; then
   info "已指定 --force：跳过 CI checks 门槛（慎用）"
 else
-  if gh pr checks "${PR_NUM}" --repo "${GH_REPO}" >/dev/null 2>&1; then
-    if gh pr checks "${PR_NUM}" --repo "${GH_REPO}" --fail-fast >/dev/null 2>&1; then
-      ok "CI checks 全部通过"
-    else
-      gh pr checks "${PR_NUM}" --repo "${GH_REPO}" 2>&1 | sed 's/^/  /' || true
-      die "存在未通过/进行中的 CI checks（确认无碍可加 --force）"
-    fi
+  # 先把 `gh pr checks` 的原始输出与退出码都取出来（stdout+stderr），再做判断。
+  if [[ -n "${CHECKS_FILE}" ]]; then
+    [[ -r "${CHECKS_FILE}" ]] || die "自测开关 --checks-file 指定的文件不可读: ${CHECKS_FILE}"
+    CHECKS_OUT=$(cat "${CHECKS_FILE}") || die "读取 --checks-file 失败: ${CHECKS_FILE}"
+    CHECKS_RC=0
+    info "自测：以 --checks-file 提供的原文替代 gh pr checks（${CHECKS_FILE}），未调用 gh"
   else
-    info "该 PR 没有 CI checks（或尚未开始），跳过门槛"
+    set +e
+    CHECKS_OUT=$(gh pr checks "${PR_NUM}" --repo "${GH_REPO}" 2>&1)
+    CHECKS_RC=$?
+    set -e
   fi
+  info "gh pr checks #${PR_NUM} 原文（退出码 ${CHECKS_RC}）:"
+  printf '%s\n' "${CHECKS_OUT}" | sed 's/^/    │ /'
+
+  if [[ -z "${CHECKS_OUT}" ]] && [[ "${CHECKS_RC}" -eq 0 ]]; then
+    info "该 PR 没有 CI checks，跳过门槛"
+  elif printf '%s' "${CHECKS_OUT}" | grep -qi "no checks reported"; then
+    info "该 PR 没有 CI checks（gh: no checks reported），跳过门槛"
+  elif ! printf '%s' "${CHECKS_OUT}" \
+      | grep -Eq "$(printf '\t')(pass|fail|pending|skipping|cancel)$(printf '\t')"; then
+    # gh 不可用 / 输出格式变了 / PR 查不到 → 不静默放行（维持原 die 行为）
+    die "无法从 gh pr checks 输出判定 CI 状态（退出码 ${CHECKS_RC}），不静默放行"
+  elif ci_judge "${CHECKS_OUT}"; then
+    ok "CI checks 全部通过（按输出文本判定；gh 退出码 ${CHECKS_RC}）"
+  else
+    die "存在未通过/进行中的 CI checks（上方为阻塞项原文；确认无碍可加 --force）"
+  fi
+fi
+
+if [[ "${CHECK_ONLY}" -eq 1 ]]; then
+  ok "演练模式（--check-only）：CI 门槛已通过，跳过合并与清理现场"
+  exit 0
 fi
 
 info "squash 合并 PR #${PR_NUM}"
