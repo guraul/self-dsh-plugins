@@ -2,10 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { loadOfficialAppBoot } from '../lib/host/official.js'
+import { evaluatePlugins } from '../lib/host/compat.js'
 
 /**
  * 找本机 dsh 安装（installAnchor）。
@@ -90,4 +92,50 @@ test('真实 API：peer 范围不含运行时 → 判不兼容；写精确版本
 
   // 同一个插件在它自己声明的世代里必须是兼容的（否则夹具本身就是坏的）
   assert.equal(official.evaluatePluginCompatibility(manifest, {}, '0.1.5-alpha.1'), undefined)
+})
+
+test('映射保真：/plugins 响应里不兼容插件的 peers 取自官方未满足项（官方改名字段后仍非空）', async (t) => {
+  const anchor = findInstallAnchor()
+  if (anchor === undefined) return t.skip('no global @deepseek-ai/dsh installation found')
+
+  const official = await loadOfficialAppBoot(anchor)
+  const manifest = FIXTURE_MANIFEST
+  const targetVersion = '0.2.0'
+
+  // 前置：官方对同一个夹具必须给出「未满足项」。两个官方名字都没有 = 官方 API 契约又变了，
+  // 这里必须当场清晰失败，而不是让下面的断言拿到 undefined 空转。
+  const officialIssue = official.evaluatePluginCompatibility(manifest, {}, targetVersion)
+  assert.notEqual(officialIssue, undefined, 'fixture must be judged incompatible by the official API')
+  const unmet = officialIssue.requirements ?? officialIssue.peers
+  assert.notEqual(
+    unmet,
+    undefined,
+    'evaluatePluginCompatibility 既没有 `requirements` 也没有 `peers`：官方 API 契约已变，本用例前置条件缺失',
+  )
+  assert.ok(Object.keys(unmet).length > 0)
+
+  // 让本插件走一遍真实映射：从 profile 目录读 manifest → 官方判定 → 转成 /plugins 响应对象。
+  const profileDir = await mkdtemp(join(tmpdir(), 'dsh-au-compat-'))
+  try {
+    const pluginDir = join(profileDir, 'node_modules', manifest.name)
+    await mkdir(pluginDir, { recursive: true })
+    await writeFile(join(pluginDir, 'package.json'), JSON.stringify(manifest))
+
+    const { plugins } = await evaluatePlugins({
+      official,
+      profileDir,
+      dependencies: [{ name: manifest.name, version: manifest.version, bundle: false, enabled: true }],
+      targetVersion,
+    })
+    const mapped = plugins[0]
+    assert.equal(mapped.compatible, false, 'fixture must stay incompatible after mapping')
+    // 本插件 API 的字段名是 `peers`（不随官方改名），但它必须是官方未满足项的忠实副本，不能是 {}。
+    assert.ok(
+      Object.keys(mapped.peers).length > 0,
+      'mapped `peers` must carry the official unmet requirements（守卫：官方再改字段名时这里必须红）',
+    )
+    assert.deepEqual(mapped.peers, unmet)
+  } finally {
+    await rm(profileDir, { recursive: true, force: true })
+  }
 })

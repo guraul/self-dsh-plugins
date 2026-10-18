@@ -106,7 +106,9 @@ export async function evaluatePlugins(options) {
       compatible: false,
       known: true,
       exempted: issue.exempted === true,
-      peers: issue.peers ?? {},
+      // 0.2.1 起官方把「未满足项」字段从 `peers` 改名成 `requirements`，两个名字都要认。
+      // 本插件对外响应字段名仍是 `peers`（不对客户端改名），只是取值时兼容两个官方名字。
+      peers: issue.requirements ?? issue.peers ?? {},
       runtimeVersion: issue.runtimeVersion,
       detail,
     })
