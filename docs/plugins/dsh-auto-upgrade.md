@@ -22,6 +22,41 @@
 | `docs/acceptance/` | 验收报告：逐条证据 + **明确没验证什么** |
 | `CHANGELOG.md` | 变更记录（含待办） |
 
+## 浮层外观（官方账号通知卡同款）
+
+浮层卡片的**呈现层**逐字照抄官方账号通知卡，差异只允许出现在「内容」与「按钮区」（检测/升级/备份/校验/重启/
+Host API/设置页行为都不受影响）。
+
+- 基准：`@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js` 里的
+  `AccountNotice.module.css` / `NoticeCard` / `AccountNoticeStack`（包内私有，**拿不到组件，不许 import**，
+  只能手抄 CSS 与 DOM 结构；前缀 `zwW4-W_` → `dsh-au-`）。
+- 定位：锚侧栏底部账号按钮 `button[aria-haspopup="menu"][data-signed-out]` → `button[aria-label="账号菜单"]` →
+  `left:8px;bottom:16px`；公式 `left=max(8,min(anchor.left,innerWidth-288))`、
+  `bottom=max(8,innerHeight-anchor.top+4)`；算出前 `visibility:hidden`。
+- 关闭按钮：`×` 只隐藏本次（等价 `setHidden(true)`）；「不再提示」仍是正文下方的按钮。
+- 本机浅色主题实测 token：`--dsw-specific-input-major` `#fff`、
+  `--dsw-alias-brand-primary-new-colorprimary-new-color` `#4176e6`（名字很怪但真实存在，别改名别回退）、
+  `--dsw-alias-label-caption` `#adb2b8`、`--dsw-alias-label-secondary` `#61666b`、
+  `--dsw-elevation-panel` `0 0 0 .5px #00000029, 0 3px 8px 0 #00000008, 0 0 16px 0 #00000005`；
+  `--dsw-focus-ring-color` 为空 → 官方 focus 规则会走 fallback `--dsw-alias-state-business-primary`（照抄即可）。
+
+**官方卡在本机不可真实触发**：只在 `signedIn && !account.desktopOnboardingVisible && !account.onboarding &&
+account.notices` 时渲染，`notices` 由服务端下发，DOM 里 `[data-front]` 恒为 0。所以视觉验收用
+`test/visual/render-cards.mjs`：真 React + worktree 里的真组件渲染本插件，旁边摆一份「按官方 CSS/DOM 逐字注入的
+复刻」，两边量 computed style + 出图（交付时会明确标注哪边是复刻）。
+
+三个已知坑：
+
+- `@deepseek-ai/dsh-client-ui-primitives` 在 dsh 0.2.1 的安装树里**已不存在**（实现被内联进各 bundle），
+  官方关闭图标 `IconCloseOutlineRegular`（size 10）拿不到 → 按同尺寸内联等价 `10×10` ×。
+- `.dsh-au-card` 只比官方多一条 `pointer-events:auto`（宿主的 `overlayLayer` 是 `pointer-events:none`），
+  `.dsh-au-copy` 多一条 `max-height:calc(100vh - 200px);overflow:auto`（内容可能比一条通知长）；
+  其余声明与官方原文逐字一致，`test/client-register.test.mjs` 会守住这一点。
+- 官方标题那条（`500` / `line-height:20px` / `display:flex`）**必须加 `.dsh-au-card` 后代限定**：
+  `.dsh-au-title` 同时被设置页的分组标题复用，不加限定会把设置页标题从 `500 14/22` 块级悄悄变成
+  `flex + 20px`。所以是 `.dsh-au-title{font:var(--dsw-font-s-strong-14…)}` +
+  `.dsh-au-card .dsh-au-title{…官方那套…}`，设置页保持原样。
+
 ## 动手前必读
 
 1. **先看 `docs/acceptance/`**：真机升级链路（备份 → `npm install -g` → 对版/冒烟 → 重启交接）**已经真实跑通**

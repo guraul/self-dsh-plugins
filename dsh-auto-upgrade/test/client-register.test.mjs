@@ -107,10 +107,38 @@ test('样式继承 dsh 字体，且只用主题里真实存在的 token', async 
   assert.doesNotMatch(source, /--dsw-alias-label-(warning|danger|success)/)
   // 设置页按钮照官方「模块平台」按钮（36px / 0 14px / radius-md）
   assert.match(source, /\.dsh-au-selectbtn\{[^}]*height:36px;padding:0 14px;/)
-  // 浮层卡片照官方浮层（MenuSurface + Menu.list）：半透明填充 + 背景模糊 + elevation-prominent
-  assert.match(source, /\.dsh-au-card\{[^}]*background:var\(--dsw-menu-surface-fill/)
-  assert.match(source, /\.dsh-au-card\{[^}]*backdrop-filter:var\(--dsw-menu-backdrop-filter/)
-  assert.match(source, /\.dsh-au-card\{[^}]*box-shadow:var\(--dsw-elevation-prominent/)
+  // 浮层逐字照抄官方账号通知卡（AccountNotice.module.css）：280px 白卡 + elevation-panel +
+  // 16 圆角 + 20 内边距 + 14/22 正文 + 右上 18×18 关闭；不再有 MenuSurface 那套半透明磨砂。
+  assert.match(source, /\.dsh-au-stack\{[^}]*width:280px;max-width:calc\(100vw - 16px\);position:fixed/)
+  assert.match(source, /\.dsh-au-card\{[^}]*box-sizing:border-box;background:var\(--dsw-specific-input-major\)/)
+  assert.match(source, /\.dsh-au-card\{[^}]*box-shadow:var\(--dsw-elevation-panel\)/)
+  assert.match(source, /\.dsh-au-card\{[^}]*border:0;border-radius:16px;padding:20px;font-size:14px;line-height:22px;/)
+  assert.match(source, /\.dsh-au-card\{[^}]*color:var\(--dsw-alias-label-secondary\)/)
+  assert.match(source, /\.dsh-au-card\{[^}]*transform-origin:top/)
+  assert.match(source, /\.dsh-au-card\{[^}]*transition:transform \.25s ease-out/)
+  assert.match(source, /\.dsh-au-card\{[^}]*z-index:calc\(0 - var\(--notice-depth\)\)/)
+  assert.match(source, /\.dsh-au-card\{[^}]*pointer-events:auto/)
+  assert.doesNotMatch(source, /backdrop-filter/, '官方 AccountNotice 没有背景模糊，别再抄 MenuSurface 那套')
+  assert.match(source, /@media \(prefers-reduced-motion:reduce\)\{\.dsh-au-card\{transition:none;\}\}/)
+  assert.doesNotMatch(source, /@keyframes/, '官方只有 transform .25s 过渡，不许自创淡入/缩放动画')
+  assert.match(source, /\.dsh-au-copy\{[^}]*overflow-wrap:anywhere;flex-direction:column;gap:2px;display:flex/)
+  assert.match(source, /\.dsh-au-copy p\{white-space:pre-wrap;margin:0;\}/)
+  // 标题行只作用于卡片内（`.dsh-au-title` 同时被设置页分组标题复用，设置页必须保持 500/22 块级原样）
+  assert.match(source, /\.dsh-au-title\{[^}]*font:var\(--dsw-font-s-strong-14/)
+  assert.match(source, /\.dsh-au-card \.dsh-au-title\{[^}]*align-items:flex-start;gap:2px;font-weight:500;line-height:20px;display:flex/)
+  assert.match(source, /\.dsh-au-icon\{[^}]*width:14px;height:14px;color:var\(--dsw-alias-brand-primary-new-colorprimary-new-color\)/)
+  assert.match(source, /\.dsh-au-close\{[^}]*width:18px;height:18px;color:var\(--dsw-alias-label-caption\)/)
+  assert.match(source, /\.dsh-au-close\{[^}]*padding:4px;display:flex;position:absolute;top:6px;right:6px/)
+  assert.match(source, /\.dsh-au-close:focus-visible\{outline:2px solid var\(--dsw-focus-ring-color,var\(--dsw-alias-state-business-primary\)\)/)
+  // 结构与无障碍：官方 DOM 同构（data-front / notice-depth / notice-scale / role=status / aria-label）
+  assert.match(source, /className: 'dsh-au-stack'/)
+  assert.match(source, /'data-front': 'true'/)
+  assert.match(source, /'--notice-depth': 0, '--notice-scale': 1/)
+  assert.match(source, /role: 'status', className: 'dsh-au-copy'/)
+  assert.match(source, /'aria-label': t\('overlay\.close'\)/)
+  // × 只隐藏本次（等价 setHidden(true)），「不再提示」仍是按钮
+  assert.match(source, /className: 'dsh-au-close'[\s\S]{0,80}onClick: \(\) => setHidden\(true\)/)
+  assert.match(source, /onClick: dismissForever/)
   // 浮层里的动作照官方 Button 的 sm + outline（28px / 0 10px / radius-sm / 12-18 / 0.5px border-l3）
   assert.match(source, /\.dsh-au-btn\{[^}]*height:28px;padding:0 10px;/)
   assert.match(source, /\.dsh-au-btn\{[^}]*font:var\(--dsw-font-xxs-12/)

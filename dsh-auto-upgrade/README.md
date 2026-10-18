@@ -86,15 +86,25 @@ node --test test/official-compat.test.mjs        # 需要本机装有 @deepseek-
 | 正文 / 强调 / 描述 | `--dsw-font-s-14` / `--dsw-font-s-strong-14` / `--dsw-font-xxs-12` | 14/22 · **500** 14/22 · 12/18 |
 | 设置行 | 官方 `Pt1bsG_row` | `space-between` + `gap:24px` + `padding:16px 0` + `0.5px solid var(--dsw-alias-border-l2)` |
 | 设置页按钮 / 下拉 | 官方模块平台按钮规则 | `height:36px` + `padding:0 14px` + `--dsw-radius-md` + `--dsw-alias-bg-module-platform`，**无边框** |
-| **浮层卡片** | 官方浮层 `MenuSurface` + `Menu.list` | `--dsw-menu-surface-fill` + `blur(40px) saturate(150%)` + `--dsw-elevation-prominent`（描边走 `border-l1`）+ `--dsw-radius-lg` + `padding:12px 16px` |
+| **浮层卡片** | 官方账号通知卡 `AccountNotice.module.css`（`ui-settings-account`） | `280px` 宽 + `--dsw-specific-input-major` 白卡 + `--dsw-elevation-panel` + `16px` 圆角 + `padding:20px` + `14/22` 正文 + 标题 `500/20`（图标 `14×14`）+ 右上 `18×18` 关闭（`--dsw-alias-label-caption`，`top/right:6px`）+ `transform .25s ease-out`；**没有** `backdrop-filter` |
+| **浮层定位** | 官方 `AccountNoticeStack` | 锚侧栏底部账号按钮：`left=max(8,min(anchor.left,innerWidth-288))`、`bottom=max(8,innerHeight-anchor.top+4)`；量到之前 `visibility:hidden`；锚点 `button[aria-haspopup="menu"][data-signed-out]` → `button[aria-label="账号菜单"]` → `left:8px;bottom:16px` |
+| **浮层按钮区** | 正文下方的动作行 | `margin-top:12px` + `gap:8px` + `flex-wrap`；按钮仍是 28px 的 `.dsh-au-btn`（见下一行） |
 | **浮层动作按钮** | primitives `Button.module.css` 的 `sm` + `outline` | `28px` + `padding:0 10px` + `--dsw-radius-sm` + `0.5px solid var(--dsw-alias-border-l3)`；主操作同尺寸 `primary` 实心 |
 | 文本输入 | primitives `Input.module.css` | `32px` + `0.5px solid var(--dsw-alias-border-l4)` + `--dsw-alias-bg-layer-1` |
 | 开关 | primitives `Switch.module.css` | `36x20` 胶囊 + `aria-checked` 驱动 + `--dsw-alias-brand-primary` |
 | 颜色 | 语义 token | `label-primary/secondary/tertiary`、`state-warn-label`、`state-error-primary`、`state-success-primary` |
 
 `test/client-register.test.mjs` 里有守卫：根规则必须用 `--dsw-font-s-14`、设置页按钮必须是 36px/`0 14px`、
-浮层卡片必须用 `menu-surface-fill` + `backdrop-filter` + `elevation-prominent`、浮层按钮必须是 28px 的 outline、
+浮层必须逐字照抄官方 `AccountNotice`（`280px` / `--dsw-specific-input-major` / `--dsw-elevation-panel` /
+`16px` 圆角 / `20px` 内边距 / `14-22` 正文 / `transform .25s` / 右上 `18×18` 关闭 / **不许出现 `backdrop-filter`** /
+不许自创 `@keyframes`）、官方标题那套必须限定在 `.dsh-au-card .dsh-au-title`（设置页复用了 `.dsh-au-title`，
+不许被带偏）、`data-front` + `role="status"` + 关闭按钮 `aria-label` 齐全、浮层按钮必须是 28px 的 outline、
 开关必须是 36x20、用到的每个 `var(--dsw-*)` 必须在主题里真实存在（或自带 fallback）。
+
+视觉验收（本机）在 `test/visual/`：`probe-gui.mjs` 从**正在运行的 GUI** 抓 token / 锚点 rect / 官方 `AccountNotice`
+已注入的 CSS 原文；`render-cards.mjs` 用真 React + worktree 里的真组件渲染浮层，并把**按官方 CSS/DOM 逐字注入的
+复刻**并排摆出来，量两边 computed style + 出截图（`docs/screenshots/overlay*.png`）。官方卡本机**不可真实触发**
+（`notices` 由服务端下发，`[data-front]` 为 0），复刻会明确标注。
 
 ## 状态目录
 
