@@ -3,6 +3,27 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] — 2026-10-18
+
+### 修复
+
+- **移除已不存在的客户端注入声明。** dsh 升到 `0.2.1-rc.2` 后，安装树里 `@deepseek-ai/dsh-client-ui-slots`
+  已被拆掉；`dsh.client.inject` 改为对齐 0.2.1 的最小且正确列表：
+  `@deepseek-ai/dsh-client-ui-renderer`（提供 `slots` 服务）、`@deepseek-ai/dsh-client-ui-layout`
+  （声明 `shell.overlay`）、`@deepseek-ai/dsh-client-ui-settings-general`（声明 `settings.section`）、
+  `@deepseek-ai/dsh-client-locale`（`locale` 注册）。这是**加载器声明**，不是服务注入
+  （服务注入仍是客户端里的 `exports.inject = ['slots']`）；写错会让守卫测试红、也会让加载顺序失去保障。
+- **修掉 `test/official-compat.test.mjs` 的连锁抛错。** 官方 `evaluatePluginCompatibility` 返回里的
+  「未满足项」字段在 0.2.1 从 `peers` 改名为 `requirements`，旧用例读 `bare.peers` 时
+  `Object.keys(undefined)` 直接抛 `TypeError`，把真因糊掉。现在取不到字段会给出「官方 API 契约已变、
+  前置条件缺失」的清晰失败，**没有放宽任何断言**（仍要求未满足项非空）。
+
+### 说明
+
+- 功能未受影响：0.2.1-rc.2 上设置页「自动升级」section 正常渲染、浮层可正常挂载、页面无 JS 错误。
+- 已知遗留（不在本次范围）：`lib/host/compat.js` 仍读 `issue.peers ?? {}`，在 0.2.1 上该字段已改名
+  `requirements`，所以「不兼容插件」明细里的 peers 列表恒为空（不崩溃，仅信息缺失）。
+
 ## [0.2.0] — 2026-10-18
 
 ### 新增
@@ -38,10 +59,9 @@
 
 - `POST /plugins/action`（写精确版本豁免 / 禁用插件）仍返回 `501`——写豁免按仓库约定必须先拿到用户对具体版本组合的明确同意。
 - Windows 不支持（helper 是 POSIX sh 脚本）。
-- `test/official-compat.test.mjs` 有 2 条用例在本机 dsh 升到 `0.2.1-rc.2` 后失败：它硬依赖「运行时那份 dsh
-  的客户端包名」，而 `@deepseek-ai/dsh-client-ui-slots` 已不在安装树里。与本次改动无关、在未改动的 main 上同样失败，
-  本次未处理、也未放宽断言。
 - 设置页升级入口的**真机点击**尚未验收（本轮只到「真渲染 + 假 fetch」的单测）。
+- `lib/host/compat.js` 仍读 `issue.peers ?? {}`（0.2.1 已改名 `requirements`），「不兼容插件」明细里的
+  peers 列表因此恒为空；不崩溃、仅信息缺失，留待后续处理。
 
 ## [0.1.1] — 2026-10-17
 

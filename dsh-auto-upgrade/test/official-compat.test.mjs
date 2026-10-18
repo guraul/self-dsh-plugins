@@ -69,7 +69,15 @@ test('真实 API：peer 范围不含运行时 → 判不兼容；写精确版本
   const bare = official.evaluatePluginCompatibility(manifest, {}, '0.2.0')
   assert.notEqual(bare, undefined, 'expected the declared peer range to reject dsh 0.2.0')
   assert.equal(bare.exempted, false)
-  assert.ok(Object.keys(bare.peers).length > 0)
+  // 官方把「未满足项」字段从 `peers` 改名成 `requirements`（0.2.1 起）。字段取不到就说明官方契约又漂了：
+  // 这里必须当场给出「前置条件缺失」的清晰失败，而不是让 Object.keys(undefined) 抛 TypeError 把真因糊掉。
+  const unmet = bare.requirements ?? bare.peers
+  assert.notEqual(
+    unmet,
+    undefined,
+    'evaluatePluginCompatibility 既没有 `requirements` 也没有旧字段 `peers`：官方 API 契约已变，前置条件缺失',
+  )
+  assert.ok(Object.keys(unmet).length > 0)
 
   const exempted = official.evaluatePluginCompatibility(
     manifest,
