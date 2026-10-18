@@ -94,3 +94,15 @@ pnpm run check                                # node --check
   （`lib/host/official.js` 经 `ctx.profileContext.installAnchor` 定位），不走 profile 的 `node_modules`。
 - **交接必须脱离进程**：`npm install -g` 覆盖的正是宿主在跑的那棵树，而「停服」就是杀掉宿主自己；
   宿主只做「门禁 → 备份 → 落 payload → fork detached helper → `exit 0`」，其余在 helper 里跑。
+
+## 客户端注入声明（`dsh.client.inject`）
+
+`package.json` 的 `dsh.client.inject` 是**加载器声明**（告诉 loader 先把哪几个客户端包注册/激活），
+不是服务注入——真正的服务注入是客户端里的 `exports.inject = ['slots']`（cordis 服务名）。别把两者混为一谈。
+
+- 0.2.1 起 `@deepseek-ai/dsh-client-ui-slots` **已不存在**（旧的 slots 包被拆开）。当前声明对齐 0.2.1：
+  `dsh-client-ui-renderer`（提供 `slots` 服务）、`dsh-client-ui-layout`（声明 `shell.overlay`）、
+  `dsh-client-ui-settings-general`（声明 `settings.section`）、`dsh-client-locale`（locale 注册）。
+- `test/official-compat.test.mjs` 有守卫：**声明的每个包都必须在「正在运行的那份 dsh」安装树里真实存在**。
+  改这里就必须同步改声明，否则测试会红（这正是它抓到本次漂移的方式）。
+- 判定依据与官方对照表见 `CHANGELOG.md` 的 `[0.2.1]`。
