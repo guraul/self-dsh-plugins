@@ -5,6 +5,10 @@
 升级入口有**两处**：右下角浮层，以及设置页「自动升级」里的常驻入口（浮层被「不再提示」关掉也照样能发起）；
 两处共用同一份计划卡与提交流程，两条门禁行为一致。
 
+浮层上只有三个动作：**升级**（主操作）、**不再提示**、以及右上角的 **`×`**。`×` 就是「本次隐藏」，
+与「稍后」完全等价，所以**不再单列「稍后」**；手动重检的正式入口是设置页的「**立即检查**」，
+因此浮层在**所有状态（含错误态）**都不提供「重新检查」，避免两处入口漂移。
+
 设计权威文档：[`docs/design/dsh-auto-upgrade-T1.md`](./docs/design/dsh-auto-upgrade-T1.md)（接口清单 + 数据流图 + 拍板结论）。
 验收报告（含逐条证据与「没验证什么」）：[`docs/acceptance/dsh-auto-upgrade-acceptance.md`](./docs/acceptance/dsh-auto-upgrade-acceptance.md)。
 变更记录：[`CHANGELOG.md`](./CHANGELOG.md)（含待办）。面向 agent 的工作约定：[`../docs/plugins/dsh-auto-upgrade.md`](../docs/plugins/dsh-auto-upgrade.md)。
@@ -69,7 +73,7 @@ package.json）推出**宿主此刻真正执行的** `dsh-app-boot` 绝对路径
 
 ```sh
 node --check lib/index.js lib/client.js          # 语法
-node --test "test/*.test.mjs"                    # 56 用例，含真 http 服务与假 registry
+node --test "test/*.test.mjs"                    # 58 用例，含真 http 服务与假 registry
 node --test test/official-compat.test.mjs        # 需要本机装有 @deepseek-ai/dsh
 ```
 

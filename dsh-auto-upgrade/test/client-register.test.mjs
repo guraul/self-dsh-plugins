@@ -139,6 +139,9 @@ test('样式继承 dsh 字体，且只用主题里真实存在的 token', async 
   // × 只隐藏本次（等价 setHidden(true)），「不再提示」仍是按钮
   assert.match(source, /className: 'dsh-au-close'[\s\S]{0,80}onClick: \(\) => setHidden\(true\)/)
   assert.match(source, /onClick: dismissForever/)
+  // 浮层不再有「重新检查」/「稍后」：× 即本次隐藏，手动重检的正式入口在设置页
+  assert.doesNotMatch(source, /overlay\.recheck/, '字典里不该再留 overlay.recheck')
+  assert.doesNotMatch(source, /overlay\.later/, '字典里不该再留 overlay.later')
   // 浮层里的动作照官方 Button 的 sm + outline（28px / 0 10px / radius-sm / 12-18 / 0.5px border-l3）
   assert.match(source, /\.dsh-au-btn\{[^}]*height:28px;padding:0 10px;/)
   assert.match(source, /\.dsh-au-btn\{[^}]*font:var\(--dsw-font-xxs-12/)

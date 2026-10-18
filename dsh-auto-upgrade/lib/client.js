@@ -51,9 +51,7 @@ window.__ModuleLoader__.load({
       'overlay.unknown': '无法确认是否有更新（{error}）',
       'overlay.cached': '今天已检查过',
       'overlay.upgrade': '升级',
-      'overlay.recheck': '重新检查',
       'overlay.dismiss': '不再提示',
-      'overlay.later': '稍后',
       'overlay.close': '关闭',
       'overlay.preflightTitle': '升级落点',
       'overlay.releaseNotes': '更新说明',
@@ -114,9 +112,7 @@ window.__ModuleLoader__.load({
       'overlay.unknown': 'Cannot confirm updates ({error})',
       'overlay.cached': 'already checked today',
       'overlay.upgrade': 'Upgrade',
-      'overlay.recheck': 'Re-check',
       'overlay.dismiss': 'Do not show again',
-      'overlay.later': 'Later',
       'overlay.close': 'Close',
       'overlay.preflightTitle': 'Upgrade plan',
       'overlay.releaseNotes': 'Release notes',
@@ -841,9 +837,7 @@ window.__ModuleLoader__.load({
             onClick: () => flow.openPlan(target),
           }, t('overlay.upgrade')))
         }
-        actions.push(h('button', { key: 're', className: 'dsh-au-btn', disabled: busy, onClick: () => runCheck(true) }, t('overlay.recheck')))
         actions.push(h('button', { key: 'di', className: 'dsh-au-btn', onClick: dismissForever }, t('overlay.dismiss')))
-        actions.push(h('button', { key: 'la', className: 'dsh-au-btn', onClick: () => setHidden(true) }, t('overlay.later')))
       }
 
       return h('div', {

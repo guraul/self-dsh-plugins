@@ -34,6 +34,10 @@ Host API/设置页行为都不受影响）。
   `left:8px;bottom:16px`；公式 `left=max(8,min(anchor.left,innerWidth-288))`、
   `bottom=max(8,innerHeight-anchor.top+4)`；算出前 `visibility:hidden`。
 - 关闭按钮：`×` 只隐藏本次（等价 `setHidden(true)`）；「不再提示」仍是正文下方的按钮。
+- 浮层动作只有三个：**升级**（`primary`）/ **不再提示** / 右上角 **`×`**。**没有「稍后」**——`×` 与它等价，
+  重复显示只会让人以为两者不同；**没有「重新检查」**——手动重检的正式入口是设置页的「**立即检查**」，
+  浮层**所有状态（含错误态）**都不给，避免两处入口漂移。`test/client-upgrade-entry.test.mjs` 会渲染浮层
+  并断言动作区**恰好**只剩「升级 + 不再提示」（多一个按钮即红）。
 - 本机浅色主题实测 token：`--dsw-specific-input-major` `#fff`、
   `--dsw-alias-brand-primary-new-colorprimary-new-color` `#4176e6`（名字很怪但真实存在，别改名别回退）、
   `--dsw-alias-label-caption` `#adb2b8`、`--dsw-alias-label-secondary` `#61666b`、

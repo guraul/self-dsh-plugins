@@ -108,6 +108,24 @@ function textOf(node) {
 }
 
 /**
+ * 把元素树里所有满足条件的节点收集起来（够做「有哪些按钮」这类结构断言）。
+ * @param {any} node 元素 / 数组。
+ * @param {(node:any)=>boolean} predicate 命中条件。
+ * @param {any[]} [out] 累积数组。
+ * @returns {any[]} 命中的节点。
+ */
+function collect(node, predicate, out = []) {
+  if (node === null || node === undefined || typeof node !== 'object') return out
+  if (Array.isArray(node)) {
+    node.forEach((child) => collect(child, predicate, out))
+    return out
+  }
+  if (predicate(node)) out.push(node)
+  collect(node.children, predicate, out)
+  return out
+}
+
+/**
  * 装一个假 fetch；路由表按 URL 命中，未命中的一律 `ok:false`（方便暴露漏打的请求）。
  * @param {Record<string, object>} routes URL → JSON。
  * @returns {void}
@@ -225,6 +243,43 @@ test('浮层：降级护栏给出出路并点名建议渠道', async () => {
   assert.match(text, /本机版本高于发布源（0\.2\.1-alpha\.5 > 0\.2\.0-rc\.2）/)
   assert.match(text, /把发布渠道改成 next 就能继续升级/)
   assert.match(text, /切到 next/)
+})
+
+test('浮层：去掉「稍后」与「重新检查」，只剩升级 / 不再提示 + 右上角 ×', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusWith({ date: '2026-10-18', decision: 'update-available', installed: '0.2.0-rc.2', target: '0.2.1-rc.2', channel: 'next', tags: TAGS, incompatible: [] }),
+  })
+  const tree = await react.mount(Overlay, {})
+  const text = textOf(tree)
+  assert.doesNotMatch(text, /重新检查/, '浮层不再提供「重新检查」：手动重检的正式入口是设置页的「立即检查」')
+  assert.doesNotMatch(text, /稍后/, '浮层不再提供「稍后」：右上角 × 就是「本次隐藏」')
+
+  // 结构断言：动作区**恰好**只剩「升级」与「不再提示」两个按钮（多一个都会立刻打脸）。
+  const row = collect(tree, (node) => node.props?.className === 'dsh-au-row')
+  assert.equal(row.length, 1, '浮层动作区应当只有一个')
+  const actionTexts = collect(row[0], (node) => node.type === 'button').map(textOf)
+  assert.deepEqual(actionTexts, ['升级', '不再提示'], '动作区只能是升级 + 不再提示')
+  // × 仍在（它没有文字子节点，只能按类名找），且「本次隐藏」与「不再提示」都还接在原动作上。
+  const close = collect(tree, (node) => node.props?.className === 'dsh-au-close')
+  assert.equal(close.length, 1, '右上角 × 必须还在')
+  assert.equal(close[0].props['aria-label'], '关闭')
+})
+
+test('浮层：错误态也不再有「重新检查」按钮（所有状态一致）', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusWith({ date: '2026-10-18', decision: 'unknown', installed: '0.2.1-rc.2', target: null, channel: 'latest', tags: TAGS, registryError: 'ETIMEDOUT', incompatible: [] }),
+  })
+  const tree = await react.mount(Overlay, {})
+  const text = textOf(tree)
+  assert.match(text, /无法确认是否有更新（ETIMEDOUT）/, '这确实是错误态')
+  assert.doesNotMatch(text, /重新检查/)
+  assert.doesNotMatch(text, /稍后/)
+  // 错误态的动作区同样只剩「不再提示」——多一个「重新检查」都会立刻打脸。
+  const row = collect(tree, (node) => node.props?.className === 'dsh-au-row')
+  assert.equal(row.length, 1, '浮层动作区应当只有一个')
+  assert.deepEqual(collect(row[0], (node) => node.type === 'button').map(textOf), ['不再提示'])
 })
 
 test('suggestChannel：挑 tags 里版本号最高的渠道；全相等 / 缺失 / 不可比一律 undefined', () => {

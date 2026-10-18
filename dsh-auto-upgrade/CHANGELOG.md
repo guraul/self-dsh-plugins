@@ -65,6 +65,11 @@
   避免波及设置页复用的 `.dsh-au-title`）。
 - 视觉验收脚本 `test/visual/`（probe-gui / render-cards）：真 GUI 抓 token 与锚点，真 React 渲染本插件 +
   官方 CSS/DOM 复刻并排量 computed style；截图见 `docs/screenshots/overlay*.png`。
+- **浮层去掉「稍后」与「重新检查」两个按钮。** 右上角 `×` 就是「本次隐藏」（等价 `setHidden(true)`），
+  与「稍后」完全等价，所以不再重复显示「稍后」。手动重检的正式入口是**设置页的「立即检查」**，
+  因此浮层里**所有状态（含错误态）**都不再提供「重新检查」按钮——避免两处入口漂移。
+  随之删除不再被引用的字典键 `overlay.later` / `overlay.recheck`（中英两套）。
+  保留：升级（primary）、不再提示、右上角 `×`，以及升级计划卡的「确认升级 / 取消」。
 
 ### 待办（尚未做，不是"已完成"）
 
