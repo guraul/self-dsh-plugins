@@ -27,7 +27,7 @@
 | **真机**升级链路（备份 → 停服 → `npm install -g` → 对版 + 冒烟 → `kickstart` 拉起） | ✅ 2026-10-17 真机成功两次（见验收报告 §3.1） |
 | 任务进度流（阶段 + 日志尾轮询）、页面重连 watchdog | ✅ |
 | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页 | ✅ |
-| 客户端注入声明 `dsh.client.inject` 对齐 DSH 0.2.1（旧 `@deepseek-ai/dsh-client-ui-slots` 已不存在） | ✅ 有守卫测试（声明包必须真实存在） |
+| 客户端注入声明 `dsh.client.inject` 对齐 DSH 0.2.1（旧 `@deepseek-ai/dsh-client-ui-slots` 已不存在） | ✅ 有守卫测试（声明包必须真实存在）；改声明需重启 dsh web 才生效，重启后要确认浮层/设置页仍挂载 |
 | **设置页常驻升级入口**（浮层被「不再提示」关掉也有地方升级；与浮层同一份计划卡/流程） | ✅ |
 | **降级护栏出路**（`downgrade-guard` 时点名建议渠道 + 「切到 `<渠道>`」按钮） | ✅ |
 | `POST /plugins/action`（写豁免/禁用插件） | ⛔ 未接线，如实返回 `501`（写豁免按仓库约定必须先拿到用户对具体版本组合的同意） |
