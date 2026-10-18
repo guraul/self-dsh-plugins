@@ -64,3 +64,4 @@ GitHub Issue（任务入口）
 | 日期 | 变更 | 说明 |
 |------|------|------|
 | 2026-10-17 | 建档 + 阶段 0 脚手架落地 | 照抄并适配 agent-mobile pipeline：7 个脚本 + CI + 手册 + 台账；决策 D1–D6；仅脚手架，未改任何插件代码 |
+| 2026-10-18 | 修 `merge-pr.sh` CI 门禁误报（issue #5） | 去掉 `gh pr checks --fail-fast`（本机 gh 2.42.1 不带 `--watch` 时会报参数非法并 exit 1，被误判成"有未通过的 checks"）；改为取原文 + 退出码，**以输出文本判定为主**：`fail`/`pending`/`cancel` 拒绝并打印阻塞原文，`pass`/`skipping` 放行；无法判定时不静默放行。新增 `--check-only`（演练）与 `--checks-file=<文件>`（自测注入 checks 原文）两个开关 |
