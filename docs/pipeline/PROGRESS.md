@@ -65,3 +65,4 @@ GitHub Issue（任务入口）
 |------|------|------|
 | 2026-10-17 | 建档 + 阶段 0 脚手架落地 | 照抄并适配 agent-mobile pipeline：7 个脚本 + CI + 手册 + 台账；决策 D1–D6；仅脚手架，未改任何插件代码 |
 | 2026-10-18 | 修 `merge-pr.sh` CI 门禁误报（issue #5） | 去掉 `gh pr checks --fail-fast`（本机 gh 2.42.1 不带 `--watch` 时会报参数非法并 exit 1，被误判成"有未通过的 checks"）；改为取原文 + 退出码，**以输出文本判定为主**：`fail`/`pending`/`cancel` 拒绝并打印阻塞原文，`pass`/`skipping` 放行；无法判定时不静默放行。新增 `--check-only`（演练）与 `--checks-file=<文件>`（自测注入 checks 原文）两个开关 |
+| 2026-10-18 | 修 `merge-pr.sh` 收尾快进 main 的 `FETCH_HEAD` 竞态（issue #22） | 收尾不再用 `git pull --ff-only`（它读 `.git/FETCH_HEAD`；本机 git 2.37.1 的 `pull.c` 在 FETCH_HEAD 含 >1 个 for-merge 条目时 `die`「Cannot fast-forward to multiple branches.」，与真分叉无关，却被报成"有分叉"，易诱使误用 `--force`/`reset`）；改为 `git fetch --prune origin main` + `git merge --ff-only origin/main`（显式命名 merge head，仍绝不做非快进合并）。失败时区分「真分叉」（提示不要 force）与「临时状态」（给可操作一步），并对后者做**一次**「先验证无分叉再重试」的自动重试 |

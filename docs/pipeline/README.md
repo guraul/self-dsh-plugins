@@ -76,7 +76,7 @@ scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎
 ```
 | 项 | 说明 |
 |---|---|
-| 行为 | 定位 PR → CI checks 未过则拒绝 → `gh pr merge --squash` → 删远端分支 → 删本地分支（`-D`）→ 移除对应 worktree → `worktree prune` → 主工作区 `pull --ff-only` 快进 |
+| 行为 | 定位 PR → CI checks 未过则拒绝 → `gh pr merge --squash` → 删远端分支 → 删本地分支（`-D`）→ 移除对应 worktree → `worktree prune` → 主工作区快进（`ff_main()`：`git fetch --prune origin main` + `git merge --ff-only origin/main`，**显式命名 merge head** 以绕开 `FETCH_HEAD` 竞态，仍绝不做非快进合并；失败时**先确认无分叉才自动重试一次**，真分叉则拒绝并提示不要用 `--force`） |
 | 幂等 | PR 已是 `MERGED` → 跳过合并，只清理现场并快进 main |
 | 退出码 | 0 成功；1 找不到 main 工作区 / 找不到 PR / 状态非 OPEN·MERGED / CI 未过 / 快进失败 |
 
