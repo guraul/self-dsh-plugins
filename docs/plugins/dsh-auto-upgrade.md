@@ -147,6 +147,11 @@ pnpm run check                                # node --check
 `package.json` 的 `dsh.client.inject` 是**加载器声明**（告诉 loader 先把哪几个客户端包注册/激活），
 不是服务注入——真正的服务注入是客户端里的 `exports.inject = ['slots']`（cordis 服务名）。别把两者混为一谈。
 
+- **生效时机**：加载器在挂载时**缓存 manifest**，改这个声明**不会**热生效（页面刷新也不行），
+  **必须重启 dsh web**。重启是**会终止当前会话**的操作，用仓库约定的 `.dsh-web/restart-once.sh`
+  （见根 `AGENTS.md`），**不许随手重启**。
+- **重启后必须确认**浮层与设置页仍正常挂载：该声明决定客户端加载顺序，写错会**静默不挂载而不报错**。
+  核对手法：浏览器里 `window.__DSH_BOOT__.entries` 中该插件条目的 `inject` 字段，看是否已用上新声明。
 - 0.2.1 起 `@deepseek-ai/dsh-client-ui-slots` **已不存在**（旧的 slots 包被拆开）。当前声明对齐 0.2.1：
   `dsh-client-ui-renderer`（提供 `slots` 服务）、`dsh-client-ui-layout`（声明 `shell.overlay`）、
   `dsh-client-ui-settings-general`（声明 `settings.section`）、`dsh-client-locale`（locale 注册）。
