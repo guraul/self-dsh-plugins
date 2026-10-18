@@ -1,9 +1,9 @@
 # 验收报告 — dsh-plugin-auto-upgrade 0.1.0
 
-- 时间：2026-10-12（2026-10-16 追加 UI 风格对齐与 pnpm 化，见文末更新记录）
+- 时间：2026-10-12（2026-10-16 / 10-17 / 10-18 多次追加，见文末更新记录）
 - 依据：`../design/dsh-auto-upgrade-T1.md`（T1 设计 + 用户拍板 §10）
-- 代码：`lib/` 2964 行 + `test/` 1040 行
-- 结论：**只读半边 + 变更半边均已实现并逐一验证；真机安装/升级/重启未执行（属于用户授权闸门）**
+- 代码：`lib/` 3487 行 + `test/` 1598 行（2026-10-18 复核）
+- 结论：**只读半边 + 变更半边均已实现并逐一验证；真机升级链路已于 2026-10-17 真实跑通两次（见 §3）**
 
 ---
 
@@ -11,21 +11,25 @@
 
 | 文件 | 行 | 职责 |
 |---|---|---|
-| `lib/index.js` | 678 | 宿主入口：14 条路由、门禁、交接调度 |
-| `lib/client.js` | 783 | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页 + 重连 watchdog |
+| `lib/index.js` | 732 | 宿主入口：14 条路由、门禁、交接调度 |
+| `lib/client.js` | 1084 | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页 + 重连 watchdog |
 | `lib/host/protocol.js` | 94 | 路由表 / 决策枚举 / 错误码 / 常量（纯数据） |
 | `lib/host/loopback.js` | 71 | loopback 信任围栏（socket 地址为准） |
 | `lib/host/http.js` | 103 | JSON 响应、有界 body、方法分发、错误信封 |
 | `lib/host/semver.js` | 91 | SemVer 比较（§11 语义） |
 | `lib/host/toolchain.js` | 218 | 工具链定位 + 体检（移植 `upgrade-dsh.sh` 的 `preflight()`） |
 | `lib/host/registry.js` | 48 | npm registry 只读查询 |
+| `lib/host/notes.js` | 110 | release notes：从 manifest 推 GitHub slug + 取 release + 压纯文本 |
 | `lib/host/official.js` | 42 | 载入**运行时那份** `dsh-app-boot` |
 | `lib/host/compat.js` | 137 | profile 插件清单 + 目标版本兼容性判定 |
 | `lib/host/sessions.js` | 36 | `ctx.agents.list()` 运行中会话门禁 |
 | `lib/host/state.js` | 122 | `state/policy/settings` 原子读写 |
 | `lib/host/tasks.js` | 151 | 任务进度、日志尾、单飞 |
 | `lib/host/backup.js` | 142 | `~/.dsh` 备份 / 恢复 |
-| `lib/host/upgrade.js` | 248 | 安装参数、helper 脚本生成、调度、结果读取 |
+| `lib/host/upgrade.js` | 274 | 安装参数、helper 脚本生成、调度、结果读取 |
+| `lib/host/token-url.js` | 32 | 从日志里抓最后一条 `?token=…`（纯函数） |
+
+（行数为 2026-10-18 复核值；`lib/host/*.js` 合计 1671 行。）
 
 ---
 
@@ -36,10 +40,14 @@
 ```sh
 cd dsh-auto-upgrade
 node --check lib/index.js lib/client.js          # 语法
-node --test "test/*.test.mjs"                    # 35 用例
+node --test "test/*.test.mjs"                    # 56 用例
 ```
 
-最近一次结果：**35 passed / 0 failed**（`node --test`，约 12s）。
+最近一次结果（2026-10-18）：**56 用例 / 54 passed / 2 failed**（`node --test`，约 12s）。
+那 2 条失败**与本次改动无关、也不是回归**：`test/official-compat.test.mjs` 依赖「运行时那份 dsh 的
+客户端包名」，而本机 dsh 已升到 `0.2.1-rc.2`（`@deepseek-ai/dsh-client-ui-slots` 不再出现在安装树里）。
+在**未改动的 main 副本**上复跑同样是这 2 条失败（50 用例 / 48 passed / 2 failed），因此记为
+环境性失败，交由插件兼容性问题单独处理，本次不动它、也不放宽断言。
 
 | # | 声明 | 证据（用例） | 结果 |
 |---|---|---|---|
@@ -75,19 +83,55 @@ node --test "test/*.test.mjs"                    # 35 用例
 
 ## 3. 明确**没有**验证的部分（诚实清单）
 
+> 更新（2026-10-18）：**真机安装 / 停服 / 升级 / 重启交接 / 页面重连这一整链已经真的跑通过**，
+> 而且不止一次——证据见下面的 §3.1。原先记在这里的那几条已随之作废，剩下的才还成立。
+
 | 项 | 为什么没做 | 谁能做 |
 |---|---|---|
-| 真机 `npm install -g @deepseek-ai/dsh@<版本>` | 会替换正在运行的 dsh 安装树，属用户授权闸门 | 用户点头后我陪同执行 |
-| 真机停服 / 重启交接 / 页面重连 | 会断开当前 Web 会话 | 同上 |
-| 插件真的被 profile 挂载（`dsh plugin add` + 重启） | 会改 `~/.dsh/profiles/web` | 同上 |
-| 端到端「检测 → 点升级 → 新版起来」全链 | 依赖上面三条 | 同上 |
 | `POST /plugins/action`（豁免/禁用插件） | 本轮未接线，如实返回 501（写豁免按仓库约定需先拿到用户对具体版本组合的同意） | 下一轮或用户点单 |
-| `GET /notes` 的**真机**调用 | 已实现并有 7 条用例（含真 http 路由 + 假 GitHub）、也对**真 GitHub API** 单独验过；但运行中的宿主进程加载的是旧代码，接线后的真机 HTTP 响应要等下一次宿主重启才能看到 | 下次重启后 curl 一次 |
+| `GET /notes` 的**真机** HTTP 响应复测 | 已实现并有 7 条用例（含真 http 路由 + 假 GitHub）、也对**真 GitHub API** 单独验过；宿主自 2026-10-17 起已重启两次（新代码已随新进程加载），但本次验收**没有**再 curl 一次确认响应体 | 下次重启后 curl 一次 |
 | Windows | helper 是 POSIX sh 脚本 | 未支持，能力位已关闭 |
+| 设置页升级入口的**真机**点击 | 本次只做到「真渲染 + 假 fetch」的单测（`test/client-upgrade-entry.test.mjs`），点下去之后的端到端由控制面在页面上验收 | 控制面 / 用户 |
+
+### 3.1 真机升级证据（2026-10-17，两次）
+
+两次都走完「备份 → 停服 → `npm install -g` → 对版 → profile 冒烟 → `launchctl kickstart -k`」。
+
+**第二次（`0.2.1-alpha.5` → `0.2.1-rc.2`）**——`~/.dsh-auto-upgrade/result.json` 当前内容：
+
+```json
+{"ok":true,"mode":"update","from":"0.2.1-alpha.5","to":"0.2.1-rc.2","failedStep":null,"finishedAt":"2026-10-17T14:00:23Z","backup":"/Users/gubin/.dsh.bak-20261017-215904"}
+```
+
+`~/.dsh-auto-upgrade/restart.log` 关键行：
+
+```
+[2026-10-17 21:59:06] helper start (mode=update current=0.2.1-alpha.5 target=0.2.1-rc.2 pid=57169)
+[2026-10-17 21:59:07] host is gone
+[2026-10-17 21:59:07] port 3080 is free
+[2026-10-17 22:00:22] install finished
+[2026-10-17 22:00:22] dsh --version -> 0.2.1-rc.2 (expected 0.2.1-rc.2)
+[2026-10-17 22:00:23] profile smoke test passed
+[2026-10-17 22:00:23] relaunching through launchd: com.deepseek.dsh-web.self-dsh-plugins
+[2026-10-17 22:00:23] kickstart ok
+[2026-10-17 22:00:23] done
+```
+
+**第一次（`0.2.0-rc.2` → `0.2.1-alpha.5`，备份 `~/.dsh.bak-20261017-173124`）**：
+
+```
+[2026-10-17 17:31:26] helper start (mode=update current=0.2.0-rc.2 target=0.2.1-alpha.5 pid=36949)
+[2026-10-17 17:32:28] dsh --version -> 0.2.1-alpha.5 (expected 0.2.1-alpha.5)
+[2026-10-17 17:32:29] profile smoke test passed
+[2026-10-17 17:32:29] kickstart ok
+[2026-10-17 17:32:29] done
+```
+
+备份目录 `~/.dsh.bak-20261017-173124` 与 `~/.dsh.bak-20261017-215904` 都还在盘上。
 
 ---
 
-## 4. 安装与首次真机验收（**需用户执行/授权**）
+## 4. 安装与真机验收（**属于用户授权闸门**；安装与升级已在 2026-10-17 真机执行成功，见 §3.1）
 
 ```sh
 # 1) 装进 web profile（改 ~/.dsh/profiles/web，属闸门）
@@ -127,6 +171,32 @@ launchctl kickstart -k gui/$(id -u)/com.deepseek.dsh-web.self-dsh-plugins
 ---
 
 ## 6. 更新记录
+
+### 2026-10-18 — 升级入口补进设置页 + 降级护栏给出路（issue #13）
+
+起因：用户反馈「升级功能好像失效了」。实测是**入口不可达**，不是链路坏了——插件当天已经真机升级成功两次
+（§3.1）。两个原因叠加：
+
+1. 装了 alpha/next 线而策略渠道被设回 `latest`（更低）→ 宿主判 `downgrade-guard`，浮层按设计**不给**升级按钮；
+2. 浮层先前被点过「不再提示」（`settings.dismissed === true`）→ 浮层不显示，而设置页**原本没有任何升级入口**。
+
+修法（只加「入口 + 文案 + 出路」，宿主门禁与交接逻辑一行不动）：
+
+- **A. 设置页升级入口**：`hasUpdate`（`update-available` / `update-with-plugin-risk`）时常驻一行
+  「发现新版本 `<target>`（当前 `<installed>`）」+「升级」；点击走与浮层**完全相同**的流程
+  （`GET /preflight` → 内联计划卡 → 确认/取消），会话门禁可强制、插件不兼容门禁不可绕过。
+  浮层是否 `dismissed` / `hidden` **不影响**该入口。
+- **B. 降级护栏给出路**：`downgrade-guard` 时浮层与设置页都显示本机版本、当前渠道最新版与
+  「把发布渠道改成 `<建议渠道>` 就能继续升级」，并给「切到 `<建议渠道>`」按钮（`POST /policy` → `POST /check/run`）。
+  建议渠道 = `tags` 里版本号最高的渠道（`{latest,alpha,next}` → `next`）；全相等/缺失时不给误导性建议。
+  宿主侧 `downgrade-guard` 的判定**未改**。
+- 计划卡渲染 / 降级出路渲染 / 升级流程控制器抽成 `renderPlanPanel` / `renderDowngradeExit` /
+  `createUpgradeFlow` 各一份，浮层与设置页共用（`test/client-upgrade-entry.test.mjs` 用计数守卫防止有人再抄一份）。
+- 新增 6 条用例：设置页有/无更新的入口渲染、设置页与浮层的降级出路文案、`suggestChannel` 真值 +
+  与宿主 `compareVersions` 的语义一致性（防浏览器半边那份比较器漂移）、共用渲染的计数守卫。
+- 浏览器半边没有构建产物，改完刷新页面即生效；**宿主半边没改**，不需要重启。
+
+顺带把本文件里已经过时的说法改掉：§3 的「真机安装/升级/重启未执行」、§1/§2 的行数与用例数。
 
 ### 2026-10-17 — 接线 `GET /notes`（确认卡显示更新说明）
 
