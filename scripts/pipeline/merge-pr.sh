@@ -13,7 +13,7 @@
 #   scripts/pipeline/merge-pr.sh <PR号> --force           # CI 未过/未配置时仍合并（慎用）
 #
 # 行为: 定位 PR → CI checks 未过则拒绝 → gh pr merge --squash
-#       → 删远端分支 → 删本地分支 → 清理对应 worktree → 主工作区 pull --ff-only 快进
+#       → 删远端分支 → 删本地分支 → 清理对应 worktree → 主工作区 fetch + merge --ff-only 快进
 # 幂等: PR 已合并（MERGED）时跳过合并步骤，仅继续清理现场并快进 main
 #
 # 与 agent-mobile 的差异（修掉那边已知的缺陷，见其 AGENTS.md 规定 15 ④ / issue #102）：
@@ -53,6 +53,43 @@ BRANCH=$(gh pr view "${PR_NUM}" --repo "${GH_REPO}" --json headRefName -q .headR
 STATE=$(gh pr view "${PR_NUM}" --repo "${GH_REPO}" --json state -q .state)
 info "PR #${PR_NUM}: ${PR_TITLE} （${BRANCH} ，state=${STATE} ）"
 
+# —— 快进 main ——
+# ⚠️ 不要用 `git pull --ff-only origin main`（issue #22）：它依赖 .git/FETCH_HEAD，
+#    而本机 git 2.37.1 的 builtin/pull.c 在 FETCH_HEAD 含 >1 个 for-merge 条目时
+#    （`sha\t\tbranch ...`，中间字段为空者）且指定 --ff-only 会直接
+#    die("Cannot fast-forward to multiple branches.")。该状态与"本地和远端真的分叉"
+#    无关：`git fetch` 是**开始时截断、结束时追加** FETCH_HEAD，两个重叠的 fetch
+#    （本仓库常有并发会话/子代理同时跑 fetch）交错时就会留下 2 条 for-merge。
+#    实测危害：报错被误读成"main 有分叉"，进而可能误用 --force / reset 破坏主线；
+#    且失败发生在"合并已成功"之后，exit=1 让调用方以为整个合并失败。
+#    故这里改成 fetch + `git merge --ff-only origin/main`：显式命名 merge head，
+#    完全不读 FETCH_HEAD，同时保持"绝不做非快进合并"的语义（必须 --ff-only）。
+# 失败时区分「真分叉」与「临时状态」；前者提示不要 force，后者给可操作的一步，
+# 并做**一次**"先验证无分叉再重试"的自动重试（禁止无验证的盲目重试）。
+ff_main() {
+  local out
+  git -C "${MAIN_WT}" fetch --prune origin main --quiet \
+    || die "fetch origin main 失败，main 未快进（检查网络后重跑本脚本的收尾步骤；脚本幂等）"
+
+  if out=$(git -C "${MAIN_WT}" merge --ff-only origin/main --quiet 2>&1); then
+    return 0
+  fi
+
+  if git -C "${MAIN_WT}" merge-base --is-ancestor main origin/main; then
+    # main 是 origin/main 的祖先 → 没有分叉，只是这次快进没做成（临时状态）
+    info "快进未生效，但已确认 main 是 origin/main 的祖先（无分叉）；疑似临时状态，重试一次"
+    if git -C "${MAIN_WT}" merge --ff-only origin/main --quiet; then
+      ok "重试成功：main 已快进"
+      return 0
+    fi
+    printf '%s\n' "${out}" | sed 's/^/    │ /'
+    die "main 快进重试仍失败（已确认无分叉：main 是 origin/main 的祖先）。这是临时状态，不是分叉 —— 重跑本脚本的收尾步骤即可（脚本幂等：PR 已是 MERGED 时只清理现场并快进 main）"
+  fi
+
+  printf '%s\n' "${out}" | sed 's/^/    │ /'
+  die "main 与 origin/main 确实分叉（merge-base --is-ancestor 不成立），需人工处理：在 ${MAIN_WT} 里看 git log --oneline --graph main...origin/main 后再决定怎么合。⚠️ 不要用 --force / reset --hard 覆盖主线"
+}
+
 # —— 清理现场（无论本次是新合并的还是早就合并过的，都要收拾干净）——
 cleanup() {
   info "清理分支与 worktree"
@@ -73,8 +110,7 @@ cleanup() {
   git -C "${MAIN_WT}" worktree prune 2>/dev/null || true
 
   info "主工作区快进 main: ${MAIN_WT}"
-  git -C "${MAIN_WT}" fetch origin main --quiet || die "fetch 失败，main 未快进（手工处理）"
-  git -C "${MAIN_WT}" pull --ff-only origin main --quiet || die "main 无法 fast-forward（有分叉，手工处理）"
+  ff_main
   git -C "${MAIN_WT}" log --oneline -1 | sed 's/^/  main → /'
 
   info "剩余 worktree（应只剩主工作区）"
