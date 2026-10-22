@@ -1,0 +1,7 @@
+# dsh-plugin-memx 的 bundle patch：插入 memx 插件行。
+# 实现全部留在 memx 仓（src/hosts/dsh/），这里只接线。
+# provider / model / throttleMinutes 留空 = 跟随当前会话、节流取 memx.config.json 缺省值。
+- insert:
+    - id: memx
+      name: dsh-plugin-memx
+      config: {}

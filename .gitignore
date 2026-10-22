@@ -25,6 +25,7 @@
 !/dsh-auto-upgrade/
 !/dsh-external-discuss/
 !/dsh-im-bridge-workspaces/
+!/dsh-plugin-memx/
 !/dsh-plugin-product-subagents/
 !/dsh-plugin-restart/
 !/dsh-prompt-optimizer/
