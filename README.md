@@ -11,6 +11,7 @@
 | [`dsh-external-discuss/`](./dsh-external-discuss) | `dsh-plugin-external-discuss` | 把 DSH 会话一键送到外部模型（清言网页版）继续讨论 | 可用（需配套 Chrome 扩展；仅清言接通） |
 | [`dsh-im-bridge-workspaces/`](./dsh-im-bridge-workspaces) | `@mhfire/dsh-im-bridge` | 企业微信智能机器人 ⇄ DSH Agent 桥接，本地 fork 增加多工作区 `/ws` 切换 | 可用（本机已接入 profile） |
 | [`dsh-plugin-product-subagents/`](./dsh-plugin-product-subagents) | `dsh-plugin-product-subagents` | 把 Claude Code / Codex / 任意 ACP CLI 变成基于角色的 subagent（`0.2.0` 线可续接；`0.2.1+` 外部子代理为一次性） | 可用（DSH `0.2.0-rc.2` / `0.2.1-alpha.5` / `0.2.1-rc.1` 均通过一次性 profile 验收） |
+| [`dsh-prompt-optimizer/`](./dsh-prompt-optimizer) | `@y1x1n/dsh-prompt-optimizer` | 发送栏纯图标按钮：一键优化提示词，完成后直接写回输入框（fork：线性图标 / 去文案 / 内联 loading，无弹出面板） | 可用（`0.6.1-fork.1`，门禁全绿；真机 GUI 手点未做） |
 
 ---
 
