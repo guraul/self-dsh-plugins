@@ -1,0 +1,24 @@
+{
+  "name": "dsh-plugin-memx",
+  "version": "0.1.0",
+  "description": "memx 薄壳包：把 memx 的 DSH 宿主适配器（memx 仓 src/hosts/dsh/index.ts）挂进 DSH profile。零逻辑复制，只做接线与转发。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
