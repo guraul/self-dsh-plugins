@@ -27,6 +27,7 @@
 !/dsh-im-bridge-workspaces/
 !/dsh-plugin-product-subagents/
 !/dsh-plugin-restart/
+!/dsh-prompt-optimizer/
 
 # ============================================================
 # 以下内容一律不入库

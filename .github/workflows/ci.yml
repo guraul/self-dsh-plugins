@@ -4,8 +4,8 @@
 #
 # 包管理：本仓库统一用 pnpm（全局约定禁用 npm / npx，npx 由 pnpm dlx 代替）。
 #
-# 另注：本仓库 .gitignore 是白名单，现已放行全部 4 个插件目录 + docs/ + scripts/ + .github/，
-# 因此 CI 检出后 4 个插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
+# 另注：本仓库 .gitignore 是白名单，现已放行全部 5 个插件目录 + docs/ + scripts/ + .github/，
+# 因此 CI 检出后 5 个插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
 # （例如新插件目录还没加进白名单），命中它是预期行为，不是失败。
 #
 # dsh-im-bridge-workspaces 是例外：干净 checkout 里装不上依赖（issue #3），
@@ -54,6 +54,11 @@ jobs:
             install: true
             entry: |
               lib/index.js
+          - dir: dsh-prompt-optimizer
+            install: true
+            entry: |
+              lib/index.js
+              lib/client.js
     steps:
       - uses: actions/checkout@v4
 

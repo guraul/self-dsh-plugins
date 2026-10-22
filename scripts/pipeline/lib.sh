@@ -16,9 +16,9 @@ GH_REPO="guraul/self-dsh-plugins"
 # 第一层 git fetch 失败后的重试次数（macOS 自带没有 timeout，用重试代替）
 FETCH_RETRY=2
 
-# 四个插件：目录名 + 包名（SUMMARY 与 install-check 用；注意二者不一致是常态）
-PLUGIN_DIRS="dsh-auto-upgrade dsh-external-discuss dsh-im-bridge-workspaces dsh-plugin-product-subagents"
-PLUGIN_NAMES="dsh-plugin-auto-upgrade dsh-plugin-external-discuss @mhfire/dsh-im-bridge dsh-plugin-product-subagents"
+# 五个插件：目录名 + 包名（SUMMARY 与 install-check 用；注意二者不一致是常态）
+PLUGIN_DIRS="dsh-auto-upgrade dsh-external-discuss dsh-im-bridge-workspaces dsh-plugin-product-subagents dsh-prompt-optimizer"
+PLUGIN_NAMES="dsh-plugin-auto-upgrade dsh-plugin-external-discuss @mhfire/dsh-im-bridge dsh-plugin-product-subagents @y1x1n/dsh-prompt-optimizer"
 
 die()  { echo "✗ $*" >&2; exit 1; }
 info() { echo "→ $*"; }
