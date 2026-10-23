@@ -64,38 +64,39 @@ docs/COMPATIBILITY.md # DSH 版本矩阵，以及每个 verdict 是怎么产生�
 
 ## 工具：`product_wait`（等价：等待一个后台子代理结算）
 
-`product_wait` 阻塞到子代理结算，返回最终回答、stop reason 和最近 trace。它有**两条独立唤醒信号**，
-任何一条命中即返回（`lib/tools/product-wait.js`）：
+`product_wait` 阻塞到子代理结算，返回最终回答、stop reason 和最近 trace。
 
-| 信号 | 来源 | 说明 |
-|---|---|---|
-| 事件 | `ctx.on('subagent/end')` | 父级 scoped、**一次性广播**，没有 replay |
-| 日志 | `sessions.get(childId)` 经 `foldProgress` 折叠 | 每 2s 兜底轮询；判据是「有 `turn/end`（`foldProgress.endedAt`）**且最后一轮未重新打开**（`turnOpen === false`）**且**能折出 `lastAnswer`」 |
+**唯一的权威唤醒信号是 activation 的结算 promise**（`lib/tools/product-wait.js`）：
+`product_delegate` 调 `startActivation()` 时，返回对象里的 `result` 就是「这个 activation 何时结束」的
+promise（`dsh-subagent/lib/index.js:2075`）；它被存进 binding（`record.settle`），`product_wait`
+直接 `Promise.race([settle, timeout, abort])`。
 
-**「最后一轮是否仍打开」是必需条件**：被 `send_message` 续接过的 child，尾部同时留着上一轮的
-`turn/end` 与新一轮的 `turn/start`；只看 `endedAt` 会把**上一轮的旧答案**当成这一轮的结果立刻返回
-（静默给错答案，比超时更糟）。`foldProgress.turnOpen` 因此必须为 `false`。
-
-**订阅先于快照**：先建立 `subagent/end` 订阅，**之后**才 `listChildren()` 取 activity。0.4.3 及以前顺序相反，
-子代理在「快照完成 → 订阅建立」的空窗期结算时事件被丢弃，等待只剩超时（issue #38）。
-快照为 `inactive` 时立即返回 `ready`。
+> ⚠️ **别再用事件或会话日志**（0.4.4 试过，生产不可达，见 issue #40）：
+> - `ctx.on('subagent/end')` 是**父级 scoped 的一次性广播**，插件在自身 ctx 上注册的监听
+>   对真实 child 从未触发；
+> - `sessions.get(id)` **只返回 live 会话**（settle 后已被移出 store），且真实 `Session` 对象
+>   **没有 `events` 属性**，`foldProgress(session)` 因此永远返回 `null`。
+>
+> 0.4.4 的 `detectedBy: 'session-log'` 分支属于死代码，已在 0.4.5 删除。
+> `subagent/end` 监听仅保留为**无 settle 句柄时的兜底**（例如 child 由上一个进程创建）。
 
 `detectedBy` 声明是哪条信号把调用唤醒的：
 
 | `detectedBy` | 含义 |
 |---|---|
-| `event` | 收到 `subagent/end`（最快路径） |
-| `session-log` | 事件错过或从未到达，靠日志兜底判完成 |
+| `activation` | **正常路径**：child 的 activation 结算，答案取自其 `output` |
 | `already-settled` | 入口快照里 child 已 `inactive`，立即返回 `ready` |
-| `timeout` | 两条信号都没命中；此时结果带 `progress` |
+| `event` | 无 settle 句柄时收到 `subagent/end`（兜底，可能不触发） |
+| `timeout` | 以上都没命中；结果带 `progress`，其中 `waitingOn` 说明当时在等哪条信号 |
+| `aborted` | `exec.signal` 已中止 |
+| `unknown` | 该 child 不在当前 parent 下，且没有 settle 句柄 |
 
-- 默认超时 **120000 ms（120s）**，上限 `600000`，可经 `timeout_ms` 覆盖。
-- 超时**不再谎报**：超时点上若日志已能判完成，返回 `status:'completed'` + `detectedBy:'session-log'`；
-  只有真的一无所有才 `status:'timeout'`，并附 `progress`（`lastActivityAt` / `receivedChars` / `lastTask`）。
-- `exec.signal` 中止时返回 `status:'aborted'`（不带 `detectedBy`）。
-- **`answer` 不截断**：日志路径用 `lastAnswerFull()` 取完整文本；`foldProgress.lastAnswer` 仍是
-  300 字符的**展示用**摘要（`subagent_progress` 的语义不变），两者不要混用。只有「最后一轮已关闭
-  或 `ready`」时才把折叠答案当 `answer` 返回，进行中的轮次不会回吐上一轮的答案。
+- 默认超时 **300000 ms（300s）**，上限 `600000`，可经 `timeout_ms` 覆盖。有了结算 promise，
+  任务一结束就返回，超时只是安全网——不要把默认值调小，否则会掐断正常的长任务。
+- activation **reject** 时返回 `status:'failed'` + `detectedBy:'activation'` + `failure`，
+  **不会**把任何内容当作 `answer` 返回。
+- `answer` 取自 activation 结算值的 `output`（文本块拼接）；`stopReason` 同源。
+  `foldProgress.lastAnswer` 仍是 300 字符的**展示用**摘要（`subagent_progress` 的语义），两者不要混用。
 - `finish` 会 `clearTimeout` + `clearInterval` + 取消 `subagent/end` 订阅与 abort 监听；轮询 interval
   额外 `unref()`，不会拖住进程。结果仍经 `stripUndefined()`，保持严格 lossless JSON。
 

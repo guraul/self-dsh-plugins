@@ -2,6 +2,46 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.5] — 2026-10-23
+
+`product_wait` now waits on the child activation's own settlement promise,
+replacing 0.4.4's event-and-session-log scheme whose fallback was unreachable in
+production.
+
+### Fixed
+- **0.4.4's two wake-up signals both never fired for a real child** (issue #40).
+  Measured on DSH 0.2.1-rc.2 with a child that answered in 24 s: `product_wait`
+  still returned `{"status":"timeout"}` after the full window.
+  - `ctx.on('subagent/end')` is a parent-scoped, one-shot emit; a listener on the
+    plugin's own context never observed it.
+  - The session-log fallback could not work at all: `sessions.get(id)` serves
+    only **live** sessions (a settled child has been removed from the store),
+    and the real `Session` object exposes no `events` property, so
+    `foldProgress(session)` returned `null` on its first line — always.
+- **Primary signal**: `startActivation()` resolves to `{ childId, result, … }`
+  and `result` settles exactly when the activation ends
+  (`dsh-subagent/lib/index.js:2075`). `product_delegate` now stores that promise
+  on the binding (`record.settle`) and `product_wait` races it against the
+  timeout and the abort signal — no events, no session reads.
+- **A rejected activation reports failure** (`status: 'failed'`,
+  `detectedBy: 'activation'`, `failure: <message>`) instead of surfacing an
+  empty answer.
+- The `subagent/end` listener is kept **only** as a fallback when no settlement
+  handle exists (e.g. a child started by an earlier process).
+
+### Changed
+- `detectedBy` values: `activation` (normal), `already-settled`, `event`
+  (fallback), `timeout`, `aborted`, `unknown`. `session-log` is gone.
+- Default timeout back to **300 s**. With a settlement promise the call returns
+  as soon as the child ends, so the timeout is only a safety net; 0.4.4's 120 s
+  risked cutting off legitimate long product runs.
+- Timeout results report `progress.waitingOn` (`activation` / `event`).
+
+### Notes
+- `foldProgress()` still reads `session.events`, which the runtime does not
+  provide — `subagent_progress` therefore remains empty. Tracked separately as
+  issue #41; this release deliberately does **not** depend on it.
+
 ## [0.4.4] — 2026-10-23
 
 `product_wait` no longer misses a child that already finished and then blocks

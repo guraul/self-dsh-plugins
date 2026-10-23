@@ -217,7 +217,20 @@ export function registerProductDelegate(ctx, deps) {
       }
       state.activeChildren += 1
       const record = bindings.get(start.childId)
-      if (record) record.settings = settings
+      if (record) {
+        record.settings = settings
+        // `startActivation()` resolves to `{ childId, result, dispose }` and
+        // `result` settles exactly when this activation ends. `product_wait`
+        // awaits it — events and session logs are not reachable from here on
+        // this DSH line (issue #40). The extra catch only suppresses an
+        // unhandled rejection when nobody waits; `product_wait` still observes
+        // the real rejection on the original promise.
+        const settle = start && start.result
+        if (settle !== undefined && typeof settle.then === 'function') {
+          settle.catch(() => {})
+          record.settle = settle
+        }
+      }
       return { childId: start.childId, role: role.id, permissionMode: role.permissionMode }
     },
   }))

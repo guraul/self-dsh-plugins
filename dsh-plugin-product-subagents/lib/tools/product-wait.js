@@ -2,28 +2,37 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { stripUndefined } from '../lossless.js'
 import { findChildEntry } from '../children.js'
 
-const DEFAULT_TIMEOUT_MS = 120000
+const DEFAULT_TIMEOUT_MS = 300000
 const MAX_TIMEOUT_MS = 600000
-const FALLBACK_POLL_MS = 2000
 
 /**
- * Wait tool: attach to a continuable child and block until it settles,
- * returning its final answer.
+ * Wait tool: block until the given product child settles, then return its final
+ * answer.
  *
- * Two independent wake-up signals: the parent-scoped `subagent/end` event and
- * the child's own durable session log. The subscription is established BEFORE
- * the activity snapshot, so a settle that lands while `listChildren()` is in
- * flight still wakes this call; the log fallback covers the case where the
- * one-shot event was emitted before this call ever subscribed.
+ * Primary signal is the activation's own settlement promise, captured by
+ * `product_delegate` when it starts the child (`startActivation()` resolves to
+ * `{ childId, result, dispose }`, where `result` settles exactly when the
+ * activation ends). No events, no session reads.
+ *
+ * Why not the alternatives (measured on DSH 0.2.1-rc.2, issue #40):
+ * - `ctx.on('subagent/end')` is a parent-scoped emit; a listener registered on
+ *   the plugin's own context never observed it for a real child.
+ * - The child's session log is unreachable after it settles: `sessions.get()`
+ *   serves only *live* sessions, and `foldProgress()` needs `session.events`,
+ *   which the real Session object does not expose. Both were tried in 0.4.4 and
+ *   never fired in production.
+ *
+ * A bare `subagent/end` listener is kept as a best-effort bonus only when no
+ * settlement handle exists (e.g. a child started by an earlier process).
  */
 export function registerProductWait(ctx, deps) {
-  const { foldProgress, foldTrace, lastAnswerFull } = deps
+  const { foldProgress, foldTrace, bindings } = deps
   ctx.tools.register(defineTool({
     name: 'product_wait',
-    description: 'Block until the given product subagent finishes (or the timeout elapses), then return its final answer, stop reason, and latest trace. Attaches to a background subagent id returned by product_delegate — no polling needed on the caller side. Returns immediately with status "ready" when the child already settled, and "timeout"/"aborted" otherwise. detectedBy reports which signal woke the call: "event", "session-log", "already-settled" or "timeout".',
+    description: 'Block until the given product subagent finishes (or the timeout elapses), then return its final answer, stop reason, and latest trace. Attaches to a background subagent id returned by product_delegate. `detectedBy` reports which signal woke the call: "activation" (the child activation settled — the normal path), "already-settled", "event", "timeout", "aborted" or "unknown".',
     parameters: {
       subagent_id: { type: 'string', required: true, description: 'The continuable child session id returned by product_delegate.' },
-      timeout_ms: { type: 'number', description: 'Max milliseconds to wait (default 120000, capped 600000).' },
+      timeout_ms: { type: 'number', description: 'Max milliseconds to wait (default 300000, capped 600000).' },
     },
     output: {
       schema: { type: 'object', additionalProperties: true },
@@ -34,73 +43,19 @@ export function registerProductWait(ctx, deps) {
       const timeoutMs = Math.min(Math.max(Number(args.timeout_ms) || DEFAULT_TIMEOUT_MS, 1000), MAX_TIMEOUT_MS)
       const parent = exec.agent
       const signal = exec.signal
+
+      if (signal && signal.aborted) {
+        return stripUndefined({ childId, status: 'aborted', detectedBy: 'aborted' })
+      }
+
       const sessionSvc = ctx.get('sessions')
-
-      if (signal && signal.aborted) return stripUndefined({ childId, status: 'aborted' })
-
       const foldNow = () => {
         const session = sessionSvc ? sessionSvc.get(childId) : undefined
         return session ? foldProgress(session) : null
       }
 
-      // The durable half of a settlement: the child's own log shows a closed
-      // LAST turn (a resumed child opens a new turn and keeps the previous
-      // turn/end in its tail) AND an answer. An answer alone is not enough — a
-      // turn that is still streaming tokens has one too.
-      const settledFold = () => {
-        const fold = foldNow()
-        return fold && fold.endedAt !== undefined && fold.turnOpen !== true && fold.lastAnswer ? fold : null
-      }
-
-      let waitDone = false
-      let finishWait = () => {}
-      let startFallback = () => {}
-      let off = () => {}
-      let timer
-      let interval
-      const onAbort = () => finishWait({ status: 'aborted' })
-      const cleanup = () => {
-        off()
-        clearTimeout(timer)
-        if (interval !== undefined) clearInterval(interval)
-        if (signal && typeof signal.removeEventListener === 'function') signal.removeEventListener('abort', onAbort)
-      }
-
-      const waitPromise = new Promise((resolve) => {
-        const finish = (value) => {
-          if (waitDone) return
-          waitDone = true
-          cleanup()
-          resolve(value)
-        }
-        finishWait = finish
-
-        off = ctx.on('subagent/end', (info) => {
-          if (info && info.id === childId) finish({ status: 'completed', detectedBy: 'event', info })
-        })
-
-        const checkLog = () => {
-          if (waitDone) return
-          if (settledFold()) finish({ status: 'completed', detectedBy: 'session-log' })
-        }
-
-        startFallback = () => {
-          if (waitDone) return
-          checkLog()
-          if (waitDone) return
-          interval = setInterval(checkLog, FALLBACK_POLL_MS)
-          if (typeof interval.unref === 'function') interval.unref()
-        }
-
-        timer = setTimeout(() => {
-          if (settledFold()) finish({ status: 'completed', detectedBy: 'session-log' })
-          else finish({ status: 'timeout', detectedBy: 'timeout' })
-        }, timeoutMs)
-
-        if (signal && typeof signal.addEventListener === 'function') {
-          signal.addEventListener('abort', onAbort, { once: true })
-        }
-      })
+      const record = bindings ? bindings.get(childId) : undefined
+      const settle = record && record.settle
 
       let activity = 'unknown'
       try {
@@ -111,48 +66,109 @@ export function registerProductWait(ctx, deps) {
         activity = 'unknown'
       }
 
-      if (!waitDone) {
-        if (activity === 'inactive') {
-          finishWait({ status: 'ready', detectedBy: 'already-settled' })
-        } else if (activity === 'unknown') {
-          finishWait(settledFold()
-            ? { status: 'completed', detectedBy: 'session-log' }
-            : { status: 'unknown', note: 'no such subagent under this parent (or listing unavailable)' })
-        } else {
-          startFallback()
+      const waitForActivation = () => new Promise((resolve) => {
+        let done = false
+        let timer
+        const cleanup = () => {
+          clearTimeout(timer)
+          if (signal && typeof signal.removeEventListener === 'function') {
+            signal.removeEventListener('abort', onAbort)
+          }
         }
-      }
+        const finish = (value) => {
+          if (done) return
+          done = true
+          cleanup()
+          resolve(value)
+        }
+        function onAbort() { finish({ status: 'aborted', detectedBy: 'aborted' }) }
+        timer = setTimeout(() => finish({ status: 'timeout', detectedBy: 'timeout' }), timeoutMs)
+        if (signal && typeof signal.addEventListener === 'function') {
+          signal.addEventListener('abort', onAbort, { once: true })
+        }
+        settle.then(
+          (terminal) => finish({ status: 'completed', detectedBy: 'activation', terminal }),
+          (error) => finish({
+            status: 'failed',
+            detectedBy: 'activation',
+            failure: error instanceof Error ? error.message : String(error),
+          }),
+        )
+      })
 
-      const outcome = await waitPromise
+      const waitForEvent = () => new Promise((resolve) => {
+        let done = false
+        let timer
+        const off = ctx.on('subagent/end', (info) => {
+          if (info && info.id === childId) finish({ status: 'completed', detectedBy: 'event', info })
+        })
+        const cleanup = () => {
+          off()
+          clearTimeout(timer)
+          if (signal && typeof signal.removeEventListener === 'function') {
+            signal.removeEventListener('abort', onAbort)
+          }
+        }
+        const finish = (value) => {
+          if (done) return
+          done = true
+          cleanup()
+          resolve(value)
+        }
+        function onAbort() { finish({ status: 'aborted', detectedBy: 'aborted' }) }
+        timer = setTimeout(() => finish({ status: 'timeout', detectedBy: 'timeout' }), timeoutMs)
+        if (signal && typeof signal.addEventListener === 'function') {
+          signal.addEventListener('abort', onAbort, { once: true })
+        }
+      })
+
+      let outcome
+      if (activity === 'inactive') {
+        outcome = { status: 'ready', detectedBy: 'already-settled' }
+      } else if (settle !== undefined && typeof settle.then === 'function') {
+        outcome = await waitForActivation()
+      } else if (activity === 'unknown') {
+        outcome = {
+          status: 'unknown',
+          detectedBy: 'unknown',
+          note: 'no such subagent under this parent, and no settlement handle is known for it (it may have been started by an earlier process)',
+        }
+      } else {
+        outcome = await waitForEvent()
+      }
 
       const session = sessionSvc ? sessionSvc.get(childId) : undefined
       const fold = session ? foldProgress(session) : null
-      const lastAssistant = outcome.info && outcome.info.lastAssistantMessage
-      // A folded answer only counts when its turn is closed — on a resumed
-      // child the tail still holds the previous turn's answer while a new turn
-      // is streaming, and returning that would be a silent wrong answer.
-      const closed = Boolean(fold && fold.endedAt !== undefined && fold.turnOpen !== true)
-      let answer
-      if (lastAssistant) {
-        answer = lastAssistant.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n')
-      } else if (closed || (outcome.status === 'ready' && fold && fold.turnOpen !== true)) {
-        answer = lastAnswerFull(session)
-      }
+
+      const blocks = outcome.terminal && Array.isArray(outcome.terminal.output)
+        ? outcome.terminal.output
+        : (outcome.info && outcome.info.lastAssistantMessage)
+      const answer = Array.isArray(blocks)
+        ? blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n')
+        : (fold ? fold.lastAnswer : undefined)
+
+      const stopReason = outcome.terminal
+        ? outcome.terminal.stopReason
+        : (outcome.info ? outcome.info.stopReason : undefined)
+
       return stripUndefined({
         childId,
         status: outcome.status,
         detectedBy: outcome.detectedBy,
         note: outcome.note,
-        stopReason: outcome.info ? outcome.info.stopReason : undefined,
+        failure: outcome.failure,
+        stopReason,
         answer: answer || undefined,
-        pinnedProduct: fold ? fold.product : undefined,
-        remoteSessionId: fold ? fold.remoteSessionId : undefined,
+        pinnedProduct: (record && record.product) || (fold ? fold.product : undefined),
+        remoteSessionId: (record && record.remote && (record.remote.sessionId || record.remote.threadId)) || (fold ? fold.remoteSessionId : undefined),
         progress: outcome.status === 'timeout' ? {
+          activity,
+          waitingOn: settle !== undefined ? 'activation' : 'event',
           lastActivityAt: fold && fold.lastActivityAt ? new Date(fold.lastActivityAt).toISOString() : undefined,
           receivedChars: fold && fold.lastAnswer ? fold.lastAnswer.length : 0,
           lastTask: fold ? fold.lastTask : undefined,
         } : undefined,
-        trace: session ? foldTrace(session) : undefined,
+        trace: fold ? foldTrace(session) : undefined,
       })
     },
   }))

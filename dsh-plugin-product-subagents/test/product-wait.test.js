@@ -9,14 +9,22 @@ function child(activity) {
   return { kind: 'child', id: CHILD_ID, activity, mode: 'continuable', label: 'relay', hasChildren: false }
 }
 
-function events(list) {
-  return list.map((e, i) => ({ seq: i + 1, ...e }))
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((onResolve, onReject) => { resolve = onResolve; reject = onReject })
+  return { promise, resolve, reject }
 }
 
-function makeHarness({ children = [child('running')], log, listChildren } = {}) {
+function textBlocks(text) {
+  return [{ type: 'text', text }]
+}
+
+function makeHarness({ children = [child('running')], settle, session, listChildren } = {}) {
   const handlers = new Set()
-  const session = log === undefined ? undefined : { events: events(log) }
   let definition
+  const bindings = new Map()
+  if (settle !== undefined) bindings.set(CHILD_ID, { product: 'codebuddy', remote: {}, settle: settle.promise })
   const ctx = {
     tools: { register: (value) => { definition = value } },
     subagents: { listChildren: listChildren || (async () => children) },
@@ -26,41 +34,63 @@ function makeHarness({ children = [child('running')], log, listChildren } = {}) 
       return () => handlers.delete(handler)
     },
   }
-  registerProductWait(ctx, { foldProgress, foldTrace, lastAnswerFull })
-  return {
-    tool: definition,
-    handlers,
-    emit(info) { for (const handler of [...handlers]) handler(info) },
-  }
+  registerProductWait(ctx, { foldProgress, foldTrace, lastAnswerFull, bindings })
+  return { tool: definition, handlers, emit(info) { for (const handler of [...handlers]) handler(info) } }
 }
 
 function exec(withSignal) {
   return { agent: { session: { id: 'parent-1' } }, signal: withSignal || new AbortController().signal }
 }
 
-function closedLog(now, text) {
-  return [
-    { type: 'turn/start', timestamp: now - 5000, payload: { turn: 1 } },
-    { type: 'assistant/message', timestamp: now - 4000, payload: { message: { content: [{ type: 'text', text }] } } },
-    { type: 'turn/end', timestamp: now - 3000, payload: { turn: 1 } },
-  ]
-}
-
-test('an event emitted before the subscription is recovered from the session log', async () => {
-  const harness = makeHarness({ log: closedLog(Date.now(), 'done early') })
-  harness.emit({ id: CHILD_ID, stopReason: 'end_turn' })
-  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec())
+test('the activation settlement resolves the wait', async () => {
+  const settle = deferred()
+  const harness = makeHarness({ settle })
+  const pending = harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 5000 }, exec())
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  settle.resolve({ output: textBlocks('from the product'), stopReason: 'completed' })
+  const result = await pending
   assert.equal(result.status, 'completed')
-  assert.equal(result.detectedBy, 'session-log')
-  assert.equal(result.answer, 'done early')
-  assert.equal(harness.handlers.size, 0)
+  assert.equal(result.detectedBy, 'activation')
+  assert.equal(result.answer, 'from the product')
+  assert.equal(result.stopReason, 'completed')
+  assert.equal(result.pinnedProduct, 'codebuddy')
 })
 
-test('an event emitted after the subscription resolves the wait', async () => {
-  const harness = makeHarness({ log: [{ type: 'turn/start', timestamp: Date.now(), payload: { turn: 1 } }] })
-  const pending = harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec())
+test('a rejected settlement reports failed, not a fake answer', async () => {
+  const settle = deferred()
+  const harness = makeHarness({ settle })
+  const pending = harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 5000 }, exec())
   await new Promise((resolve) => setTimeout(resolve, 10))
-  harness.emit({ id: CHILD_ID, stopReason: 'end_turn', lastAssistantMessage: [{ type: 'text', text: 'live answer' }] })
+  settle.reject(new Error('product_submit: quota exhausted'))
+  const result = await pending
+  assert.equal(result.status, 'failed')
+  assert.equal(result.detectedBy, 'activation')
+  assert.match(result.failure, /quota exhausted/)
+  assert.equal(result.answer, undefined)
+})
+
+test('a settlement that never resolves times out and says what it waited on', async () => {
+  const settle = deferred()
+  const harness = makeHarness({ settle })
+  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 50 }, exec())
+  assert.equal(result.status, 'timeout')
+  assert.equal(result.detectedBy, 'timeout')
+  assert.equal(result.progress.waitingOn, 'activation')
+  assert.equal(result.progress.activity, 'running')
+})
+
+test('a child that is already inactive resolves immediately', async () => {
+  const harness = makeHarness({ children: [child('inactive')] })
+  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 50 }, exec())
+  assert.equal(result.status, 'ready')
+  assert.equal(result.detectedBy, 'already-settled')
+})
+
+test('without a settlement handle the event still wakes the wait', async () => {
+  const harness = makeHarness({})
+  const pending = harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 5000 }, exec())
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  harness.emit({ id: CHILD_ID, stopReason: 'end_turn', lastAssistantMessage: textBlocks('live answer') })
   const result = await pending
   assert.equal(result.status, 'completed')
   assert.equal(result.detectedBy, 'event')
@@ -69,72 +99,31 @@ test('an event emitted after the subscription resolves the wait', async () => {
   assert.equal(harness.handlers.size, 0)
 })
 
-test('a closed turn in the log wakes the wait when no event ever arrives', async () => {
-  const harness = makeHarness({ log: closedLog(Date.now(), 'from the log') })
-  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec())
-  assert.equal(result.status, 'completed')
-  assert.equal(result.detectedBy, 'session-log')
-  assert.equal(result.answer, 'from the log')
-  assert.equal(harness.handlers.size, 0)
-})
-
-test('a turn that never closes times out and reports progress', async () => {
-  const now = Date.now()
-  const harness = makeHarness({ log: [
-    { type: 'turn/start', timestamp: now - 1000, payload: { turn: 1 } },
-    { type: 'tool/call', timestamp: now - 500, payload: { name: 'product_submit', args: { task: 'slow task' } } },
-  ] })
-  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec())
-  assert.equal(result.status, 'timeout')
-  assert.equal(result.detectedBy, 'timeout')
-  assert.ok(result.progress)
-  assert.equal(result.progress.lastTask, 'slow task')
-  assert.equal(result.progress.receivedChars, 0)
-  assert.ok(result.progress.lastActivityAt)
-  assert.equal(harness.handlers.size, 0)
-})
-
-test('a child that is already inactive resolves immediately', async () => {
-  const harness = makeHarness({ children: [child('inactive')] })
-  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec())
-  assert.equal(result.status, 'ready')
-  assert.equal(result.detectedBy, 'already-settled')
-  assert.equal(harness.handlers.size, 0)
+test('an unknown child without a handle reports unknown', async () => {
+  const harness = makeHarness({ children: [] })
+  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 50 }, exec())
+  assert.equal(result.status, 'unknown')
+  assert.equal(result.detectedBy, 'unknown')
+  assert.ok(result.note)
 })
 
 test('an already-aborted signal reports aborted', async () => {
   const controller = new AbortController()
   controller.abort()
-  const harness = makeHarness()
-  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec(controller.signal))
+  const harness = makeHarness({ settle: deferred() })
+  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 50 }, exec(controller.signal))
   assert.equal(result.status, 'aborted')
-  assert.equal(result.detectedBy, undefined)
+  assert.equal(result.detectedBy, 'aborted')
   assert.equal(harness.handlers.size, 0)
 })
 
-test('a resumed child with a new open turn does not report the previous answer', async () => {
-  const now = Date.now()
-  const harness = makeHarness({ log: [
-    { type: 'turn/start', timestamp: now - 9000, payload: { turn: 1 } },
-    { type: 'assistant/message', timestamp: now - 8000, payload: { message: { content: [{ type: 'text', text: 'old answer' }] } } },
-    { type: 'turn/end', timestamp: now - 7000, payload: { turn: 1 } },
-    { type: 'turn/start', timestamp: now - 1000, payload: { turn: 2 } },
-  ] })
-  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec())
-  assert.equal(result.status, 'timeout')
-  assert.equal(result.detectedBy, 'timeout')
-  assert.notEqual(result.answer, 'old answer')
-  assert.equal(result.answer, undefined)
-  assert.equal(harness.handlers.size, 0)
-})
-
-test('the session-log path returns the full answer, not the display cap', async () => {
-  const answer = 'x'.repeat(1000)
-  const harness = makeHarness({ log: closedLog(Date.now(), answer) })
-  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec())
-  assert.equal(result.status, 'completed')
-  assert.equal(result.detectedBy, 'session-log')
-  assert.equal(result.answer.length, 1000)
-  assert.equal(result.answer, answer)
-  assert.equal(harness.handlers.size, 0)
+test('aborting mid-wait settles the tool immediately', async () => {
+  const controller = new AbortController()
+  const harness = makeHarness({ settle: deferred() })
+  const pending = harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 5000 }, exec(controller.signal))
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  controller.abort()
+  const result = await pending
+  assert.equal(result.status, 'aborted')
+  assert.equal(result.detectedBy, 'aborted')
 })
