@@ -41,6 +41,9 @@ const buttonStyle = {
  * | loading | 转圈图标(每秒刷新的「已用 12s」) | 取消优化 |
  * | applied | 撤回箭头 | 还原替换前的草稿 |
  * | error | 四芒星 + 红色 | 重新发起优化 |
+ *
+ * 优化产出诊断时,按钮右上角另起一个 6px 圆点:点它展开「诊断分析」卡(可滚可复制),
+ * Esc / 点外部 / 再点圆点收起。hover 不再是任何交互的触发方式。
  */
 export function createOptimizeButton(controller: OptimizerController) {
   return function OptimizeButton(props: OptimizeButtonProps) {
@@ -151,14 +154,38 @@ export function createOptimizeButton(controller: OptimizerController) {
               ? t('button.titleEmpty')
               : t('button.title')
 
-    // ---- 诊断浮卡:悬停 / Tab 聚焦时展开最近一次诊断(只在发起它的会话里显示) ----
+    // ---- 诊断卡:点击按钮右上角圆点展开(不再依赖 hover) ----
     // `state.last` 是这个 controller 最近一次请求的归属会话;诊断来自那次请求的 done,
-    // 所以两者天然同源。不匹配说明用户切到了别的会话 → 卡片不显示。
+    // 所以两者天然同源。不匹配说明用户切到了别的会话 → 圆点与卡片都不显示。
     const diagnosis = state.last?.sessionId === sessionId ? state.lastAnalysis : null
-    // loading 期间不显示(hover 会让正在转圈的按钮分心,也避免与 title 计时抢注意力)。
-    const canHover = state.status !== 'loading' && !!diagnosis
-    const [hovered, setHovered] = useState(false)
-    const showDiagnosis = canHover && hovered
+    // loading 期间不给第二个可点目标(正在转圈的按钮不该被圆点分心)。
+    const showDot = state.status !== 'loading' && !!diagnosis
+    const [diagnosisOpen, setDiagnosisOpen] = useState(false)
+    // 圆点消失时必须一并收起卡片:切会话(诊断归属变了)与新一轮优化开始(loading)
+    // 都会让圆点消失;不收起的话,下次 done 圆点回来时旧卡片会自己弹出来。
+    useEffect(() => {
+      setDiagnosisOpen(false)
+    }, [sessionId, showDot])
+    // 关闭触发:Esc / 点击按钮与卡片以外的区域。监听挂在 document 上,
+    // 只在展开期间存在(收起即清理,不常驻)。
+    useEffect(() => {
+      if (!diagnosisOpen) return
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') setDiagnosisOpen(false)
+      }
+      const onClickOutside = (event: MouseEvent) => {
+        const target = event.target as Element | null
+        // 按钮、圆点、卡片自身(含卡片滚动条)不算「外部」,否则刚滚一下就关掉。
+        if (target && typeof target.closest === 'function' && target.closest('.dsh-po-btn, .dsh-po-dot, .dsh-po-diagnosis')) return
+        setDiagnosisOpen(false)
+      }
+      document.addEventListener('keydown', onKeyDown)
+      document.addEventListener('click', onClickOutside)
+      return () => {
+        document.removeEventListener('keydown', onKeyDown)
+        document.removeEventListener('click', onClickOutside)
+      }
+    }, [diagnosisOpen])
 
     const onClick = () => {
       // loading 中点击 = 取消(模型卡住时的逃生口;不依赖 Esc,面板已移除)。
@@ -179,15 +206,8 @@ export function createOptimizeButton(controller: OptimizerController) {
     }
 
     return (
-      // position:relative 是浮卡的定位锚点(卡片 absolute 相对它摆放)。
-      // 鼠标事件必须挂在 span 而不是 button 上:empty 态 button 带 `disabled`,
-      // 而 Chrome/Safari 对 disabled 元素**不派发鼠标事件**(React 合成事件同样收不到),
-      // 挂 button 上会导致「输入框清空后诊断浮卡永远弹不出来」。span 不是 disabled,始终派发。
-      <span
-        style={{ display: 'inline-flex', position: 'relative' }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-      >
+      // position:relative 是圆点与诊断卡的定位锚点(两者都 absolute 相对它摆放)。
+      <span style={{ display: 'inline-flex', position: 'relative' }}>
         <button
           className="dsh-po-btn dsh-po-opt"
           type="button"
@@ -199,19 +219,46 @@ export function createOptimizeButton(controller: OptimizerController) {
           }}
           disabled={view === 'empty'}
           aria-busy={view === 'loading'}
-          // 浮卡会出现时清空原生 title:否则浏览器 tooltip 与自绘卡片会同时冒出来打架。
-          // 可访问性改由 aria-label 承载同一句文案(屏幕阅读器照常朗读)。
-          title={canHover ? '' : title}
+          // 原生 title 始终保留:诊断不再由 hover 触发,不存在与自绘卡片打架的问题。
+          title={title}
           aria-label={title}
-          // focus 不冒泡,且焦点只会落在 button 上(span 不可聚焦),所以这两个留在这里;
-          // 鼠标事件已移到外层 span(见上,绕开 disabled 不派发事件的问题)。
-          onFocus={() => setHovered(true)}
-          onBlur={() => setHovered(false)}
           onClick={onClick}
         >
           {view === 'loading' ? <LoadingIcon /> : view === 'applied' ? <UndoIcon /> : <SparkleIcon />}
         </button>
-        {showDiagnosis && diagnosis ? <DiagnosisCard text={diagnosis} title={t('button.diagnosisTitle')} /> : null}
+        {showDot ? (
+          // 独立 button(不是主按钮的子元素):6px 视觉圆点贴在按钮右上角外缘,
+          // 点击只负责开关诊断卡,绝不冒泡到主按钮(否则会顺手发起一次优化)。
+          <button
+            className="dsh-po-dot"
+            type="button"
+            aria-label={diagnosisOpen ? t('button.closeDiagnosis') : t('button.dotLabel')}
+            title={diagnosisOpen ? t('button.closeDiagnosis') : t('button.dotLabel')}
+            aria-expanded={diagnosisOpen}
+            onClick={(event) => {
+              // 挡掉冒泡:既防止触发主按钮 onClick,也防止触达 document 的
+              // 「点外部关闭」监听(否则同一次点击里先开后关)。
+              event.stopPropagation()
+              setDiagnosisOpen((open) => !open)
+            }}
+            style={{
+              position: 'absolute',
+              top: 1,
+              right: 1,
+              width: 6,
+              height: 6,
+              padding: 0,
+              border: 'none',
+              borderRadius: 999,
+              background: 'var(--dsw-alias-state-business-primary, #4f7cf7)',
+              cursor: 'pointer',
+              // 盖在主按钮之上,保证 6px 圆点始终可点。
+              zIndex: 1,
+              lineHeight: 0,
+            }}
+          />
+        ) : null}
+        {diagnosisOpen && showDot && diagnosis ? <DiagnosisCard text={diagnosis} title={t('button.diagnosisTitle')} /> : null}
       </span>
     )
   }

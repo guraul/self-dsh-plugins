@@ -36,9 +36,9 @@ export interface OptimizerState {
    */
   applied: { backup: string; text: string; sessionId?: SessionId } | null
   /**
-   * 最近一次优化产出的「诊断分析」全文(仅展示用,由按钮 hover 浮卡渲染)。
+   * 最近一次优化产出的「诊断分析」全文(仅展示用,由按钮右上角圆点点击展开)。
    * 结果面板已移除,而 full 模式的诊断仍有价值:它不进输入框、不参与发送,
-   * 只在这里存一份供悬停查看。'' 归一化为 null;`settle()` 不清(用户可能还想看),
+   * 只在这里存一份供点开查看。'' 归一化为 null;`settle()` 不清(用户可能还想看),
    * 只由新结果覆盖 / `close()` 复位。
    */
   lastAnalysis: string | null
@@ -425,9 +425,9 @@ export function createOptimizerController(
             // 迟到的 done 不得落库 —— 否则会出现「我明明点了取消,草稿却被替换了」。
             // 本 fork 的 done 会直接写回草稿,这条护栏比展示面板时更关键。
             if (abort !== controller) return
-            // 诊断只存不写回:结果面板已移除,full 模式的诊断改由按钮 hover 浮卡展示。
+            // 诊断只存不写回:结果面板已移除,full 模式的诊断改由按钮圆点展开的卡片展示。
             // 空串('')说明模型没产出诊断(fast 模式/未按格式输出),归一化为 null,
-            // 免得浮卡里出现一张空白卡片。
+            // 免得点开圆点后出现一张空白卡片。
             const analysisText = String(event.analysis ?? '')
             set({
               status: 'done',
