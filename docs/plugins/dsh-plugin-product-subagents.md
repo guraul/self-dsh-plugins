@@ -62,6 +62,43 @@ docs/COMPATIBILITY.md # DSH 版本矩阵，以及每个 verdict 是怎么产生�
 一切 CLI 启动走 `lib/run.js`；一切可能缺失字段的工具结果走 `lib/lossless.js`；
 会话 id 的捕获与恢复链在 `lib/bindings.js` → `lib/registry.js`（+ log marker）。
 
+## 工具：`product_wait`（等价：等待一个后台子代理结算）
+
+`product_wait` 阻塞到子代理结算，返回最终回答、stop reason 和最近 trace。它有**两条独立唤醒信号**，
+任何一条命中即返回（`lib/tools/product-wait.js`）：
+
+| 信号 | 来源 | 说明 |
+|---|---|---|
+| 事件 | `ctx.on('subagent/end')` | 父级 scoped、**一次性广播**，没有 replay |
+| 日志 | `sessions.get(childId)` 经 `foldProgress` 折叠 | 每 2s 兜底轮询；判据是「有 `turn/end`（`foldProgress.endedAt`）**且最后一轮未重新打开**（`turnOpen === false`）**且**能折出 `lastAnswer`」 |
+
+**「最后一轮是否仍打开」是必需条件**：被 `send_message` 续接过的 child，尾部同时留着上一轮的
+`turn/end` 与新一轮的 `turn/start`；只看 `endedAt` 会把**上一轮的旧答案**当成这一轮的结果立刻返回
+（静默给错答案，比超时更糟）。`foldProgress.turnOpen` 因此必须为 `false`。
+
+**订阅先于快照**：先建立 `subagent/end` 订阅，**之后**才 `listChildren()` 取 activity。0.4.3 及以前顺序相反，
+子代理在「快照完成 → 订阅建立」的空窗期结算时事件被丢弃，等待只剩超时（issue #38）。
+快照为 `inactive` 时立即返回 `ready`。
+
+`detectedBy` 声明是哪条信号把调用唤醒的：
+
+| `detectedBy` | 含义 |
+|---|---|
+| `event` | 收到 `subagent/end`（最快路径） |
+| `session-log` | 事件错过或从未到达，靠日志兜底判完成 |
+| `already-settled` | 入口快照里 child 已 `inactive`，立即返回 `ready` |
+| `timeout` | 两条信号都没命中；此时结果带 `progress` |
+
+- 默认超时 **120000 ms（120s）**，上限 `600000`，可经 `timeout_ms` 覆盖。
+- 超时**不再谎报**：超时点上若日志已能判完成，返回 `status:'completed'` + `detectedBy:'session-log'`；
+  只有真的一无所有才 `status:'timeout'`，并附 `progress`（`lastActivityAt` / `receivedChars` / `lastTask`）。
+- `exec.signal` 中止时返回 `status:'aborted'`（不带 `detectedBy`）。
+- **`answer` 不截断**：日志路径用 `lastAnswerFull()` 取完整文本；`foldProgress.lastAnswer` 仍是
+  300 字符的**展示用**摘要（`subagent_progress` 的语义不变），两者不要混用。只有「最后一轮已关闭
+  或 `ready`」时才把折叠答案当 `answer` 返回，进行中的轮次不会回吐上一轮的答案。
+- `finish` 会 `clearTimeout` + `clearInterval` + 取消 `subagent/end` 订阅与 abort 监听；轮询 interval
+  额外 `unref()`，不会拖住进程。结果仍经 `stripUndefined()`，保持严格 lossless JSON。
+
 ## 设计规则（不可协商）
 
 1. **relay model 永远是只读管道。** child 的 `toolFilter` 只可能含 `product_submit`，
@@ -198,4 +235,14 @@ docs/COMPATIBILITY.md # DSH 版本矩阵，以及每个 verdict 是怎么产生�
   - **测试补缺口**：`test/delegate-request.test.js` 断言**请求内容**（`agentPreset`、
     `maxDepth`、prompt 分隔、无 preset 时拒绝）——0.4.2 的测试只验证"调了哪个方法"，
     所以这次回归是绿的。
+- **`0.4.4`（issue #38：`product_wait` 漏检）**：
+  - **事故**：39 秒跑完的子代理，`product_wait` 等满 300s 报 `timeout`；
+  - **根因**：先 `listChildren` 快照、**后**订阅 `subagent/end`，结算落在空窗期时一次性事件被丢弃，
+    且缺少第二信号兜底；
+  - **修法**：订阅先于快照；日志兜底（每 2s + 首次立即读，判据 `foldProgress.endedAt` +
+    `turnOpen === false` + `lastAnswer`）；新增 `detectedBy`；超时不再谎报；默认超时降到 120s；
+    `foldProgress` 新增 `endedAt` / `turnOpen`；`lastAnswerFull()` 让日志路径返回**完整**答案
+    （`foldProgress.lastAnswer` 的 300 字符只是展示摘要）；
+  - **测试**：`test/product-wait.test.js` 八条时序用例（离网、假 ctx / 假 session），
+    含「续接后新一轮仍打开不得回吐旧答案」「1000 字符答案不被截断」。
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { foldProgress, foldTrace, foldTokenUsage } from '../lib/progress.js'
+import { foldProgress, foldTrace, foldTokenUsage, lastAnswerFull } from '../lib/progress.js'
 
 function events(list) {
   return list.map((e, i) => ({ seq: i + 1, ...e }))
@@ -21,6 +21,8 @@ test('foldProgress: turn/step/task/answer/marker', () => {
   assert.equal(out.stepCount, 1)
   assert.equal(out.lastTask, 'do thing A')
   assert.match(out.lastAnswer, /PROBE_CONT/)
+  assert.equal(out.endedAt, now - 49000)
+  assert.equal(out.turnOpen, true)
   assert.equal(out.product, 'acp')
   assert.equal(out.remoteSessionId, 'sess-123')
 })
@@ -54,4 +56,15 @@ test('foldProgress returns null for non-array events', () => {
   assert.equal(foldProgress(null), null)
   assert.equal(foldProgress({}), null)
   assert.deepEqual(foldTrace(undefined), [])
+})
+
+test('lastAnswerFull keeps the full text while foldProgress truncates', () => {
+  const text = 'y'.repeat(1000)
+  const session = { events: events([
+    { type: 'assistant/message', timestamp: 1, payload: { message: { content: [{ type: 'text', text }] } } },
+  ]) }
+  assert.equal(foldProgress(session).lastAnswer.length, 300)
+  assert.equal(lastAnswerFull(session).length, 1000)
+  assert.equal(lastAnswerFull({}), undefined)
+  assert.equal(lastAnswerFull(undefined), undefined)
 })

@@ -3,8 +3,9 @@ import { recoverRemoteSessionId } from './bindings.js'
 /**
  * Fold the tail of one child session's durable events into a compact progress
  * snapshot: last turn, step count, the latest product_submit task, the latest
- * answer text, last activity time, and the pinned product/remote session id
- * (from the PRODUCT_SESSION marker the bridge tool echoes in every result).
+ * answer text, last activity time, whether (and when) the last turn closed, and
+ * the pinned product/remote session id (from the PRODUCT_SESSION marker the
+ * bridge tool echoes in every result).
  * Schema-tolerant: unknown event shapes are skipped, never thrown on.
  */
 export function foldProgress(session) {
@@ -16,6 +17,8 @@ export function foldProgress(session) {
     lastTask: undefined,
     lastAnswer: undefined,
     lastActivityAt: undefined,
+    endedAt: undefined,
+    turnOpen: false,
   }
   const start = Math.max(0, events.length - 150)
   for (let i = start; i < events.length; i += 1) {
@@ -27,10 +30,15 @@ export function foldProgress(session) {
       case 'turn/start': {
         if (typeof payload.turn === 'number') out.turn = payload.turn
         if (ts !== undefined) out.lastActivityAt = ts
+        out.turnOpen = true
         break
       }
       case 'turn/end': {
-        if (ts !== undefined) out.lastActivityAt = ts
+        if (ts !== undefined) {
+          out.lastActivityAt = ts
+          out.endedAt = ts
+        }
+        out.turnOpen = false
         break
       }
       case 'step/start': {
@@ -72,6 +80,32 @@ export function foldProgress(session) {
     out.remoteSessionId = marker.sessionId
   }
   return out
+}
+
+/**
+ * The latest answer text of one child session, UNTRUNCATED. Same tail scan and
+ * same precedence as `foldProgress().lastAnswer` (a later `assistant/message`
+ * or `tool/result` overwrites an earlier one), but without the 300-character
+ * display cap — `product_wait` returns this as the child's real answer.
+ */
+export function lastAnswerFull(session) {
+  const events = session && session.events
+  if (!Array.isArray(events)) return undefined
+  let answer
+  const start = Math.max(0, events.length - 150)
+  for (let i = start; i < events.length; i += 1) {
+    const event = events[i]
+    if (!event || typeof event.type !== 'string') continue
+    const payload = (event && event.payload) || {}
+    if (event.type === 'assistant/message') {
+      const text = messageText(payload)
+      if (text) answer = text
+    } else if (event.type === 'tool/result') {
+      const text = extractAnyText(payload)
+      if (text) answer = text
+    }
+  }
+  return answer
 }
 
 /**

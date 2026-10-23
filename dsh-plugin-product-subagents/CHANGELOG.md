@@ -2,6 +2,57 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.4] — 2026-10-23
+
+`product_wait` no longer misses a child that already finished and then blocks
+until the timeout.
+
+### Fixed
+- **A child that settled during the wait's own setup woke nobody** (issue #38).
+  `product_wait` used to snapshot `subagents.listChildren()` first and only then
+  subscribe to `subagent/end`. A settle landing in that window — including the
+  time `listChildren()` itself takes — was dropped, because the event is a
+  one-shot parent-scoped broadcast with no replay; the call then returned
+  `{"status":"timeout"}` after the full 300 s even though the child had answered
+  in 39 s. The subscription is now established **before** the snapshot.
+- **No second signal**: the child's own durable session log is now folded
+  (`sessions.get(childId)` → `foldProgress`, first read immediately, then every
+  2 s) and a closed last turn plus a folded answer (`endedAt`, `turnOpen ===
+  false`, `lastAnswer`) also completes the wait. Whichever signal lands first
+  wins.
+- **A resumed child could be reported complete with the previous turn's
+  answer.** The tail of a child continued via `send_message` holds the earlier
+  `turn/end` while the new turn is still streaming, so `endedAt` alone reported
+  `completed` with the *old* answer — a silent wrong answer, worse than the
+  timeout. `foldProgress` now tracks `turnOpen` (set by `turn/start`, cleared by
+  `turn/end`) and the log signal additionally requires it to be `false`.
+- **The log path no longer truncates the answer.** `foldProgress.lastAnswer` is
+  a 300-character display cap; `product_wait` now returns the full text via the
+  new `lastAnswerFull()`. A folded answer is only used as `answer` when its turn
+  is closed (or the child is already settled), never while a turn is in
+  flight.
+
+### Changed
+- **`detectedBy` is now returned**: `"event"`, `"session-log"`,
+  `"already-settled"` or `"timeout"` says which signal woke the call
+  (`aborted` carries none).
+- **A timeout no longer lies**: if the log already shows a finished child at the
+  timeout boundary the result is `status: "completed"` with
+  `detectedBy: "session-log"`; only a genuinely silent child reports `timeout`,
+  and that result now carries `progress` (`lastActivityAt`, `receivedChars`,
+  `lastTask`).
+- **Default timeout 300 s → 120 s** (the cap stays 600 s; `timeout_ms` still
+  overrides).
+- `foldProgress` exposes `endedAt` (timestamp of the last `turn/end`) and
+  `turnOpen` (whether a later `turn/start` re-opened the turn).
+
+### Tests
+- New `test/product-wait.test.js`: eight timing cases against a fake ctx and
+  fake sessions (event before subscribe, event after subscribe, log-only
+  completion, nothing at all, already-inactive child, pre-aborted signal, a
+  resumed child whose new turn is still open, and a 1000-character answer) —
+  offline, no credentials.
+
 ## [0.4.3] — 2026-10-17
 
 Restores the read-only relay on DSH 0.2.1 — 0.4.2 silently handed delegated
