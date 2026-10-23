@@ -18,7 +18,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import { createMemorySettings, SETTINGS_ENTRY_ID, type MemxSettingsValue } from './MemorySettings.js'
+import { createMemorySettings, LLM_SETTINGS_ENTRY_ID, SETTINGS_ENTRY_ID, type LlmPiAiSettingsValue, type MemxSettingsValue } from './MemorySettings.js'
 
 export const name = 'dsh-plugin-memx-client'
 
@@ -37,6 +37,8 @@ export function apply(ctx: ClientContext): void {
   const Section = createMemorySettings({
     // 取值函数：每次渲染现取，宿主还没下发设置项时返回 undefined（页面会显示状态并重试）。
     formFor: () => ctx.configForms.get<MemxSettingsValue>(SETTINGS_ENTRY_ID),
+    // 模型选项主来源（官方 llm-pi-ai 的配置 providers）；同样现取，缺失时页面降级。
+    llmFormFor: () => ctx.configForms.get<LlmPiAiSettingsValue>(LLM_SETTINGS_ENTRY_ID),
     loadCatalog: () => ctx.remote.session.modelCatalog(),
   })
 

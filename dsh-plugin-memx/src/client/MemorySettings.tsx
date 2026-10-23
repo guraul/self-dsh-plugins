@@ -2,10 +2,18 @@
  * 设置页「记忆」——memx 薄壳包的 Web 客户端页面。
  *
  * 四项：
- *   1. 提炼模型（下拉，首项「跟随当前会话」，其余按 provider 分组）
+ *   1. 提炼模型（下拉，首项「跟随当前会话」，其余按 provider 分组；选项 =
+ *      配置（llm-pi-ai）为主 + 运行时目录（modelCatalog）合并去重，见
+ *      `mergeModelSources`）
  *   2. 自动提炼（开关）
  *   3. 提炼间隔（分钟，1–1440）
  *   4. 只读说明（注入语义 + 当前选择）
+ *
+ * 为什么模型来源以配置为主：`remote.session.modelCatalog()` 只返回**运行时
+ * "可用"**的模型（不可路由的 provider 进 `failures`、不进 `groups`），提供方
+ * 未被判可路由时 groups 为 [] 且不报错 —— 下拉会只剩「跟随当前会话」。官方
+ * 「设置 → 模型」页读的正是 llm-pi-ai 配置里的 `providers.*.models`，本页与
+ * 它同源：先读 `configForms.get('llm-pi-ai')`，再把运行时目录合并补缺。
  *
  * 读写全部走 `ctx.configForms.get('memx')`：`form.mutate([{ op:'set', path, value }])`
  * 即"改完就落盘"，没有保存按钮。宿主拒绝写（含并发冲突）时 `mutate` 返回 false 并
@@ -23,12 +31,32 @@ import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 /** 宿主配置条目 id（`cordis.patch.yml` → `- insert: - id: memx`）。 */
 export const SETTINGS_ENTRY_ID = 'memx'
 
+/** 模型 provider 配置的条目 id（官方 `dsh-llm-pi-ai` 插件；模型选项的主来源）。 */
+export const LLM_SETTINGS_ENTRY_ID = 'llm-pi-ai'
+
 /** 与宿主 Config 对应的分节（entry id = `memx`）。 */
 export interface MemxSettingsValue {
   provider?: string
   model?: string
   autoRefine?: boolean
   throttleMinutes?: number
+}
+
+/** llm-pi-ai 配置里的单个模型（`providers.*.models[]`；name 缺省用 id）。 */
+export interface LlmPiAiModelEntry {
+  id: string
+  name?: string
+}
+
+/** llm-pi-ai 配置里的单个 provider（key 即 route id；name 缺省用 route id）。 */
+export interface LlmPiAiProviderConfig {
+  name?: string
+  models?: readonly LlmPiAiModelEntry[]
+}
+
+/** `configForms.get('llm-pi-ai')` 的返回面（页面只读 providers）。 */
+export interface LlmPiAiSettingsValue {
+  providers?: Record<string, LlmPiAiProviderConfig>
 }
 
 /** 模型目录分组（只声明页面消费的字段，避免追着上游类型跑）。 */
@@ -38,9 +66,17 @@ export interface MemxModelGroup {
   models: readonly { id: string; name: string }[]
 }
 
-/** `ctx.remote.session.modelCatalog()` 的返回面（页面只读 groups）。 */
+/** 运行时目录里被判定不可用的 provider（`buildModelCatalog` 的 failures 面）。 */
+export interface MemxModelFailure {
+  id: string
+  name?: string
+  message: string
+}
+
+/** `ctx.remote.session.modelCatalog()` 的返回面（页面只读 groups + failures）。 */
 export interface MemxModelCatalog {
   groups?: readonly MemxModelGroup[]
+  failures?: readonly MemxModelFailure[]
 }
 
 /** 提炼间隔的合法区间（与 Host 侧 `throttleMinutes` 的 schema 一致）。 */
@@ -63,6 +99,108 @@ function isConflict(error: unknown): boolean {
   return code === 'SETTINGS_CONFLICT' || errorMessage(error).includes('SETTINGS_CONFLICT')
 }
 
+/** 模型列表的来源判定（下拉下方小字用）。 */
+export type ModelSource = 'config' | 'config+catalog' | 'catalog' | 'empty'
+
+export const MODEL_SOURCE_LABEL: Record<ModelSource, string> = {
+  config: '模型来源：配置（llm-pi-ai）',
+  'config+catalog': '模型来源：配置 + 运行时目录',
+  catalog: '模型来源：运行时目录',
+  empty: '模型来源：无（配置与运行时目录均为空）',
+}
+
+/** 合并后的模型列表（groups 直接喂下拉；reason/failures 只在皆空时有内容）。 */
+export interface MergedModelList {
+  groups: MemxModelGroup[]
+  source: ModelSource
+  /** 配置侧不可读的原因（llm form 缺失/非 ready/读取抛错）；可读时缺席。 */
+  configNote?: string
+  /** 两者皆空时的明确原因（否则缺席）。 */
+  reason?: string
+  failures: readonly MemxModelFailure[]
+}
+
+/**
+ * llm-pi-ai 配置 `providers` → 分组列表（与官方「设置 → 模型」页同源）。
+ * provider 显示名缺省用 route id；模型 name 缺省用 id；空 provider 不出组。
+ */
+export function readConfigProviders(value: LlmPiAiSettingsValue | undefined): MemxModelGroup[] {
+  const providers = value?.providers
+  if (!providers || typeof providers !== 'object') return []
+  const groups: MemxModelGroup[] = []
+  for (const [routeId, provider] of Object.entries(providers)) {
+    if (!provider || typeof provider !== 'object') continue
+    const seen = new Set<string>()
+    const models: { id: string; name: string }[] = []
+    for (const model of Array.isArray(provider.models) ? provider.models : []) {
+      if (!model || typeof model.id !== 'string' || !model.id || seen.has(model.id)) continue
+      seen.add(model.id)
+      models.push({ id: model.id, name: typeof model.name === 'string' && model.name ? model.name : model.id })
+    }
+    if (models.length === 0) continue
+    groups.push({
+      id: routeId,
+      name: typeof provider.name === 'string' && provider.name ? provider.name : routeId,
+      models,
+    })
+  }
+  return groups
+}
+
+/**
+ * 配置为主、运行时目录为辅的合并去重：配置分组在前；目录里 `provider/model`
+ * 已存在的跳过，配置没有的 provider/模型补在后面。两者皆空时给出明确原因。
+ */
+export function mergeModelSources(input: {
+  configGroups: readonly MemxModelGroup[]
+  /** 配置不可读的原因（读到了就不传）。 */
+  configNote?: string
+  catalog?: MemxModelCatalog
+  /** 运行时目录读取失败的原因（成功了就不传）。 */
+  catalogError?: string
+}): MergedModelList {
+  const { configGroups, configNote, catalog, catalogError } = input
+  const catalogGroups = catalog?.groups ?? []
+  const failures = catalog?.failures ?? []
+
+  // 合并期用可变类型（readonly 只留在对外接口上）。
+  const groups: { id: string; name: string; models: { id: string; name: string }[] }[] = configGroups.map(
+    (group) => ({ ...group, models: [...group.models] }),
+  )
+  const seen = new Set(groups.flatMap((group) => group.models.map((model) => `${group.id}/${model.id}`)))
+  for (const group of catalogGroups) {
+    const additions = group.models.filter((model) => {
+      const key = `${group.id}/${model.id}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    if (additions.length === 0) continue
+    const existing = groups.find((candidate) => candidate.id === group.id)
+    if (existing) existing.models.push(...additions)
+    else groups.push({ id: group.id, name: group.name, models: [...additions] })
+  }
+
+  const hasConfig = configGroups.length > 0
+  const hasCatalog = catalogGroups.length > 0
+  const source: ModelSource =
+    hasConfig && hasCatalog ? 'config+catalog' : hasConfig ? 'config' : hasCatalog ? 'catalog' : 'empty'
+  const base = { groups, source, failures } as MergedModelList
+  if (source !== 'empty') {
+    return configNote === undefined ? base : { ...base, configNote }
+  }
+  const configPart = configNote === undefined ? '配置里没有 provider 模型（llm-pi-ai）' : `配置暂不可读（${configNote}）`
+  const catalogPart =
+    catalogError === undefined
+      ? `运行时目录 groups=${catalogGroups.length} / failures=${failures.length}`
+      : `运行时目录读取失败：${catalogError}`
+  return {
+    ...base,
+    ...(configNote === undefined ? {} : { configNote }),
+    reason: `目录为空：${configPart}，${catalogPart}`,
+  }
+}
+
 /** 只注入一次的页面样式（类名带前缀，避免与官方设置页抢样式）。 */
 function ensureStyles(): void {
   if (typeof document === 'undefined') return
@@ -76,25 +214,28 @@ function ensureStyles(): void {
     '.memx-st-title{margin:0;font-size:16px;font-weight:600;color:var(--dsw-alias-label-primary,inherit);}',
     '.memx-st-sub{margin:0;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary,#6b7280);}',
     '.memx-st-diag{margin:0;font-size:11px;line-height:1.5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dsw-alias-label-secondary,#6b7280);word-break:break-word;}',
-    '.memx-st-card{display:flex;flex-direction:column;gap:18px;padding:16px 18px;border-radius:12px;border:1px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.24));background:var(--dsw-alias-fill-primary,transparent);}',
+    '.memx-st-card{display:flex;flex-direction:column;gap:12px;padding:16px 18px;border-radius:12px;border:1px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.24));background:var(--dsw-alias-fill-primary,transparent);}',
     '.memx-st-row{display:grid;grid-template-columns:minmax(120px,200px) minmax(0,1fr);gap:6px 20px;align-items:start;}',
     '.memx-st-label{font-size:13px;font-weight:600;line-height:28px;color:var(--dsw-alias-label-primary,inherit);}',
     '.memx-st-label small{display:block;font-weight:400;font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary,#6b7280);}',
     '.memx-st-field{display:flex;flex-direction:column;gap:6px;min-width:0;}',
     '.memx-st-inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
+    '.memx-st-inline--select{flex-wrap:nowrap;}',
     '.memx-st-select,.memx-st-input{box-sizing:border-box;min-height:28px;padding:4px 8px;border-radius:8px;font-size:13px;color:inherit;background:var(--dsw-alias-fill-secondary,rgba(128,128,128,.06));border:1px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.32));}',
-    '.memx-st-select{min-width:0;max-width:100%;flex:1 1 260px;}',
+    '.memx-st-select{min-width:0;max-width:100%;flex:1 1 auto;}',
     '.memx-st-input{width:110px;}',
-    '.memx-st-select:focus-visible,.memx-st-input:focus-visible,.memx-st-check:focus-visible{outline:2px solid var(--dsw-alias-state-focus-ring,#4f7cf7);outline-offset:1px;}',
+    '.memx-st-btn{flex:0 0 auto;white-space:nowrap;box-sizing:border-box;min-height:28px;padding:4px 10px;border-radius:8px;font-size:12px;cursor:pointer;color:inherit;background:var(--dsw-alias-fill-secondary,rgba(128,128,128,.06));border:1px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.32));}',
+    '.memx-st-btn:disabled{opacity:.55;cursor:default;}',
+    '.memx-st-select:focus-visible,.memx-st-input:focus-visible,.memx-st-btn:focus-visible,.memx-st-check:focus-visible{outline:2px solid var(--dsw-alias-state-focus-ring,#4f7cf7);outline-offset:1px;}',
     '.memx-st-check{width:16px;height:16px;margin:6px 8px 0 0;accent-color:var(--dsw-alias-state-focus-ring,#4f7cf7);}',
-    '.memx-st-hint{font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary,#6b7280);}',
+    '.memx-st-hint{font-size:12px;line-height:1.6;text-align:left;color:var(--dsw-alias-label-secondary,#6b7280);}',
     '.memx-st-error{font-size:12px;line-height:1.6;color:var(--dsw-alias-state-error,#d93025);}',
     '.memx-st-notice{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:10px;font-size:12px;line-height:1.6;}',
     '.memx-st-notice[data-kind="error"]{color:var(--dsw-alias-state-error,#d93025);background:color-mix(in srgb,var(--dsw-alias-state-error,#d93025) 10%,transparent);}',
     '.memx-st-notice[data-kind="info"]{color:var(--dsw-alias-label-secondary,#6b7280);background:var(--dsw-alias-fill-secondary,rgba(128,128,128,.08));}',
-    '.memx-st-dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:12px;line-height:1.6;}',
-    '.memx-st-dl dt{color:var(--dsw-alias-label-secondary,#6b7280);white-space:nowrap;}',
-    '.memx-st-dl dd{margin:0;color:var(--dsw-alias-label-primary,inherit);word-break:break-word;}',
+    '.memx-st-dl{display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px 14px;margin:0;font-size:12px;line-height:1.6;}',
+    '.memx-st-dl dt{color:var(--dsw-alias-label-secondary,#6b7280);}',
+    '.memx-st-dl dd{margin:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary,inherit);}',
     '.memx-st-disabled{opacity:.6;}',
   ].join('')
   document.head.appendChild(style)
@@ -106,6 +247,11 @@ export interface MemorySettingsOptions {
    * 就是空的（旧实现只在 apply 时取一次，取空后整页白屏）。
    */
   formFor: () => ConfigForm<MemxSettingsValue> | undefined
+  /**
+   * 现取 `ctx.configForms.get('llm-pi-ai')`（模型选项的主来源）。允许返回
+   * undefined（异步/未挂载）：降级到运行时目录并显示原因，不崩。
+   */
+  llmFormFor: () => ConfigForm<LlmPiAiSettingsValue> | undefined
   /** `ctx.remote.session.modelCatalog()`。 */
   loadCatalog: () => Promise<MemxModelCatalog>
 }
@@ -140,7 +286,7 @@ function SettingsPage({ children }: { children: ReactNode }) {
 
 /** 造一个设置页组件（闭包持有取值函数，避免注册参数把内部结构漏给槽位契约）。 */
 export function createMemorySettings(options: MemorySettingsOptions) {
-  const { formFor, loadCatalog } = options
+  const { formFor, llmFormFor, loadCatalog } = options
 
   return function MemxMemorySettings(_props: { close?: () => void }) {
     ensureStyles()
@@ -172,17 +318,18 @@ export function createMemorySettings(options: MemorySettingsOptions) {
       )
     }
 
-    return <MemorySettingsForm form={form} loadCatalog={loadCatalog} />
+    return <MemorySettingsForm form={form} llmFormFor={llmFormFor} loadCatalog={loadCatalog} />
   }
 }
 
 interface MemorySettingsFormProps {
   form: ConfigForm<MemxSettingsValue>
+  llmFormFor: () => ConfigForm<LlmPiAiSettingsValue> | undefined
   loadCatalog: () => Promise<MemxModelCatalog>
 }
 
 /** form 就绪后的实体页面。单独成组件：form 从无到有时钩子数量不变。 */
-function MemorySettingsForm({ form, loadCatalog }: MemorySettingsFormProps) {
+function MemorySettingsForm({ form, llmFormFor, loadCatalog }: MemorySettingsFormProps) {
   const snapshot = useSyncExternalStore(
     (callback) => form.subscribe(callback),
     () => form.getSnapshot(),
@@ -192,33 +339,72 @@ function MemorySettingsForm({ form, loadCatalog }: MemorySettingsFormProps) {
   const status = snapshot.status
 
   const [notice, setNotice] = useState<{ kind: 'error' | 'info'; text: string } | null>(null)
-  const [catalog, setCatalog] = useState<{
-    state: 'loading' | 'ready' | 'error'
-    groups: readonly MemxModelGroup[]
-    error?: string
-  }>({ state: 'loading', groups: [] })
+  const [modelList, setModelList] = useState<{ state: 'loading' | 'ready'; list: MergedModelList }>({
+    state: 'loading',
+    list: { groups: [], source: 'empty', failures: [] },
+  })
+  const [catalogError, setCatalogError] = useState<string | undefined>(undefined)
+
+  // —— llm-pi-ai form（模型选项的主来源）——
+  // 与 memx form 同理：宿主下发时机不定。缺失时轻量轮询；出现后 reloadCatalog
+  // 的依赖变化会自动重并一次（自愈），配置值热更再单独触发重并。
+  const llmForm = llmFormFor()
+  const [, setLlmProbe] = useState(0)
+  useEffect(() => {
+    if (llmForm) return
+    const timer = window.setInterval(() => setLlmProbe((count) => count + 1), FORM_RETRY_INTERVAL_MS)
+    return () => window.clearInterval(timer)
+  }, [llmForm])
+  const llmSnapshot = useSyncExternalStore(
+    useCallback((callback: () => void) => (llmForm ? llmForm.subscribe(callback) : () => {}), [llmForm]),
+    useCallback(() => (llmForm ? llmForm.getSnapshot() : null), [llmForm]),
+  )
 
   const alive = useRef(true)
   const reloadCatalog = useCallback(() => {
-    setCatalog((current) => ({ state: 'loading', groups: current.groups }))
+    setModelList((current) => ({ state: 'loading', list: current.list }))
+
+    // 配置侧（同步读 form snapshot；缺失/非 ready/抛错都降级，不崩）
+    let configGroups: MemxModelGroup[] = []
+    let configNote: string | undefined
+    try {
+      if (!llmForm) {
+        configNote = 'llm-pi-ai 设置项未下发'
+      } else {
+        const llmSnap = llmForm.getSnapshot()
+        if (llmSnap.status === 'ready' && llmSnap.value) configGroups = readConfigProviders(llmSnap.value)
+        else configNote = `llm-pi-ai 配置状态 ${String(llmSnap.status)}`
+      }
+    } catch (err) {
+      configGroups = []
+      configNote = `配置读取失败：${errorMessage(err)}`
+    }
+
+    // 运行时目录（异步；同步抛错也要留在页面里，别让异常从 effect 逃逸）
+    const finish = (result: { catalog?: MemxModelCatalog; error?: string }) => {
+      if (!alive.current) return
+      setCatalogError(result.error)
+      setModelList({
+        state: 'ready',
+        list: mergeModelSources({
+          configGroups,
+          ...(configNote === undefined ? {} : { configNote }),
+          ...(result.catalog === undefined ? {} : { catalog: result.catalog }),
+          ...(result.error === undefined ? {} : { catalogError: result.error }),
+        }),
+      })
+    }
     let request: Promise<MemxModelCatalog>
     try {
-      // 同步抛错（ctx.remote.session 还没就绪等）也要留在页面里，别让异常从 effect 逃逸。
       request = Promise.resolve(loadCatalog())
     } catch (err) {
-      if (alive.current) setCatalog({ state: 'error', groups: [], error: errorMessage(err) })
+      finish({ error: errorMessage(err) })
       return
     }
     void request
-      .then((result) => {
-        if (!alive.current) return
-        setCatalog({ state: 'ready', groups: result?.groups ?? [] })
-      })
-      .catch((err: unknown) => {
-        if (!alive.current) return
-        setCatalog({ state: 'error', groups: [], error: errorMessage(err) })
-      })
-  }, [loadCatalog])
+      .then((result) => finish({ catalog: result ?? undefined }))
+      .catch((err: unknown) => finish({ error: errorMessage(err) }))
+  }, [llmForm, loadCatalog])
 
   useEffect(() => {
     alive.current = true
@@ -227,6 +413,17 @@ function MemorySettingsForm({ form, loadCatalog }: MemorySettingsFormProps) {
       alive.current = false
     }
   }, [reloadCatalog])
+
+  // llm 配置值热更（volatile）→ 重并一次；首挂载那次跳过（上面的 effect 已加载）。
+  const seenLlmSnapshot = useRef<unknown>(null)
+  useEffect(() => {
+    if (!llmSnapshot) {
+      seenLlmSnapshot.current = null
+      return
+    }
+    if (seenLlmSnapshot.current !== null && !Object.is(seenLlmSnapshot.current, llmSnapshot)) reloadCatalog()
+    seenLlmSnapshot.current = llmSnapshot
+  }, [llmSnapshot, reloadCatalog])
 
   /** 所有写入的唯一出口：失败/冲突 → 顶部提示（form 自己会重读最新值）。 */
   const save = useCallback(
@@ -256,7 +453,8 @@ function MemorySettingsForm({ form, loadCatalog }: MemorySettingsFormProps) {
 
   // —— 提炼模型 ——
   const selected = value.provider && value.model ? `${value.provider}/${value.model}` : ''
-  const groups = catalog.groups
+  const { list } = modelList
+  const groups = list.groups
   const selectedInCatalog =
     selected === '' || groups.some((group) => group.models.some((model) => `${group.id}/${model.id}` === selected))
   const selectedLabel = (() => {
@@ -377,13 +575,13 @@ function MemorySettingsForm({ form, loadCatalog }: MemorySettingsFormProps) {
             <small>轮末自动提炼用；显式 memory_write 不受影响</small>
           </label>
           <div className="memx-st-field">
-            <div className="memx-st-inline">
+            <div className="memx-st-inline memx-st-inline--select">
               <select
                 id="memx-st-model"
                 className="memx-st-select"
                 aria-label="提炼模型"
                 value={selected}
-                disabled={!writable || catalog.state === 'loading'}
+                disabled={!writable || modelList.state === 'loading'}
                 onChange={(event) => pickModel(event.target.value)}
               >
                 <option value="">跟随当前会话</option>
@@ -400,22 +598,36 @@ function MemorySettingsForm({ form, loadCatalog }: MemorySettingsFormProps) {
               </select>
               <button
                 type="button"
-                className="memx-st-input"
-                style={{ width: 'auto', cursor: 'pointer' }}
+                className="memx-st-btn"
                 onClick={reloadCatalog}
-                disabled={catalog.state === 'loading'}
-                title="重新读取模型目录"
+                disabled={modelList.state === 'loading'}
+                title="重新读取模型来源（配置 + 运行时目录）"
               >
-                {catalog.state === 'loading' ? '读取中…' : '刷新目录'}
+                {modelList.state === 'loading' ? '读取中…' : '刷新目录'}
               </button>
             </div>
-            {catalog.state === 'error' ? (
-              <span className="memx-st-error">模型目录读取失败：{catalog.error}</span>
-            ) : (
-              <span className="memx-st-hint">
-                选项按 provider 分组；空 = 跟随当前会话（用会话自己的模型）。
+            <span className="memx-st-hint" data-role="model-source">
+              {modelList.state === 'loading' && list.source === 'empty'
+                ? '模型来源：读取中…'
+                : MODEL_SOURCE_LABEL[list.source]}
+            </span>
+            {catalogError && <span className="memx-st-error">运行时目录读取失败：{catalogError}</span>}
+            {list.configNote && list.source !== 'empty' && (
+              <span className="memx-st-diag">配置暂不可读（{list.configNote}），列表仅来自运行时目录。</span>
+            )}
+            {list.reason && (
+              <span className="memx-st-error" data-role="model-empty-reason">
+                {list.reason}
               </span>
             )}
+            {list.failures.map((failure) => (
+              <span key={failure.id} className="memx-st-diag">
+                {`${failure.id}: ${failure.message}`}
+              </span>
+            ))}
+            <span className="memx-st-hint">
+              选项按 provider 分组；空 = 跟随当前会话（用会话自己的模型）。
+            </span>
           </div>
         </div>
 
