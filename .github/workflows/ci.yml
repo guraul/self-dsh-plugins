@@ -4,8 +4,8 @@
 #
 # 包管理：本仓库统一用 pnpm（全局约定禁用 npm / npx，npx 由 pnpm dlx 代替）。
 #
-# 另注：本仓库 .gitignore 是白名单，现已放行全部 5 个插件目录 + docs/ + scripts/ + .github/，
-# 因此 CI 检出后 5 个插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
+# 另注：本仓库 .gitignore 是白名单，现已放行全部 6 个插件目录 + docs/ + scripts/ + .github/，
+# 因此 CI 检出后 6 个插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
 # （例如新插件目录还没加进白名单），命中它是预期行为，不是失败。
 #
 # dsh-im-bridge-workspaces 是例外：干净 checkout 里装不上依赖（issue #3），
@@ -50,6 +50,12 @@ jobs:
             entry: |
               lib/index.js
               lib/client.js
+          - dir: dsh-plugin-memx
+            install: true
+            entry: |
+              lib/index.js
+              lib/client.js
+              lib/config.js
           - dir: dsh-plugin-product-subagents
             install: true
             entry: |
@@ -94,6 +100,7 @@ jobs:
           # 各插件 lockfile 现状（决定 frozen-lockfile 成败）：
           #   * dsh-auto-upgrade            —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           #   * dsh-external-discuss        —— 无任何 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
+          #   * dsh-plugin-memx             —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           #   * dsh-plugin-product-subagents —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           #   * dsh-im-bridge-workspaces     —— 不进本步骤（install=false，见上面的说明步骤）
           # 本仓库只留 pnpm-lock.yaml：npm 的 package-lock.json 已按全局约定清掉，并被 .gitignore 挡下。
@@ -101,6 +108,30 @@ jobs:
           # ⚠️ CI 下 pnpm 默认 frozen-lockfile=true：兜底必须显式 --no-frozen-lockfile。
           #    写成 `|| pnpm install` 在 GitHub Actions 里同样会冻锁、救不回来（PR #4 实测红过一次）。
           pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+
+      # 通用门禁：入库的构建产物必须与源码一致。
+      # 做法：有 scripts.build 就在装好依赖后重建一遍，然后要求该目录在 git 里「零改动」；
+      # 有改动说明提交上去的 lib/* 是过期的（或在 CI 里才被改写），直接判红。
+      # 仓库根校验：本步骤 working-directory 是插件目录，故用 git -C "${GITHUB_WORKSPACE}"。
+      - name: 构建产物新鲜度（有 scripts.build 才跑）
+        if: steps.presence.outputs.exists == 'true' && matrix.install
+        working-directory: ${{ matrix.dir }}
+        run: |
+          if node -e 'process.exit(require("./package.json").scripts && require("./package.json").scripts.build ? 0 : 1)'; then
+            pnpm run build
+            DIRTY=$(git -C "${GITHUB_WORKSPACE}" status --porcelain -- "${{ matrix.dir }}")
+            if [ -n "${DIRTY}" ]; then
+              echo "::error::构建产物与源码不一致：请在本地 pnpm run build 并提交 lib/*"
+              echo "── git status --porcelain -- ${{ matrix.dir }} ──"
+              printf '%s\n' "${DIRTY}"
+              echo "── git diff --stat -- ${{ matrix.dir }} ──"
+              git -C "${GITHUB_WORKSPACE}" diff --stat -- "${{ matrix.dir }}"
+              exit 1
+            fi
+            echo "  ✓ 重建后工作区干净，产物新鲜"
+          else
+            echo "  - 无 scripts.build，跳过（该包不产生入库的构建产物）"
+          fi
 
       - name: 运行测试（有 scripts.test 才跑）
         if: steps.presence.outputs.exists == 'true' && matrix.install
