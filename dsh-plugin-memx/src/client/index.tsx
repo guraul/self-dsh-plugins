@@ -7,6 +7,10 @@
  *
  * 配置读写走 `ctx.configForms.get('memx')`——entry id 就是 `cordis.patch.yml` 里
  * 那一行的 `id: memx`，不是包名。
+ *
+ * ⚠️ 不要在这里把 form 取成快照再闭包进组件：宿主下发设置项的时机同样与本插件
+ * 激活顺序无关，apply 那一刻可能是空的。传取值函数，由页面自己轮询（见
+ * MemorySettings.tsx）。
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // 类型级引入：激活 ctx.slots（ui-renderer）、ctx.configForms + settings.section
@@ -14,15 +18,14 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import { createMemorySettings, type MemxSettingsValue } from './MemorySettings.js'
+import { createMemorySettings, SETTINGS_ENTRY_ID, type MemxSettingsValue } from './MemorySettings.js'
 
 export const name = 'dsh-plugin-memx-client'
 
-/** 三个服务都是页面必需：缺任何一个这一页都无从渲染。 */
-export const inject = ['slots', 'remote', 'configForms']
-
-/** 宿主配置条目 id（`cordis.patch.yml` → `- insert: - id: memx`）。 */
-const SETTINGS_ENTRY_ID = 'memx'
+/** 页面必需的服务：缺任何一个这一页都无从渲染。
+ * `remote.session` 必须单独声明——只写 `remote` 时访问 `ctx.remote.session` 会抛
+ * `cannot get property "remote.session" without inject`（线上白屏的真凶）。 */
+export const inject = ['slots', 'remote', 'remote.session', 'configForms']
 
 /** 设置页 id（导航键）。 */
 const SECTION_ID = 'memx-memory'
@@ -31,9 +34,9 @@ const SECTION_ID = 'memx-memory'
 const SECTION_ORDER = 60
 
 export function apply(ctx: ClientContext): void {
-  const form = ctx.configForms.get<MemxSettingsValue>(SETTINGS_ENTRY_ID)
   const Section = createMemorySettings({
-    form,
+    // 取值函数：每次渲染现取，宿主还没下发设置项时返回 undefined（页面会显示状态并重试）。
+    formFor: () => ctx.configForms.get<MemxSettingsValue>(SETTINGS_ENTRY_ID),
     loadCatalog: () => ctx.remote.session.modelCatalog(),
   })
 
