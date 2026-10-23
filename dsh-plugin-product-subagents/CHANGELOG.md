@@ -2,6 +2,43 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.4] — 2026-10-23
+
+`product_wait` no longer misses a child that already finished and then blocks
+until the timeout.
+
+### Fixed
+- **A child that settled during the wait's own setup woke nobody** (issue #38).
+  `product_wait` used to snapshot `subagents.listChildren()` first and only then
+  subscribe to `subagent/end`. A settle landing in that window — including the
+  time `listChildren()` itself takes — was dropped, because the event is a
+  one-shot parent-scoped broadcast with no replay; the call then returned
+  `{"status":"timeout"}` after the full 300 s even though the child had answered
+  in 39 s. The subscription is now established **before** the snapshot.
+- **No second signal**: the child's own durable session log is now folded
+  (`sessions.get(childId)` → `foldProgress`, first read immediately, then every
+  2 s) and a closed turn plus a folded answer (`endedAt` + `lastAnswer`) also
+  completes the wait. Whichever signal lands first wins.
+
+### Changed
+- **`detectedBy` is now returned**: `"event"`, `"session-log"`,
+  `"already-settled"` or `"timeout"` says which signal woke the call
+  (`aborted` carries none).
+- **A timeout no longer lies**: if the log already shows a finished child at the
+  timeout boundary the result is `status: "completed"` with
+  `detectedBy: "session-log"`; only a genuinely silent child reports `timeout`,
+  and that result now carries `progress` (`lastActivityAt`, `receivedChars`,
+  `lastTask`).
+- **Default timeout 300 s → 120 s** (the cap stays 600 s; `timeout_ms` still
+  overrides).
+- `foldProgress` exposes `endedAt` (timestamp of the last `turn/end`).
+
+### Tests
+- New `test/product-wait.test.js`: six timing cases against a fake ctx and fake
+  sessions (event before subscribe, event after subscribe, log-only completion,
+  nothing at all, already-inactive child, pre-aborted signal) — offline, no
+  credentials.
+
 ## [0.4.3] — 2026-10-17
 
 Restores the read-only relay on DSH 0.2.1 — 0.4.2 silently handed delegated

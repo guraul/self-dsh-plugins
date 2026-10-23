@@ -3,8 +3,9 @@ import { recoverRemoteSessionId } from './bindings.js'
 /**
  * Fold the tail of one child session's durable events into a compact progress
  * snapshot: last turn, step count, the latest product_submit task, the latest
- * answer text, last activity time, and the pinned product/remote session id
- * (from the PRODUCT_SESSION marker the bridge tool echoes in every result).
+ * answer text, last activity time, whether (and when) the last turn closed, and
+ * the pinned product/remote session id (from the PRODUCT_SESSION marker the
+ * bridge tool echoes in every result).
  * Schema-tolerant: unknown event shapes are skipped, never thrown on.
  */
 export function foldProgress(session) {
@@ -16,6 +17,7 @@ export function foldProgress(session) {
     lastTask: undefined,
     lastAnswer: undefined,
     lastActivityAt: undefined,
+    endedAt: undefined,
   }
   const start = Math.max(0, events.length - 150)
   for (let i = start; i < events.length; i += 1) {
@@ -30,7 +32,10 @@ export function foldProgress(session) {
         break
       }
       case 'turn/end': {
-        if (ts !== undefined) out.lastActivityAt = ts
+        if (ts !== undefined) {
+          out.lastActivityAt = ts
+          out.endedAt = ts
+        }
         break
       }
       case 'step/start': {

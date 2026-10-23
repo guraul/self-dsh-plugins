@@ -21,6 +21,7 @@ test('foldProgress: turn/step/task/answer/marker', () => {
   assert.equal(out.stepCount, 1)
   assert.equal(out.lastTask, 'do thing A')
   assert.match(out.lastAnswer, /PROBE_CONT/)
+  assert.equal(out.endedAt, now - 49000)
   assert.equal(out.product, 'acp')
   assert.equal(out.remoteSessionId, 'sess-123')
 })
