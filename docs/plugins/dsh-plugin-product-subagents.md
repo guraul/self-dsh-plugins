@@ -48,6 +48,7 @@ lib/
   run.js              # 跨平台进程启动（Windows .cmd shim）
   availability.js     # CLI 探测
   bindings.js         # child → remote 绑定表 + log-marker 恢复
+  session-events.js   # sessionQuery 读事件 + 归一化（payload/timestamp）
   progress.js         # 会话日志折叠（progress / trace / token usage）
   children.js         # listChildren() 并集：身份行 vs 诊断行
   lossless.js         # stripUndefined()：工具结果必须是 lossless JSON
@@ -71,11 +72,13 @@ docs/COMPATIBILITY.md # DSH 版本矩阵，以及每个 verdict 是怎么产生�
 promise（`dsh-subagent/lib/index.js:2075`）；它被存进 binding（`record.settle`），`product_wait`
 直接 `Promise.race([settle, timeout, abort])`。
 
-> ⚠️ **别再用事件或会话日志**（0.4.4 试过，生产不可达，见 issue #40）：
+> ⚠️ **别把事件或会话日志当唤醒信号**（0.4.4 试过，生产不可达，见 issue #40）：
 > - `ctx.on('subagent/end')` 是**父级 scoped 的一次性广播**，插件在自身 ctx 上注册的监听
 >   对真实 child 从未触发；
-> - `sessions.get(id)` **只返回 live 会话**（settle 后已被移出 store），且真实 `Session` 对象
->   **没有 `events` 属性**，`foldProgress(session)` 因此永远返回 `null`。
+> - `sessions.get(id)` **只返回 live 会话**（settle 后已被移出 store）。
+>
+> 日志本身现在读得到（走 `sessionQuery`，见下节），但只用于 `answer` 兜底、`trace` 和超时时的
+> `progress`，**永远不参与判断 child 是否结束**。
 >
 > 0.4.4 的 `detectedBy: 'session-log'` 分支属于死代码，已在 0.4.5 删除。
 > `subagent/end` 监听仅保留为**无 settle 句柄时的兜底**（例如 child 由上一个进程创建）。
@@ -95,10 +98,41 @@ promise（`dsh-subagent/lib/index.js:2075`）；它被存进 binding（`record.s
   任务一结束就返回，超时只是安全网——不要把默认值调小，否则会掐断正常的长任务。
 - activation **reject** 时返回 `status:'failed'` + `detectedBy:'activation'` + `failure`，
   **不会**把任何内容当作 `answer` 返回。
-- `answer` 取自 activation 结算值的 `output`（文本块拼接）；`stopReason` 同源。
+- `answer` 取自 activation 结算值的 `output`（文本块拼接）；`output` 缺失时回退到 child 日志里
+  最后一条 `assistant/message` / `tool/result`（`lastAnswerFull()`，**不截断**）。`stopReason` 同源。
   `foldProgress.lastAnswer` 仍是 300 字符的**展示用**摘要（`subagent_progress` 的语义），两者不要混用。
 - `finish` 会 `clearTimeout` + `clearInterval` + 取消 `subagent/end` 订阅与 abort 监听；轮询 interval
   额外 `unref()`，不会拖住进程。结果仍经 `stripUndefined()`，保持严格 lossless JSON。
+
+## 会话事件读取走 `sessionQuery`（#41）
+
+`subagent_progress` / `product_wait` 需要的「子代理日志」统一由 `lib/session-events.js`
+的 `loadEvents(ctx, sessionId)` 提供：**会话 id → 归一化事件数组**，任何失败都退化为 `[]`，绝不抛。
+调用方据此拼 `{ events }` 再交给 `progress.js` 的折叠函数（`foldProgress` / `foldTrace` /
+`foldTokenUsage` / `lastAnswerFull` 的签名保持不变）。
+
+**为什么不直接读真实 `Session` 对象**（issue #41 的两层病因）：
+
+1. 真实 `Session` **没有 `events` 属性**，只有 `snapshotEvents(fromSeq, toSeqExclusive)`。
+   `foldProgress(session)` 入口的 `Array.isArray(session.events)` 因此永远为 false → 返回 `null`
+   → `subagent_progress` 恒为 `stepCount: 0` / `trace: []`。
+2. `sessions.get(id)` **只服务 live 会话**（settle 后 `store.delete()`），子代理一结束就取不到。
+3. 真实事件的正文在 **`data`** 里（信封是 `{ type, seq, time, data }`），不是 `payload`；
+   旧折叠函数只读 `payload`，即使来源修好也提取不到 `lastTask` / `lastAnswer`。
+   `progress.js` 现在按 `payload → data → body` 的顺序取正文，并兼容
+   `tool/call.data.arguments`（JSON 字符串）与 `tool/result.data.message`。
+
+**为什么是 `sessionQuery`**（`ctx.get('sessionQuery')`，可选服务，缺它不阻塞插件加载）：
+
+| 通道 | 结论 |
+|---|---|
+| `sessionQuery.readSession(id)` | ✅ **首选**：完整原始日志，事件带 `data`；live 优先，冷读走 `persistence.open(id, 'read')`，**已 settle 的会话也读得到** |
+| `sessionQuery.listEvents(id)` | ⚠️ 兜底：只返回轻量记录 `{ sessionId, seq, type, time, surface }`，**不含 payload**，只能算 turn/step；不同 DSH 版本形状可能变化，不能作为唯一来源 |
+| `session.snapshotEvents()` | ❌ 只覆盖 live，且源码标注 deprecated（"new calls are prohibited"）；仅作最后兜底 |
+| 自己解 `~/.dsh/sessions/**/session.v4.jsonl.zstd` | ❌ 多帧 zstd，重且易碎，不碰 |
+
+实现要点：5s 超时（`AbortSignal` 之外的软超时，超时即退化为兜底/空）；**不做缓存**（运行中的日志会增长）；
+告警只打一次（`warnOnce`），避免每轮 `subagent_progress` 刷日志。
 
 ## 设计规则（不可协商）
 
@@ -246,4 +280,17 @@ promise（`dsh-subagent/lib/index.js:2075`）；它被存进 binding（`record.s
     （`foldProgress.lastAnswer` 的 300 字符只是展示摘要）；
   - **测试**：`test/product-wait.test.js` 八条时序用例（离网、假 ctx / 假 session），
     含「续接后新一轮仍打开不得回吐旧答案」「1000 字符答案不被截断」。
+- **`0.4.6`（issue #41：`subagent_progress` 永远为空）**：
+  - **事故**：一个日志里 25 条事件的子代理，`subagent_progress` 返回 `stepCount: 0`、`trace: []`、
+    无 `lastAnswer`；
+  - **根因（两层）**：① 真实 `Session` 没有 `events` 属性，`foldProgress` 首行即 `return null`；
+    ② 真实事件正文在 `data`，折叠函数只读 `payload`；
+  - **修法**：新增 `lib/session-events.js`（`loadEvents()`，`sessionQuery.readSession()` 优先、
+    `listEvents()` 兜底、`snapshotEvents()` 最后兜底、5s 超时、告警一次、不缓存）；
+    `progress.js` 改为 `payload → data → body` 取正文，并识别 `tool/call.data.arguments` /
+    `tool/result.data.message`；`subagent_progress` / `product_wait` 的日志读取改走适配层
+    （`product_wait` 只把它用于 trace 与答案兜底，唤醒仍看 activation settle）；
+    `bindings.recoverRemoteSessionId` 同步接受 `data` 与 live `snapshotEvents()`；
+  - **测试**：新增 `test/session-events.test.js`（真实事件信封、回退、抛错、超时）；
+    `test/progress.test.js` 补 `data` 信封与 `data.message.usage` 用例；`product_wait` 八条时序用例不变全过。
 

@@ -68,3 +68,47 @@ test('lastAnswerFull keeps the full text while foldProgress truncates', () => {
   assert.equal(lastAnswerFull({}), undefined)
   assert.equal(lastAnswerFull(undefined), undefined)
 })
+
+test('foldProgress reads the real event envelope (data, not payload)', () => {
+  const now = Date.now()
+  const session = { events: events([
+    { type: 'turn/start', time: now - 60000, data: { turn: 1 } },
+    { type: 'step/start', time: now - 59000, data: { turn: 1, step: 1 } },
+    {
+      type: 'tool/call',
+      time: now - 58000,
+      data: { turn: 1, step: 1, callId: 'call-1', name: 'product_submit', arguments: '{"task":"do real thing"}' },
+    },
+    {
+      type: 'tool/result',
+      time: now - 50000,
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          id: 'result-1',
+          role: 'tool',
+          content: [{ type: 'text', text: 'ok\nPRODUCT_SESSION:acp:sess-999' }],
+        },
+      },
+    },
+    { type: 'turn/end', time: now - 49000, data: { turn: 1 } },
+  ]) }
+  const out = foldProgress(session)
+  assert.equal(out.stepCount, 1)
+  assert.equal(out.lastTask, 'do real thing')
+  assert.match(out.lastAnswer, /^ok/)
+  assert.equal(out.lastAnswer.includes('result-1'), false)
+  assert.equal(out.product, 'acp')
+  assert.equal(out.remoteSessionId, 'sess-999')
+  assert.equal(out.lastActivityAt, now - 49000)
+  assert.equal(out.turnOpen, false)
+  assert.equal(lastAnswerFull(session), 'ok\nPRODUCT_SESSION:acp:sess-999')
+})
+
+test('foldTokenUsage reads data.message.usage', () => {
+  const session = { events: events([
+    { type: 'assistant/message', time: 1, data: { turn: 1, step: 1, message: { content: [], usage: { input_tokens: 4, output_tokens: 2 } } } },
+  ]) }
+  assert.deepEqual(foldTokenUsage(session), { inputTokens: 4, outputTokens: 2, cacheReadInputTokens: 0 })
+})

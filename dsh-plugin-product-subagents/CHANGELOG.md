@@ -2,6 +2,54 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.6] — 2026-10-23
+
+`subagent_progress` could never report anything: `foldProgress()` read a
+`session.events` property that the real harness `Session` does not have, and the
+events it was supposed to fold carry their body in `data`, not `payload`. Both
+layers are fixed; the session log is now read through the `sessionQuery`
+service, which also covers settled children.
+
+### Fixed
+- **`subagent_progress` returned `stepCount: 0`, `trace: []` and no
+  `lastAnswer` for every child** (issue #41), including one whose log held 25
+  events. Two independent causes:
+  1. **Source** — `lib/progress.js` gated on `Array.isArray(session.events)`.
+     The real `Session` exposes `snapshotEvents()` / `log` only, so the fold
+     returned `null` on its first line. On top of that, `sessions.get(id)` serves
+     only **live** sessions, so a settled child was absent from the store.
+  2. **Field name** — real events are `{ type, seq, time, data }`; the folds read
+     `event.payload`, so even a correct log produced no `lastTask` / `lastAnswer`
+     / marker.
+- **New `lib/session-events.js`** — `loadEvents(ctx, sessionId)` maps a session
+  id to a normalized event array (`payload` mirrors `data`, `timestamp` mirrors
+  `time`, original fields kept). It prefers `sessionQuery.readSession()` (full
+  log, live-preferred, cold reads via persistence), falls back to
+  `sessionQuery.listEvents()` (metadata-only records) and then to the live
+  `Session.snapshotEvents()`. Any failure degrades to `[]`; a 5 s timeout guards
+  the read; the warning is emitted once; nothing is cached (a running log grows).
+- **`foldProgress` / `lastAnswerFull` / `foldTrace` / `foldTokenUsage`** now read
+  `payload → data → body`, so both fixture-shaped and real events fold
+  correctly. `tool/call` recognises `data.arguments` (JSON string) and
+  `tool/result` reads `data.message` content instead of scanning arbitrary
+  strings (which used to return the message id).
+- **`subagent_progress`** builds `{ events }` from `loadEvents()` before folding;
+  `status` / `inFlight` still come from the live store and the binding.
+- **`product_wait`** does the same for its answers and trace, and falls back to
+  the untruncated `lastAnswerFull()`. Its wake-up signal is unchanged: the
+  activation settlement promise (0.4.5, issue #40).
+- **`bindings.recoverRemoteSessionId()`** accepts `data` and, for a live
+  `Session`, `snapshotEvents()`; settled sessions are still recovered through the
+  durable registry.
+
+### Tests
+- New `test/session-events.test.js`: real envelope with `data`, `readSession`
+  preference, live `snapshotEvents()` fallback, throwing service, timeout.
+- `test/progress.test.js`: real-envelope case asserting `lastTask` / `lastAnswer`
+  / marker, and `data.message.usage` for token folding.
+- `test/product-wait.test.js`: unchanged (the 8 timing cases still pass).
+- 74 tests pass, 0 fail.
+
 ## [0.4.5] — 2026-10-23
 
 `product_wait` now waits on the child activation's own settlement promise,
