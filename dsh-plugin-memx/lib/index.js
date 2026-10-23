@@ -4,7 +4,7 @@
  * 单一事实源是 memx 仓的 DSH 宿主适配器：
  *   /Users/gubin/workspace/memx/src/hosts/dsh/index.ts
  * 这里不复制任何记忆逻辑（注入 / 捕获 / 提炼 / 写盘全部在 memx 的 core 里），
- * 只把它的导出原样转发给 Cordis。
+ * 只把它的导出原样转发给 Cordis，**外加**一份本包自己的配置声明。
  *
  * 为什么不直接 `export { … } from "<…>/index.ts"`：
  * Node 24 默认只有 strip-only 类型剥离，memx 源码里有 parameter property
@@ -12,10 +12,18 @@
  * ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX（2026-10-22 实测）。所以这里注册一个
  * 只作用于 memx 源码目录的 load hook，用 transform 模式剥类型；
  * 路径仍指向 memx 源码本身，memx 改代码后无需在本包重编译。
+ *
+ * 为什么 `Config` 不再转发 memx 那份：
+ * 宿主 0.2.1 的设置面只认 schemastery `.volatile()`（dsh-settings 用
+ * `volatileForm(Config)` 投影可编辑字段）。memx 的 Config 是手写 standard-schema，
+ * 投影不出任何字段 → 设置页整页消失。本包的 `Config`（src/config.ts → lib/config.js）
+ * 与 memx 的 `DshMemxConfig` 四字段逐一对应，全部 volatile；memx 的适配层会拆
+ * 宿主传进来的引用 cell。
  */
 import { registerHooks, stripTypeScriptTypes } from "node:module";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { Config as MemxShellConfig } from "./config.js";
 
 const MEMX_ROOT = "/Users/gubin/workspace/memx/";
 const MEMX_ENTRY = `${MEMX_ROOT}src/hosts/dsh/index.ts`;
@@ -42,9 +50,11 @@ export const {
   name,
   inject,
   apply,
-  Config,
   INJECT_SECTION_ORDER,
   INJECT_SECTION_NAME,
   DEFAULT_THROTTLE_MINUTES,
   NOTICE_MAX_CHARS,
 } = memx;
+
+/** 本包自己的配置声明（四个字段全 volatile）；**不要**改回 `memx.Config`。 */
+export const Config = MemxShellConfig;
