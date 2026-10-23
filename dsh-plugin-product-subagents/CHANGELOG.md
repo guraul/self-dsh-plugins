@@ -17,8 +17,20 @@ until the timeout.
   in 39 s. The subscription is now established **before** the snapshot.
 - **No second signal**: the child's own durable session log is now folded
   (`sessions.get(childId)` → `foldProgress`, first read immediately, then every
-  2 s) and a closed turn plus a folded answer (`endedAt` + `lastAnswer`) also
-  completes the wait. Whichever signal lands first wins.
+  2 s) and a closed last turn plus a folded answer (`endedAt`, `turnOpen ===
+  false`, `lastAnswer`) also completes the wait. Whichever signal lands first
+  wins.
+- **A resumed child could be reported complete with the previous turn's
+  answer.** The tail of a child continued via `send_message` holds the earlier
+  `turn/end` while the new turn is still streaming, so `endedAt` alone reported
+  `completed` with the *old* answer — a silent wrong answer, worse than the
+  timeout. `foldProgress` now tracks `turnOpen` (set by `turn/start`, cleared by
+  `turn/end`) and the log signal additionally requires it to be `false`.
+- **The log path no longer truncates the answer.** `foldProgress.lastAnswer` is
+  a 300-character display cap; `product_wait` now returns the full text via the
+  new `lastAnswerFull()`. A folded answer is only used as `answer` when its turn
+  is closed (or the child is already settled), never while a turn is in
+  flight.
 
 ### Changed
 - **`detectedBy` is now returned**: `"event"`, `"session-log"`,
@@ -31,13 +43,15 @@ until the timeout.
   `lastTask`).
 - **Default timeout 300 s → 120 s** (the cap stays 600 s; `timeout_ms` still
   overrides).
-- `foldProgress` exposes `endedAt` (timestamp of the last `turn/end`).
+- `foldProgress` exposes `endedAt` (timestamp of the last `turn/end`) and
+  `turnOpen` (whether a later `turn/start` re-opened the turn).
 
 ### Tests
-- New `test/product-wait.test.js`: six timing cases against a fake ctx and fake
-  sessions (event before subscribe, event after subscribe, log-only completion,
-  nothing at all, already-inactive child, pre-aborted signal) — offline, no
-  credentials.
+- New `test/product-wait.test.js`: eight timing cases against a fake ctx and
+  fake sessions (event before subscribe, event after subscribe, log-only
+  completion, nothing at all, already-inactive child, pre-aborted signal, a
+  resumed child whose new turn is still open, and a 1000-character answer) —
+  offline, no credentials.
 
 ## [0.4.3] — 2026-10-17
 

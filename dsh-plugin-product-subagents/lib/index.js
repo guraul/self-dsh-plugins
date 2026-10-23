@@ -1,7 +1,7 @@
 import { bindings, MARKER, recoverRemoteSessionId } from './bindings.js'
 import { buildBridgeSet } from './bridge-set.js'
 import { validateConfig } from './config.js'
-import { foldProgress, foldTrace, foldTokenUsage } from './progress.js'
+import { foldProgress, foldTrace, foldTokenUsage, lastAnswerFull } from './progress.js'
 import { DEFAULT_PROVIDER_NAMESPACE, runtimeProviderName } from './providers.js'
 import { createRegistry } from './registry.js'
 import { registerRelayPreset } from './relay-preset.js'
@@ -173,7 +173,7 @@ export function apply(ctx, config = {}) {
     bindings, MARKER, recoverRemoteSessionId,
     bridges, availability, providers, roles,
     registry, persistRemote, cancelDispose,
-    foldProgress, foldTrace, foldTokenUsage,
+    foldProgress, foldTrace, foldTokenUsage, lastAnswerFull,
     state, maxConcurrent, availableProviders, runtimeName,
     relayPreset: () => relay.ready,
     maxDelegationDepth: cfg.maxDelegationDepth !== undefined ? cfg.maxDelegationDepth : 2,

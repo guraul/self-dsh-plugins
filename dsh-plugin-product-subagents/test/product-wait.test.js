@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerProductWait } from '../lib/tools/product-wait.js'
-import { foldProgress, foldTrace } from '../lib/progress.js'
+import { foldProgress, foldTrace, lastAnswerFull } from '../lib/progress.js'
 
 const CHILD_ID = 'child-1'
 
@@ -26,7 +26,7 @@ function makeHarness({ children = [child('running')], log, listChildren } = {}) 
       return () => handlers.delete(handler)
     },
   }
-  registerProductWait(ctx, { foldProgress, foldTrace })
+  registerProductWait(ctx, { foldProgress, foldTrace, lastAnswerFull })
   return {
     tool: definition,
     handlers,
@@ -109,5 +109,32 @@ test('an already-aborted signal reports aborted', async () => {
   const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec(controller.signal))
   assert.equal(result.status, 'aborted')
   assert.equal(result.detectedBy, undefined)
+  assert.equal(harness.handlers.size, 0)
+})
+
+test('a resumed child with a new open turn does not report the previous answer', async () => {
+  const now = Date.now()
+  const harness = makeHarness({ log: [
+    { type: 'turn/start', timestamp: now - 9000, payload: { turn: 1 } },
+    { type: 'assistant/message', timestamp: now - 8000, payload: { message: { content: [{ type: 'text', text: 'old answer' }] } } },
+    { type: 'turn/end', timestamp: now - 7000, payload: { turn: 1 } },
+    { type: 'turn/start', timestamp: now - 1000, payload: { turn: 2 } },
+  ] })
+  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec())
+  assert.equal(result.status, 'timeout')
+  assert.equal(result.detectedBy, 'timeout')
+  assert.notEqual(result.answer, 'old answer')
+  assert.equal(result.answer, undefined)
+  assert.equal(harness.handlers.size, 0)
+})
+
+test('the session-log path returns the full answer, not the display cap', async () => {
+  const answer = 'x'.repeat(1000)
+  const harness = makeHarness({ log: closedLog(Date.now(), answer) })
+  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 1000 }, exec())
+  assert.equal(result.status, 'completed')
+  assert.equal(result.detectedBy, 'session-log')
+  assert.equal(result.answer.length, 1000)
+  assert.equal(result.answer, answer)
   assert.equal(harness.handlers.size, 0)
 })

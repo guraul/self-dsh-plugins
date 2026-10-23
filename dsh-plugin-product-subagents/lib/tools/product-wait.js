@@ -17,7 +17,7 @@ const FALLBACK_POLL_MS = 2000
  * one-shot event was emitted before this call ever subscribed.
  */
 export function registerProductWait(ctx, deps) {
-  const { foldProgress, foldTrace } = deps
+  const { foldProgress, foldTrace, lastAnswerFull } = deps
   ctx.tools.register(defineTool({
     name: 'product_wait',
     description: 'Block until the given product subagent finishes (or the timeout elapses), then return its final answer, stop reason, and latest trace. Attaches to a background subagent id returned by product_delegate — no polling needed on the caller side. Returns immediately with status "ready" when the child already settled, and "timeout"/"aborted" otherwise. detectedBy reports which signal woke the call: "event", "session-log", "already-settled" or "timeout".',
@@ -44,11 +44,12 @@ export function registerProductWait(ctx, deps) {
       }
 
       // The durable half of a settlement: the child's own log shows a closed
-      // turn AND an answer. An answer alone is not enough — a turn that is
-      // still streaming tokens has one too.
+      // LAST turn (a resumed child opens a new turn and keeps the previous
+      // turn/end in its tail) AND an answer. An answer alone is not enough — a
+      // turn that is still streaming tokens has one too.
       const settledFold = () => {
         const fold = foldNow()
-        return fold && fold.endedAt !== undefined && fold.lastAnswer ? fold : null
+        return fold && fold.endedAt !== undefined && fold.turnOpen !== true && fold.lastAnswer ? fold : null
       }
 
       let waitDone = false
@@ -127,9 +128,16 @@ export function registerProductWait(ctx, deps) {
       const session = sessionSvc ? sessionSvc.get(childId) : undefined
       const fold = session ? foldProgress(session) : null
       const lastAssistant = outcome.info && outcome.info.lastAssistantMessage
-      const answer = lastAssistant
-        ? lastAssistant.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n')
-        : (fold ? fold.lastAnswer : undefined)
+      // A folded answer only counts when its turn is closed — on a resumed
+      // child the tail still holds the previous turn's answer while a new turn
+      // is streaming, and returning that would be a silent wrong answer.
+      const closed = Boolean(fold && fold.endedAt !== undefined && fold.turnOpen !== true)
+      let answer
+      if (lastAssistant) {
+        answer = lastAssistant.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n')
+      } else if (closed || (outcome.status === 'ready' && fold && fold.turnOpen !== true)) {
+        answer = lastAnswerFull(session)
+      }
       return stripUndefined({
         childId,
         status: outcome.status,
