@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { stripUndefined } from '../lossless.js'
 import { findChildEntry } from '../children.js'
+import { loadEvents } from '../session-events.js'
 
 const DEFAULT_TIMEOUT_MS = 300000
 const MAX_TIMEOUT_MS = 600000
@@ -17,16 +18,18 @@ const MAX_TIMEOUT_MS = 600000
  * Why not the alternatives (measured on DSH 0.2.1-rc.2, issue #40):
  * - `ctx.on('subagent/end')` is a parent-scoped emit; a listener registered on
  *   the plugin's own context never observed it for a real child.
- * - The child's session log is unreachable after it settles: `sessions.get()`
- *   serves only *live* sessions, and `foldProgress()` needs `session.events`,
- *   which the real Session object does not expose. Both were tried in 0.4.4 and
- *   never fired in production.
+ * - Reading the child's session log was tried in 0.4.4 and never fired there
+ *   (issue #40): `sessions.get()` serves only *live* sessions and
+ *   `foldProgress()` needed `session.events`, which the real Session object does
+ *   not expose. The log is readable now — through `sessionQuery`
+ *   (lib/session-events.js, issue #41) — but it stays a *supplement* here
+ *   (`answer` fallback, `trace`, timeout `progress`), never the wake-up signal.
  *
  * A bare `subagent/end` listener is kept as a best-effort bonus only when no
  * settlement handle exists (e.g. a child started by an earlier process).
  */
 export function registerProductWait(ctx, deps) {
-  const { foldProgress, foldTrace, bindings } = deps
+  const { foldProgress, foldTrace, lastAnswerFull, bindings } = deps
   ctx.tools.register(defineTool({
     name: 'product_wait',
     description: 'Block until the given product subagent finishes (or the timeout elapses), then return its final answer, stop reason, and latest trace. Attaches to a background subagent id returned by product_delegate. `detectedBy` reports which signal woke the call: "activation" (the child activation settled — the normal path), "already-settled", "event", "timeout", "aborted" or "unknown".',
@@ -48,10 +51,12 @@ export function registerProductWait(ctx, deps) {
         return stripUndefined({ childId, status: 'aborted', detectedBy: 'aborted' })
       }
 
-      const sessionSvc = ctx.get('sessions')
-      const foldNow = () => {
-        const session = sessionSvc ? sessionSvc.get(childId) : undefined
-        return session ? foldProgress(session) : null
+      // The child's log is read through sessionQuery (lib/session-events.js), so
+      // a settled child still yields its events; it feeds the trace and the
+      // answer fallback only, never the wake-up signal (issue #41).
+      const foldNow = async () => {
+        const sessionLike = { events: await loadEvents(ctx, childId) }
+        return { sessionLike, fold: foldProgress(sessionLike) }
       }
 
       const record = bindings ? bindings.get(childId) : undefined
@@ -137,15 +142,14 @@ export function registerProductWait(ctx, deps) {
         outcome = await waitForEvent()
       }
 
-      const session = sessionSvc ? sessionSvc.get(childId) : undefined
-      const fold = session ? foldProgress(session) : null
+      const { sessionLike, fold } = await foldNow()
 
       const blocks = outcome.terminal && Array.isArray(outcome.terminal.output)
         ? outcome.terminal.output
         : (outcome.info && outcome.info.lastAssistantMessage)
       const answer = Array.isArray(blocks)
         ? blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n')
-        : (fold ? fold.lastAnswer : undefined)
+        : (lastAnswerFull(sessionLike) || (fold ? fold.lastAnswer : undefined))
 
       const stopReason = outcome.terminal
         ? outcome.terminal.stopReason
@@ -168,7 +172,7 @@ export function registerProductWait(ctx, deps) {
           receivedChars: fold && fold.lastAnswer ? fold.lastAnswer.length : 0,
           lastTask: fold ? fold.lastTask : undefined,
         } : undefined,
-        trace: fold ? foldTrace(session) : undefined,
+        trace: sessionLike.events.length > 0 ? foldTrace(sessionLike) : undefined,
       })
     },
   }))

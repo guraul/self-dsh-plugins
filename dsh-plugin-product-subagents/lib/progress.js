@@ -6,6 +6,12 @@ import { recoverRemoteSessionId } from './bindings.js'
  * answer text, last activity time, whether (and when) the last turn closed, and
  * the pinned product/remote session id (from the PRODUCT_SESSION marker the
  * bridge tool echoes in every result).
+ *
+ * Takes a session-like `{ events }`; callers get that from
+ * `loadEvents(ctx, childId)` (lib/session-events.js), never from the live
+ * `Session` object — the real one has no `events` property (issue #41).
+ * Real events carry their body in `data`, so `payload` is read with a `data`
+ * fallback as well.
  * Schema-tolerant: unknown event shapes are skipped, never thrown on.
  */
 export function foldProgress(session) {
@@ -25,7 +31,7 @@ export function foldProgress(session) {
     const event = events[i]
     if (!event || typeof event.type !== 'string') continue
     const ts = event.timestamp ?? event.time ?? undefined
-    const payload = (event && event.payload) || {}
+    const payload = payloadOf(event)
     switch (event.type) {
       case 'turn/start': {
         if (typeof payload.turn === 'number') out.turn = payload.turn
@@ -55,15 +61,13 @@ export function foldProgress(session) {
         break
       }
       case 'tool/call': {
-        if (payload && payload.name === 'product_submit') {
-          const task = extractString(payload, 'task')
-          if (task) out.lastTask = task.slice(0, 300)
-        }
+        const task = submittedTask(payload)
+        if (task) out.lastTask = task.slice(0, 300)
         if (ts !== undefined) out.lastActivityAt = ts
         break
       }
       case 'tool/result': {
-        const text = extractAnyText(payload)
+        const text = toolResultText(payload)
         if (text) {
           out.lastAnswer = text.slice(0, 300)
           if (ts !== undefined) out.lastActivityAt = ts
@@ -96,12 +100,12 @@ export function lastAnswerFull(session) {
   for (let i = start; i < events.length; i += 1) {
     const event = events[i]
     if (!event || typeof event.type !== 'string') continue
-    const payload = (event && event.payload) || {}
+    const payload = payloadOf(event)
     if (event.type === 'assistant/message') {
       const text = messageText(payload)
       if (text) answer = text
     } else if (event.type === 'tool/result') {
-      const text = extractAnyText(payload)
+      const text = toolResultText(payload)
       if (text) answer = text
     }
   }
@@ -129,7 +133,7 @@ export function foldTrace(session, max = 12) {
 
 function compactEvent(event) {
   const timestamp = event.timestamp ?? event.time
-  const payload = (event && event.payload) || {}
+  const payload = payloadOf(event)
   let brief
   switch (event.type) {
     case 'turn/start':
@@ -142,8 +146,9 @@ function compactEvent(event) {
       brief = `step ${payload.turn}.${payload.step}`
       break
     case 'tool/call': {
-      if (payload.name === 'product_submit' && payload.args && typeof payload.args.task === 'string') {
-        brief = `product_submit: ${payload.args.task.slice(0, 80)}`
+      const task = submittedTask(payload)
+      if (task) {
+        brief = `product_submit: ${task.slice(0, 80)}`
       } else {
         brief = `tool ${payload.name || '?'}`
       }
@@ -171,7 +176,7 @@ export function foldTokenUsage(session) {
   for (let i = start; i < events.length; i += 1) {
     const event = events[i]
     if (!event || event.type !== 'assistant/message') continue
-    const payload = (event.payload) || {}
+    const payload = payloadOf(event)
     const message = payload.message || payload
     const usage = message.usage || payload.usage
     if (!usage || typeof usage !== 'object') continue
@@ -181,6 +186,14 @@ export function foldTokenUsage(session) {
   }
   if (input === 0 && output === 0 && cacheRead === 0) return undefined
   return { inputTokens: input, outputTokens: output, cacheReadInputTokens: cacheRead }
+}
+
+function payloadOf(event) {
+  if (!event) return {}
+  if (event.payload !== undefined && event.payload !== null) return event.payload
+  if (event.data !== undefined && event.data !== null) return event.data
+  if (event.body !== undefined && event.body !== null) return event.body
+  return {}
 }
 
 function messageText(payload) {
@@ -194,6 +207,37 @@ function messageText(payload) {
   return text || undefined
 }
 
+/**
+ * The task text of a `product_submit` tool call, or undefined for any other
+ * call. Real `tool/call` events carry `{ name, arguments }` where `arguments`
+ * is the JSON-encoded argument object; older fixtures nest `{ args: { task } }`.
+ */
+function submittedTask(payload) {
+  if (!payload || payload.name !== 'product_submit') return undefined
+  const raw = payload.args !== undefined ? payload.args : payload.arguments
+  let args = raw
+  if (typeof raw === 'string') {
+    try {
+      args = JSON.parse(raw)
+    } catch {
+      args = undefined
+    }
+  }
+  return extractString(args, 'task') || extractString(payload, 'task')
+}
+
+/**
+ * The text of a `tool/result` event. Real results carry `data.message` with the
+ * usual content blocks; scanning arbitrary leaves would otherwise return the
+ * message id instead of the text.
+ */
+function toolResultText(payload) {
+  if (!payload) return undefined
+  const message = payload.message
+  if (message && typeof message === 'object') return messageText({ message })
+  return extractString(payload, 'text')
+}
+
 function extractString(value, key) {
   if (!value || typeof value !== 'object') return undefined
   if (typeof value[key] === 'string') return value[key]
@@ -201,20 +245,6 @@ function extractString(value, key) {
     const v = value[k]
     if (v && typeof v === 'object') {
       const result = extractString(v, key)
-      if (result) return result
-    }
-  }
-  return undefined
-}
-
-function extractAnyText(value) {
-  if (typeof value === 'string') return value
-  if (!value || typeof value !== 'object') return undefined
-  for (const k of Object.keys(value)) {
-    const v = value[k]
-    if (typeof v === 'string' && v.length > 4) return v
-    if (v && typeof v === 'object') {
-      const result = extractAnyText(v)
       if (result) return result
     }
   }

@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { stripUndefined } from '../lossless.js'
 import { findChildEntry } from '../children.js'
+import { loadEvents } from '../session-events.js'
 
 /** Progress tool: latest status, internal trace, token usage of one child. */
 export function registerSubagentProgress(ctx, deps) {
@@ -19,7 +20,10 @@ export function registerSubagentProgress(ctx, deps) {
       const childId = args.subagent_id
       const record = bindings.get(childId)
       const session = ctx.get('sessions') ? ctx.get('sessions').get(childId) : undefined
-      const fold = session ? foldProgress(session) : null
+      // The child's log is read through sessionQuery, so a settled child (no
+      // longer in the live store) still yields its events (issue #41).
+      const sessionLike = { events: await loadEvents(ctx, childId) }
+      const fold = foldProgress(sessionLike)
       let listStatus = null
       try {
         const children = await ctx.subagents.listChildren(exec.agent.session.id, exec.signal)
@@ -51,9 +55,9 @@ export function registerSubagentProgress(ctx, deps) {
         lastTask: fold ? fold.lastTask : undefined,
         lastAnswer: fold ? fold.lastAnswer : undefined,
         lastActivityAt: fold && fold.lastActivityAt ? new Date(fold.lastActivityAt).toISOString() : undefined,
-        tokenUsage: session ? foldTokenUsage(session) : undefined,
+        tokenUsage: foldTokenUsage(sessionLike),
         // internal trace: recent turn/step/tool/answer events from the child's own log
-        trace: session ? foldTrace(session) : undefined,
+        trace: foldTrace(sessionLike),
         inFlight,
       })
     },
