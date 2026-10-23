@@ -1,6 +1,6 @@
 # AGENTS.md — self-dsh-plugins
 
-**Updated:** 2026-10-17
+**Updated:** 2026-10-23
 
 给在本仓库工作的 AI agent 的说明。本文件只承担**路由**与**强制规定**两个职责：
 插件细节、流程细节、历史细节一律在 `docs/` 里（见下面的路由表），**不要在本文重复**。
@@ -70,14 +70,32 @@
    `scripts/pipeline/open-pr.sh` → **拿到用户对 review 的明确同意**后 `scripts/pipeline/merge-pr.sh`。
    **禁止直接改 main 并 push。** worktree 与分支命名契约、清理纪律见
    [`docs/pipeline/README.md`](./docs/pipeline/README.md)。
-4. **subagent 委派约定**（照 agent-mobile 规则 11/12 适配）：
-   - **DSH 主模型 = 控制面**：产品决策、审阅 diff、验收、落档、单条只读小探针。
-   - **执行类工作**（改代码、跑门禁、git / gh 远端操作）**委派给 opencode 子代理**；「小改动」不构成自做的理由。
-   - **每次委派必须显式传 `model`**（角色库不 pin 模型）：首选 `opencode/deepseek-v4.1-flash-free`，
-     回退链 `opencode/glm-5.3-flash-free` → `opencode/mimo-v2.6-flash-free` → `opencode-go/longcat-2.5-preview-free`。
-     只有**限流 / 429 / 偶发不通**才按链回退；**非限流故障**（鉴权、模型不存在、报错、无响应）
-     **停下报告，不降级、不换 provider、不绕道**。model id 必须写全 `provider/model` 形式。
-   - **大任务只起一个子代理**（不拆并行；验证可以自己做）。
+4. **subagent 委派约定**（照 agent-mobile 规则 11/12/13 适配；2026-10-23 按用户要求扩写）：
+   - **职责二分**：**DSH 主模型 = 控制面**（编排 / 决策 / 审阅 / 验收）；**opencode 子代理 = 执行面**
+     （改代码 / 跑门禁 / 探查 / 实现）。
+   - **必须委派（执行类，不论仓库与任务大小）**：改代码、跑门禁（`node --test` / `scripts/lint.js`）、
+     建 worktree、提交、push、开 PR、`merge-pr.sh` 的执行、生产脚本执行、`gh` / `git` 远端操作。
+     **「小改动」不构成自做的理由**——「改个默认值 + 同步文档 + 改测试断言」这类多文件编辑同样属执行类。
+   - **主模型自己做（控制面）**：产品决策与拍板、审阅 diff、「用户 review 完成」的人在环确认、验收、
+     交底书 / 知识库 / **规则文件（含本 `AGENTS.md`）落档**、单条只读小探针（一条 `rg` / `cat` 能答的）。
+   - **人在环不可外包**：`merge-pr.sh` 的执行可以委派，但**合并前必须由控制面拿到用户的明确同意**再发。
+   - **模型逐次显式传**（角色库不 pin 模型；`product_roles` 四角色只有 `provider`，无 `model`）。
+     **opencode 回退链（按序尝试；仅限流 / 429 / 偶发不通时逐档下移）**：
+     1. `opencode/deepseek-v4.1-flash-free`
+     2. `opencode/glm-5.3-flash-free`
+     3. `opencode/mimo-v2.6-flash-free`
+   - **opencode 整链不可用 → 改委派 codebuddy**：`provider: codebuddy`，model 写 `codebuddy/<alias>`
+     （如 `codebuddy/deepseek-v4.1-flash`）。⚠️ 它消耗 **WorkBuddy 账号额度**，委派前先告知用户。
+   - **codebuddy 也不可用时**：**停下报告**（哪条链、哪一档、原始错误），**请求用户授权**；
+     **不得自行接手执行**。方向性要求见下一条「临时授权」。
+   - **非限流故障**（鉴权失败、模型不存在、报错、无响应）：**立即停下报告**，
+     不降级、不换 provider、不绕道（含「先用别的模型顶一下」）。**宁可失败并如实报告，不可静默降质。**
+   - **model id 必须写全 `provider/model` 形式**：写裸名会落到会话默认模型
+     （`opencode/mimo-v2.6-flash-free`），表现为「指定了但没生效」。
+   - **临时授权仅对当次任务有效**（用户 2026-10-23 明确）：「你自己做了吧」这类授权**不构成长期许可**；
+     下一次执行类工作仍按本条委派。确实需要自做时必须**逐次**取得授权，并在回复里**明示**
+     「本次自做，原因：…」。
+   - **并发纪律**：大任务只起一个子代理（不拆并行）；**验证可以自己做**。
    - 委派一律用**任务书六段式**：背景 / 步骤（可直接复制的命令 + 期望输出）/ 红线 /
      交付（原始输出 + 退出码，不许折叠成摘要）/ 材料与已知坑 / 模型不可用怎么办。
 5. **禁止随意重启 dsh web**（重启会终止当前会话）；需要时用
