@@ -35,6 +35,7 @@ module.exports = __toCommonJS(index_exports);
 var import_react = require("react");
 var import_jsx_runtime = require("react/jsx-runtime");
 var SETTINGS_ENTRY_ID = "memx";
+var LLM_SETTINGS_ENTRY_ID = "llm-pi-ai";
 var THROTTLE_MIN = 1;
 var THROTTLE_MAX = 1440;
 var THROTTLE_COMMIT_DELAY_MS = 500;
@@ -49,6 +50,69 @@ function isConflict(error) {
   const code = error?.code;
   return code === "SETTINGS_CONFLICT" || errorMessage(error).includes("SETTINGS_CONFLICT");
 }
+var MODEL_SOURCE_LABEL = {
+  config: "\u6A21\u578B\u6765\u6E90\uFF1A\u914D\u7F6E\uFF08llm-pi-ai\uFF09",
+  "config+catalog": "\u6A21\u578B\u6765\u6E90\uFF1A\u914D\u7F6E + \u8FD0\u884C\u65F6\u76EE\u5F55",
+  catalog: "\u6A21\u578B\u6765\u6E90\uFF1A\u8FD0\u884C\u65F6\u76EE\u5F55",
+  empty: "\u6A21\u578B\u6765\u6E90\uFF1A\u65E0\uFF08\u914D\u7F6E\u4E0E\u8FD0\u884C\u65F6\u76EE\u5F55\u5747\u4E3A\u7A7A\uFF09"
+};
+function readConfigProviders(value) {
+  const providers = value?.providers;
+  if (!providers || typeof providers !== "object") return [];
+  const groups = [];
+  for (const [routeId, provider] of Object.entries(providers)) {
+    if (!provider || typeof provider !== "object") continue;
+    const seen = /* @__PURE__ */ new Set();
+    const models = [];
+    for (const model of Array.isArray(provider.models) ? provider.models : []) {
+      if (!model || typeof model.id !== "string" || !model.id || seen.has(model.id)) continue;
+      seen.add(model.id);
+      models.push({ id: model.id, name: typeof model.name === "string" && model.name ? model.name : model.id });
+    }
+    if (models.length === 0) continue;
+    groups.push({
+      id: routeId,
+      name: typeof provider.name === "string" && provider.name ? provider.name : routeId,
+      models
+    });
+  }
+  return groups;
+}
+function mergeModelSources(input) {
+  const { configGroups, configNote, catalog, catalogError } = input;
+  const catalogGroups = catalog?.groups ?? [];
+  const failures = catalog?.failures ?? [];
+  const groups = configGroups.map(
+    (group) => ({ ...group, models: [...group.models] })
+  );
+  const seen = new Set(groups.flatMap((group) => group.models.map((model) => `${group.id}/${model.id}`)));
+  for (const group of catalogGroups) {
+    const additions = group.models.filter((model) => {
+      const key = `${group.id}/${model.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (additions.length === 0) continue;
+    const existing = groups.find((candidate) => candidate.id === group.id);
+    if (existing) existing.models.push(...additions);
+    else groups.push({ id: group.id, name: group.name, models: [...additions] });
+  }
+  const hasConfig = configGroups.length > 0;
+  const hasCatalog = catalogGroups.length > 0;
+  const source = hasConfig && hasCatalog ? "config+catalog" : hasConfig ? "config" : hasCatalog ? "catalog" : "empty";
+  const base = { groups, source, failures };
+  if (source !== "empty") {
+    return configNote === void 0 ? base : { ...base, configNote };
+  }
+  const configPart = configNote === void 0 ? "\u914D\u7F6E\u91CC\u6CA1\u6709 provider \u6A21\u578B\uFF08llm-pi-ai\uFF09" : `\u914D\u7F6E\u6682\u4E0D\u53EF\u8BFB\uFF08${configNote}\uFF09`;
+  const catalogPart = catalogError === void 0 ? `\u8FD0\u884C\u65F6\u76EE\u5F55 groups=${catalogGroups.length} / failures=${failures.length}` : `\u8FD0\u884C\u65F6\u76EE\u5F55\u8BFB\u53D6\u5931\u8D25\uFF1A${catalogError}`;
+  return {
+    ...base,
+    ...configNote === void 0 ? {} : { configNote },
+    reason: `\u76EE\u5F55\u4E3A\u7A7A\uFF1A${configPart}\uFF0C${catalogPart}`
+  };
+}
 function ensureStyles() {
   if (typeof document === "undefined") return;
   const ID = "dsh-plugin-memx-settings-styles";
@@ -61,25 +125,28 @@ function ensureStyles() {
     ".memx-st-title{margin:0;font-size:16px;font-weight:600;color:var(--dsw-alias-label-primary,inherit);}",
     ".memx-st-sub{margin:0;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary,#6b7280);}",
     ".memx-st-diag{margin:0;font-size:11px;line-height:1.5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dsw-alias-label-secondary,#6b7280);word-break:break-word;}",
-    ".memx-st-card{display:flex;flex-direction:column;gap:18px;padding:16px 18px;border-radius:12px;border:1px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.24));background:var(--dsw-alias-fill-primary,transparent);}",
+    ".memx-st-card{display:flex;flex-direction:column;gap:12px;padding:16px 18px;border-radius:12px;border:1px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.24));background:var(--dsw-alias-fill-primary,transparent);}",
     ".memx-st-row{display:grid;grid-template-columns:minmax(120px,200px) minmax(0,1fr);gap:6px 20px;align-items:start;}",
     ".memx-st-label{font-size:13px;font-weight:600;line-height:28px;color:var(--dsw-alias-label-primary,inherit);}",
     ".memx-st-label small{display:block;font-weight:400;font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary,#6b7280);}",
     ".memx-st-field{display:flex;flex-direction:column;gap:6px;min-width:0;}",
     ".memx-st-inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}",
+    ".memx-st-inline--select{flex-wrap:nowrap;}",
     ".memx-st-select,.memx-st-input{box-sizing:border-box;min-height:28px;padding:4px 8px;border-radius:8px;font-size:13px;color:inherit;background:var(--dsw-alias-fill-secondary,rgba(128,128,128,.06));border:1px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.32));}",
-    ".memx-st-select{min-width:0;max-width:100%;flex:1 1 260px;}",
+    ".memx-st-select{min-width:0;max-width:100%;flex:1 1 auto;}",
     ".memx-st-input{width:110px;}",
-    ".memx-st-select:focus-visible,.memx-st-input:focus-visible,.memx-st-check:focus-visible{outline:2px solid var(--dsw-alias-state-focus-ring,#4f7cf7);outline-offset:1px;}",
+    ".memx-st-btn{flex:0 0 auto;white-space:nowrap;box-sizing:border-box;min-height:28px;padding:4px 10px;border-radius:8px;font-size:12px;cursor:pointer;color:inherit;background:var(--dsw-alias-fill-secondary,rgba(128,128,128,.06));border:1px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.32));}",
+    ".memx-st-btn:disabled{opacity:.55;cursor:default;}",
+    ".memx-st-select:focus-visible,.memx-st-input:focus-visible,.memx-st-btn:focus-visible,.memx-st-check:focus-visible{outline:2px solid var(--dsw-alias-state-focus-ring,#4f7cf7);outline-offset:1px;}",
     ".memx-st-check{width:16px;height:16px;margin:6px 8px 0 0;accent-color:var(--dsw-alias-state-focus-ring,#4f7cf7);}",
-    ".memx-st-hint{font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary,#6b7280);}",
+    ".memx-st-hint{font-size:12px;line-height:1.6;text-align:left;color:var(--dsw-alias-label-secondary,#6b7280);}",
     ".memx-st-error{font-size:12px;line-height:1.6;color:var(--dsw-alias-state-error,#d93025);}",
     ".memx-st-notice{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:10px;font-size:12px;line-height:1.6;}",
     '.memx-st-notice[data-kind="error"]{color:var(--dsw-alias-state-error,#d93025);background:color-mix(in srgb,var(--dsw-alias-state-error,#d93025) 10%,transparent);}',
     '.memx-st-notice[data-kind="info"]{color:var(--dsw-alias-label-secondary,#6b7280);background:var(--dsw-alias-fill-secondary,rgba(128,128,128,.08));}',
-    ".memx-st-dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:12px;line-height:1.6;}",
-    ".memx-st-dl dt{color:var(--dsw-alias-label-secondary,#6b7280);white-space:nowrap;}",
-    ".memx-st-dl dd{margin:0;color:var(--dsw-alias-label-primary,inherit);word-break:break-word;}",
+    ".memx-st-dl{display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px 14px;margin:0;font-size:12px;line-height:1.6;}",
+    ".memx-st-dl dt{color:var(--dsw-alias-label-secondary,#6b7280);}",
+    ".memx-st-dl dd{margin:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary,inherit);}",
     ".memx-st-disabled{opacity:.6;}"
   ].join("");
   document.head.appendChild(style);
@@ -101,7 +168,7 @@ function SettingsPage({ children }) {
   ] });
 }
 function createMemorySettings(options) {
-  const { formFor, loadCatalog } = options;
+  const { formFor, llmFormFor, loadCatalog } = options;
   return function MemxMemorySettings(_props) {
     ensureStyles();
     const form = formFor();
@@ -120,10 +187,10 @@ function createMemorySettings(options) {
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "memx-st-notice", "data-kind": timedOut ? "error" : "info", role: "status", children: timedOut ? `\u914D\u7F6E\u9879\u4ECD\u672A\u5C31\u7EEA\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\uFF08entry id: ${SETTINGS_ENTRY_ID}\uFF09\u3002` : `\u914D\u7F6E\u9879\u5C1A\u672A\u5C31\u7EEA\uFF1A\u6B63\u5728\u7B49\u5F85\u5BBF\u4E3B\u4E0B\u53D1\u8BBE\u7F6E\u9879\uFF08entry id: ${SETTINGS_ENTRY_ID}\uFF09\u2026` })
       ] });
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MemorySettingsForm, { form, loadCatalog });
+    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MemorySettingsForm, { form, llmFormFor, loadCatalog });
   };
 }
-function MemorySettingsForm({ form, loadCatalog }) {
+function MemorySettingsForm({ form, llmFormFor, loadCatalog }) {
   const snapshot = (0, import_react.useSyncExternalStore)(
     (callback) => form.subscribe(callback),
     () => form.getSnapshot()
@@ -132,25 +199,62 @@ function MemorySettingsForm({ form, loadCatalog }) {
   const writable = snapshot.writable !== false;
   const status = snapshot.status;
   const [notice, setNotice] = (0, import_react.useState)(null);
-  const [catalog, setCatalog] = (0, import_react.useState)({ state: "loading", groups: [] });
+  const [modelList, setModelList] = (0, import_react.useState)({
+    state: "loading",
+    list: { groups: [], source: "empty", failures: [] }
+  });
+  const [catalogError, setCatalogError] = (0, import_react.useState)(void 0);
+  const llmForm = llmFormFor();
+  const [, setLlmProbe] = (0, import_react.useState)(0);
+  (0, import_react.useEffect)(() => {
+    if (llmForm) return;
+    const timer2 = window.setInterval(() => setLlmProbe((count) => count + 1), FORM_RETRY_INTERVAL_MS);
+    return () => window.clearInterval(timer2);
+  }, [llmForm]);
+  const llmSnapshot = (0, import_react.useSyncExternalStore)(
+    (0, import_react.useCallback)((callback) => llmForm ? llmForm.subscribe(callback) : () => {
+    }, [llmForm]),
+    (0, import_react.useCallback)(() => llmForm ? llmForm.getSnapshot() : null, [llmForm])
+  );
   const alive = (0, import_react.useRef)(true);
   const reloadCatalog = (0, import_react.useCallback)(() => {
-    setCatalog((current) => ({ state: "loading", groups: current.groups }));
+    setModelList((current) => ({ state: "loading", list: current.list }));
+    let configGroups = [];
+    let configNote;
+    try {
+      if (!llmForm) {
+        configNote = "llm-pi-ai \u8BBE\u7F6E\u9879\u672A\u4E0B\u53D1";
+      } else {
+        const llmSnap = llmForm.getSnapshot();
+        if (llmSnap.status === "ready" && llmSnap.value) configGroups = readConfigProviders(llmSnap.value);
+        else configNote = `llm-pi-ai \u914D\u7F6E\u72B6\u6001 ${String(llmSnap.status)}`;
+      }
+    } catch (err) {
+      configGroups = [];
+      configNote = `\u914D\u7F6E\u8BFB\u53D6\u5931\u8D25\uFF1A${errorMessage(err)}`;
+    }
+    const finish = (result) => {
+      if (!alive.current) return;
+      setCatalogError(result.error);
+      setModelList({
+        state: "ready",
+        list: mergeModelSources({
+          configGroups,
+          ...configNote === void 0 ? {} : { configNote },
+          ...result.catalog === void 0 ? {} : { catalog: result.catalog },
+          ...result.error === void 0 ? {} : { catalogError: result.error }
+        })
+      });
+    };
     let request;
     try {
       request = Promise.resolve(loadCatalog());
     } catch (err) {
-      if (alive.current) setCatalog({ state: "error", groups: [], error: errorMessage(err) });
+      finish({ error: errorMessage(err) });
       return;
     }
-    void request.then((result) => {
-      if (!alive.current) return;
-      setCatalog({ state: "ready", groups: result?.groups ?? [] });
-    }).catch((err) => {
-      if (!alive.current) return;
-      setCatalog({ state: "error", groups: [], error: errorMessage(err) });
-    });
-  }, [loadCatalog]);
+    void request.then((result) => finish({ catalog: result ?? void 0 })).catch((err) => finish({ error: errorMessage(err) }));
+  }, [llmForm, loadCatalog]);
   (0, import_react.useEffect)(() => {
     alive.current = true;
     reloadCatalog();
@@ -158,6 +262,15 @@ function MemorySettingsForm({ form, loadCatalog }) {
       alive.current = false;
     };
   }, [reloadCatalog]);
+  const seenLlmSnapshot = (0, import_react.useRef)(null);
+  (0, import_react.useEffect)(() => {
+    if (!llmSnapshot) {
+      seenLlmSnapshot.current = null;
+      return;
+    }
+    if (seenLlmSnapshot.current !== null && !Object.is(seenLlmSnapshot.current, llmSnapshot)) reloadCatalog();
+    seenLlmSnapshot.current = llmSnapshot;
+  }, [llmSnapshot, reloadCatalog]);
   const save = (0, import_react.useCallback)(
     async (ops) => {
       if (!writable) return;
@@ -179,7 +292,8 @@ function MemorySettingsForm({ form, loadCatalog }) {
     [form, writable]
   );
   const selected = value.provider && value.model ? `${value.provider}/${value.model}` : "";
-  const groups = catalog.groups;
+  const { list } = modelList;
+  const groups = list.groups;
   const selectedInCatalog = selected === "" || groups.some((group) => group.models.some((model) => `${group.id}/${model.id}` === selected));
   const selectedLabel = (() => {
     if (selected === "") return "\u8DDF\u968F\u5F53\u524D\u4F1A\u8BDD";
@@ -271,7 +385,7 @@ function MemorySettingsForm({ form, loadCatalog }) {
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u8F6E\u672B\u81EA\u52A8\u63D0\u70BC\u7528\uFF1B\u663E\u5F0F memory_write \u4E0D\u53D7\u5F71\u54CD" })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "memx-st-field", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "memx-st-inline", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "memx-st-inline memx-st-inline--select", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
               "select",
               {
@@ -279,7 +393,7 @@ function MemorySettingsForm({ form, loadCatalog }) {
                 className: "memx-st-select",
                 "aria-label": "\u63D0\u70BC\u6A21\u578B",
                 value: selected,
-                disabled: !writable || catalog.state === "loading",
+                disabled: !writable || modelList.state === "loading",
                 onChange: (event) => pickModel(event.target.value),
                 children: [
                   /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "", children: "\u8DDF\u968F\u5F53\u524D\u4F1A\u8BDD" }),
@@ -292,19 +406,27 @@ function MemorySettingsForm({ form, loadCatalog }) {
               "button",
               {
                 type: "button",
-                className: "memx-st-input",
-                style: { width: "auto", cursor: "pointer" },
+                className: "memx-st-btn",
                 onClick: reloadCatalog,
-                disabled: catalog.state === "loading",
-                title: "\u91CD\u65B0\u8BFB\u53D6\u6A21\u578B\u76EE\u5F55",
-                children: catalog.state === "loading" ? "\u8BFB\u53D6\u4E2D\u2026" : "\u5237\u65B0\u76EE\u5F55"
+                disabled: modelList.state === "loading",
+                title: "\u91CD\u65B0\u8BFB\u53D6\u6A21\u578B\u6765\u6E90\uFF08\u914D\u7F6E + \u8FD0\u884C\u65F6\u76EE\u5F55\uFF09",
+                children: modelList.state === "loading" ? "\u8BFB\u53D6\u4E2D\u2026" : "\u5237\u65B0\u76EE\u5F55"
               }
             )
           ] }),
-          catalog.state === "error" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "memx-st-error", children: [
-            "\u6A21\u578B\u76EE\u5F55\u8BFB\u53D6\u5931\u8D25\uFF1A",
-            catalog.error
-          ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "memx-st-hint", children: "\u9009\u9879\u6309 provider \u5206\u7EC4\uFF1B\u7A7A = \u8DDF\u968F\u5F53\u524D\u4F1A\u8BDD\uFF08\u7528\u4F1A\u8BDD\u81EA\u5DF1\u7684\u6A21\u578B\uFF09\u3002" })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "memx-st-hint", "data-role": "model-source", children: modelList.state === "loading" && list.source === "empty" ? "\u6A21\u578B\u6765\u6E90\uFF1A\u8BFB\u53D6\u4E2D\u2026" : MODEL_SOURCE_LABEL[list.source] }),
+          catalogError && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "memx-st-error", children: [
+            "\u8FD0\u884C\u65F6\u76EE\u5F55\u8BFB\u53D6\u5931\u8D25\uFF1A",
+            catalogError
+          ] }),
+          list.configNote && list.source !== "empty" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "memx-st-diag", children: [
+            "\u914D\u7F6E\u6682\u4E0D\u53EF\u8BFB\uFF08",
+            list.configNote,
+            "\uFF09\uFF0C\u5217\u8868\u4EC5\u6765\u81EA\u8FD0\u884C\u65F6\u76EE\u5F55\u3002"
+          ] }),
+          list.reason && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "memx-st-error", "data-role": "model-empty-reason", children: list.reason }),
+          list.failures.map((failure) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "memx-st-diag", children: `${failure.id}: ${failure.message}` }, failure.id)),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "memx-st-hint", children: "\u9009\u9879\u6309 provider \u5206\u7EC4\uFF1B\u7A7A = \u8DDF\u968F\u5F53\u524D\u4F1A\u8BDD\uFF08\u7528\u4F1A\u8BDD\u81EA\u5DF1\u7684\u6A21\u578B\uFF09\u3002" })
         ] })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "memx-st-row", children: [
@@ -396,6 +518,8 @@ function apply(ctx) {
   const Section = createMemorySettings({
     // 取值函数：每次渲染现取，宿主还没下发设置项时返回 undefined（页面会显示状态并重试）。
     formFor: () => ctx.configForms.get(SETTINGS_ENTRY_ID),
+    // 模型选项主来源（官方 llm-pi-ai 的配置 providers）；同样现取，缺失时页面降级。
+    llmFormFor: () => ctx.configForms.get(LLM_SETTINGS_ENTRY_ID),
     loadCatalog: () => ctx.remote.session.modelCatalog()
   });
   ctx.slots.inject(
