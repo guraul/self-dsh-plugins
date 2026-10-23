@@ -1,11 +1,12 @@
 {
   "name": "dsh-plugin-memx",
-  "version": "0.1.0",
-  "description": "memx 薄壳包：把 memx 的 DSH 宿主适配器（memx 仓 src/hosts/dsh/index.ts）挂进 DSH profile。零逻辑复制，只做接线与转发。",
+  "version": "0.2.0",
+  "description": "memx 薄壳包：把 memx 的 DSH 宿主适配器（memx 仓 src/hosts/dsh/index.ts）挂进 DSH profile（零逻辑复制，只做接线与转发），并提供 Web 设置页「记忆」（提炼模型 / 自动提炼 / 提炼间隔）。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -16,9 +17,33 @@
   "engines": {
     "node": ">=22.15.0"
   },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
     }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-api-remotes": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "0.2.1-rc.2",
+    "@types/react": "^18.3.1",
+    "esbuild": "^0.24.0",
+    "react": "^18.2.0",
+    "typescript": "^5.5.0"
   }
 }

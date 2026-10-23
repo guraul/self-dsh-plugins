@@ -1,6 +1,14 @@
 # dsh-plugin-memx 的 bundle patch：插入 memx 插件行。
 # 实现全部留在 memx 仓（src/hosts/dsh/），这里只接线。
-# provider / model / throttleMinutes 留空 = 跟随当前会话、节流取 memx.config.json 缺省值。
+#
+# 配置的四个字段（都由薄壳包 src/config.ts 声明，全部 volatile = 设置面可热更）：
+#   provider         提炼 provider，空 = 跟随当前会话
+#   model            提炼 model，空 = 跟随当前会话
+#   autoRefine       轮末自动提炼开关（默认 true；false 只关轮末补记，显式 memory_write 不受影响）
+#   throttleMinutes  轮末补记节流（默认 10 分钟，1–1440）
+#
+# config 留空 = 四字段取 schema 默认值（跟随会话 / 自动提炼开 / 10 分钟）；
+# 用户改动写在 profile 的 cordis.patch.yml 用户层或 Web 设置页「记忆」里。
 - insert:
     - id: memx
       name: dsh-plugin-memx
