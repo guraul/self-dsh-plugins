@@ -42,17 +42,19 @@ function DiagnosisCard(props) {
     "div",
     {
       className: "dsh-po-diagnosis",
-      role: "tooltip",
+      role: "dialog",
+      "aria-label": props.title,
+      tabIndex: 0,
       style: {
         position: "absolute",
         // 浮在按钮上方 8px;右对齐按钮(工具行在右侧,向左展开才不溢出)。
         bottom: "calc(100% + 8px)",
         right: 0,
         zIndex: 2147483e3,
-        // 不挡点击:卡片自己吞事件会导致 hover 闪烁。
-        pointerEvents: "none",
+        // 可交互层:能滚动、能选中复制(点击展开后不再有 hover 闪烁问题)。
+        pointerEvents: "auto",
         maxWidth: 360,
-        maxHeight: 320,
+        maxHeight: 400,
         overflowY: "auto",
         padding: "8px 10px",
         borderRadius: 8,
@@ -67,7 +69,9 @@ function DiagnosisCard(props) {
         // 长英文/长 URL 不撑破 360px 宽度。
         wordBreak: "break-word",
         textAlign: "left",
-        cursor: "default"
+        cursor: "default",
+        // 让卡片内的滚动不带动外层对话区。
+        overscrollBehavior: "contain"
       },
       children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
@@ -176,6 +180,8 @@ var dict = {
     "button.titleLoading": "\u4F18\u5316\u4E2D \xB7 \u5DF2\u7528 {seconds}s",
     "button.titleApplied": "\u5DF2\u66FF\u6362,\u70B9\u4E00\u4E0B\u8FD8\u539F\u539F\u6587",
     "button.diagnosisTitle": "\u8BCA\u65AD\u5206\u6790",
+    "button.dotLabel": "\u67E5\u770B\u8BCA\u65AD",
+    "button.closeDiagnosis": "\u6536\u8D77\u8BCA\u65AD",
     "panel.aria": "\u63D0\u793A\u8BCD\u4F18\u5316",
     "panel.title": "\u63D0\u793A\u8BCD\u4F18\u5316",
     "panel.closeTitle": "\u5173\u95ED (Esc)",
@@ -228,9 +234,9 @@ var dict = {
     "settings.language": "\u8F93\u51FA\u8BED\u8A00",
     "settings.language.desc": "\u4F18\u5316\u7ED3\u679C\u4F7F\u7528\u7684\u8BED\u8A00",
     "settings.mode": "\u4F18\u5316\u6A21\u5F0F",
-    "settings.mode.desc": "\u5FEB\u901F\u6A21\u5F0F\u8F93\u51FA\u4E0E\u7B49\u5F85\u7EA6\u51CF\u534A;\u5B8C\u6574\u6A21\u5F0F\u591A\u4E00\u6BB5\u5206\u6790\u8BCA\u65AD(\u60AC\u505C\u6309\u94AE\u67E5\u770B)",
+    "settings.mode.desc": "\u5FEB\u901F\u6A21\u5F0F\u8F93\u51FA\u4E0E\u7B49\u5F85\u7EA6\u51CF\u534A;\u5B8C\u6574\u6A21\u5F0F\u591A\u4E00\u6BB5\u5206\u6790\u8BCA\u65AD(\u70B9\u6309\u94AE\u53F3\u4E0A\u89D2\u5706\u70B9\u67E5\u770B)",
     "settings.mode.full": "\u5B8C\u6574(\u5206\u6790\u8BCA\u65AD + \u4F18\u5316)",
-    "settings.mode.full.hint": "\u5B8C\u6574(\u5206\u6790\u8BCA\u65AD + \u4F18\u5316)\uFF5C\u8BCA\u65AD\u5728\u9F20\u6807\u60AC\u505C\u6309\u94AE\u65F6\u67E5\u770B",
+    "settings.mode.full.hint": "\u5B8C\u6574(\u5206\u6790\u8BCA\u65AD + \u4F18\u5316)\uFF5C\u8BCA\u65AD\u70B9\u6309\u94AE\u53F3\u4E0A\u89D2\u5706\u70B9\u67E5\u770B",
     "settings.mode.fast": "\u5FEB\u901F(\u4EC5\u4F18\u5316,\u7B49\u5F85\u7EA6\u51CF\u534A)",
     "settings.mode.full.short": "\u5B8C\u6574",
     "settings.mode.fast.short": "\u5FEB\u901F",
@@ -264,6 +270,8 @@ var dict = {
     "button.titleLoading": "Optimizing \xB7 {seconds}s",
     "button.titleApplied": "Replaced \u2014 click to undo",
     "button.diagnosisTitle": "Diagnosis",
+    "button.dotLabel": "View diagnosis",
+    "button.closeDiagnosis": "Collapse diagnosis",
     "panel.aria": "Prompt optimizer",
     "panel.title": "Prompt Optimizer",
     "panel.closeTitle": "Close (Esc)",
@@ -315,9 +323,9 @@ var dict = {
     "settings.language": "Output language",
     "settings.language.desc": "Language of the optimized result",
     "settings.mode": "Mode",
-    "settings.mode.desc": "Fast halves the output tokens and the wait; full adds a diagnosis pass (hover the button to read it)",
+    "settings.mode.desc": "Fast halves the output tokens and the wait; full adds a diagnosis pass (click the dot at the button top-right to read it)",
     "settings.mode.full": "Full (analysis + rewrite)",
-    "settings.mode.full.hint": "Full (diagnosis + rewrite) \u2014 view the diagnosis by hovering the button",
+    "settings.mode.full.hint": "Full (diagnosis + rewrite) \u2014 click the dot at the button top-right to read the diagnosis",
     "settings.mode.fast": "Fast (rewrite only, ~half the wait)",
     "settings.mode.full.short": "Full",
     "settings.mode.fast.short": "Fast",
@@ -840,10 +848,7 @@ function createOptimizerController(ctx, opts = {}) {
 
 // src/client/OptimizeButton.tsx
 var import_jsx_runtime5 = (
-  // position:relative 是浮卡的定位锚点(卡片 absolute 相对它摆放)。
-  // 鼠标事件必须挂在 span 而不是 button 上:empty 态 button 带 `disabled`,
-  // 而 Chrome/Safari 对 disabled 元素**不派发鼠标事件**(React 合成事件同样收不到),
-  // 挂 button 上会导致「输入框清空后诊断浮卡永远弹不出来」。span 不是 disabled,始终派发。
+  // position:relative 是圆点与诊断卡的定位锚点(两者都 absolute 相对它摆放)。
   require("react/jsx-runtime")
 );
 var buttonStyle = {
@@ -921,9 +926,28 @@ function createOptimizeButton(controller) {
     }, [state.status]);
     const title = view === "loading" ? t("button.titleLoading", { seconds: elapsed }) : view === "applied" ? t("button.titleApplied") : view === "error" ? state.error ?? t("panel.error") : view === "empty" ? t("button.titleEmpty") : t("button.title");
     const diagnosis = state.last?.sessionId === sessionId ? state.lastAnalysis : null;
-    const canHover = state.status !== "loading" && !!diagnosis;
-    const [hovered, setHovered] = (0, import_react2.useState)(false);
-    const showDiagnosis = canHover && hovered;
+    const showDot = state.status !== "loading" && !!diagnosis;
+    const [diagnosisOpen, setDiagnosisOpen] = (0, import_react2.useState)(false);
+    (0, import_react2.useEffect)(() => {
+      setDiagnosisOpen(false);
+    }, [sessionId, showDot]);
+    (0, import_react2.useEffect)(() => {
+      if (!diagnosisOpen) return;
+      const onKeyDown = (event) => {
+        if (event.key === "Escape") setDiagnosisOpen(false);
+      };
+      const onClickOutside = (event) => {
+        const target = event.target;
+        if (target && typeof target.closest === "function" && target.closest(".dsh-po-btn, .dsh-po-dot, .dsh-po-diagnosis")) return;
+        setDiagnosisOpen(false);
+      };
+      document.addEventListener("keydown", onKeyDown);
+      document.addEventListener("click", onClickOutside);
+      return () => {
+        document.removeEventListener("keydown", onKeyDown);
+        document.removeEventListener("click", onClickOutside);
+      };
+    }, [diagnosisOpen]);
     const onClick = () => {
       if (view === "loading") {
         controller.cancel();
@@ -938,38 +962,61 @@ function createOptimizeButton(controller) {
       setElapsed(0);
       void controller.optimize(draft, sessionId);
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
-      "span",
-      {
-        style: { display: "inline-flex", position: "relative" },
-        onMouseEnter: () => setHovered(true),
-        onMouseLeave: () => setHovered(false),
-        children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-            "button",
-            {
-              className: "dsh-po-btn dsh-po-opt",
-              type: "button",
-              "data-po-state": view,
-              style: {
-                ...buttonStyle,
-                ...view === "error" ? { color: "var(--dsw-alias-state-error, #d64545)" } : {},
-                ...view === "empty" ? { opacity: 0.45, cursor: "not-allowed" } : {}
-              },
-              disabled: view === "empty",
-              "aria-busy": view === "loading",
-              title: canHover ? "" : title,
-              "aria-label": title,
-              onFocus: () => setHovered(true),
-              onBlur: () => setHovered(false),
-              onClick,
-              children: view === "loading" ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(LoadingIcon, {}) : view === "applied" ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(UndoIcon, {}) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(SparkleIcon, {})
+    return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { style: { display: "inline-flex", position: "relative" }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+        "button",
+        {
+          className: "dsh-po-btn dsh-po-opt",
+          type: "button",
+          "data-po-state": view,
+          style: {
+            ...buttonStyle,
+            ...view === "error" ? { color: "var(--dsw-alias-state-error, #d64545)" } : {},
+            ...view === "empty" ? { opacity: 0.45, cursor: "not-allowed" } : {}
+          },
+          disabled: view === "empty",
+          "aria-busy": view === "loading",
+          title,
+          "aria-label": title,
+          onClick,
+          children: view === "loading" ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(LoadingIcon, {}) : view === "applied" ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(UndoIcon, {}) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(SparkleIcon, {})
+        }
+      ),
+      showDot ? (
+        // 独立 button(不是主按钮的子元素):6px 视觉圆点贴在按钮右上角外缘,
+        // 点击只负责开关诊断卡,绝不冒泡到主按钮(否则会顺手发起一次优化)。
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+          "button",
+          {
+            className: "dsh-po-dot",
+            type: "button",
+            "aria-label": diagnosisOpen ? t("button.closeDiagnosis") : t("button.dotLabel"),
+            title: diagnosisOpen ? t("button.closeDiagnosis") : t("button.dotLabel"),
+            "aria-expanded": diagnosisOpen,
+            onClick: (event) => {
+              event.stopPropagation();
+              setDiagnosisOpen((open) => !open);
+            },
+            style: {
+              position: "absolute",
+              top: 1,
+              right: 1,
+              width: 6,
+              height: 6,
+              padding: 0,
+              border: "none",
+              borderRadius: 999,
+              background: "var(--dsw-alias-state-business-primary, #4f7cf7)",
+              cursor: "pointer",
+              // 盖在主按钮之上,保证 6px 圆点始终可点。
+              zIndex: 1,
+              lineHeight: 0
             }
-          ),
-          showDiagnosis && diagnosis ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(DiagnosisCard, { text: diagnosis, title: t("button.diagnosisTitle") }) : null
-        ]
-      }
-    );
+          }
+        )
+      ) : null,
+      diagnosisOpen && showDot && diagnosis ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(DiagnosisCard, { text: diagnosis, title: t("button.diagnosisTitle") }) : null
+    ] });
   };
 }
 

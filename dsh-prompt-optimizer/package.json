@@ -41,7 +41,7 @@
     "prepare": "node scripts/build.mjs",
     "sync:types": "node scripts/sync-types.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node test/smoke.mjs && node test/prompt.test.mjs && node test/controller.test.mjs && node test/slot-guard.test.mjs && node test/button-state.test.mjs"
+    "test": "node test/smoke.mjs && node test/prompt.test.mjs && node test/controller.test.mjs && node test/slot-guard.test.mjs && node test/button-state.test.mjs && node test/diagnosis-ui.test.mjs"
   },
   "dsh": {
     "manifestVersion": 1,

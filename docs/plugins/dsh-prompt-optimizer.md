@@ -16,7 +16,7 @@
 |---|---|---|
 | 图标 | 实心四芒星（`fill="currentColor"`）+ 文字「优化」 | 线性描边四芒星（`fill="none"` / `strokeWidth=1.5` / 圆角连接），**无文字**，正方形内边距 |
 | 结果呈现 | `conversation.input.dock` 弹面板，用户点「替换输入框」 | **删除 dock 注册与 `ResultDock.tsx`**，`status==='done'` 时直接 `inputActions.setDraft()` |
-| 诊断分析 | 面板里与优化稿一起渲染 | **悬停按钮浮卡**查看（`state.lastAnalysis`）；写回输入框的永远只有优化稿 |
+| 诊断分析 | 面板里与优化稿一起渲染 | **点击按钮右上角圆点展开**查看（`state.lastAnalysis`）；写回输入框的永远只有优化稿 |
 | loading | 图标透明度脉冲（SVG `<animate>`），继续显示文字 | 独立转圈图标 + CSS `0.9s linear infinite` 旋转，title 显示**每秒刷新**的「已用 Ns」；再次点击 = **取消** |
 | 错误 | 面板里展示 + 重试/关闭按钮 | 图标变红 + title 承载错误原文，3 秒后自动 `settle()`；再点一次即重试，**不清空草稿** |
 | 撤回 | 面板里「替换输入框」后可点撤回 | **按钮自带撤销**：写回后变撤回箭头，再点一次 `setDraft(backup)` 还原原文；用户编辑草稿 / 切会话即失效 |
@@ -33,7 +33,7 @@
 | `src/client/OptimizeButton.tsx` | 按钮本体：状态机渲染、点击优化、loading 取消 + 计时、done 写回、applied 还原、error 3s 复位 |
 | `src/client/LoadingIcon.tsx` | 转圈图标（开口圆环，CSS `.dsh-po-spin` 驱动） |
 | `src/client/UndoIcon.tsx` | 撤回图标（逆时针回环箭头） |
-| `src/client/DiagnosisCard.tsx` | 诊断浮卡（`position:absolute` + `right:0` + `zIndex` + `pointer-events:none` + `pre-wrap`） |
+| `src/client/DiagnosisCard.tsx` | 诊断卡（`position:absolute` + `right:0` + `zIndex` + `pointer-events:auto` + `maxHeight:400` + `pre-wrap`，可滚可复制） |
 | `src/client/controller.ts` | 状态容器（`optimize` / `cancel` / `settle` / `retry` / `markApplied` / `clearApplied` / `close`）、`lastAnalysis` 留存、按钮状态纯函数 `resolveButtonState`、上下文取样、SSE 解析 |
 | `src/client/SparkleIcon.tsx` | 线性四芒星图标（idle / error 两态） |
 | `src/client/i18n.ts` | zh/en 文案；`button.optimize` / `button.optimizing` **保留 key 但不再参与渲染**（title 用 `button.title*`） |
@@ -56,9 +56,10 @@
 | `error` | 红色四芒星 | 完整错误文本 | 重新发起优化 |
 
 **诊断不进输入框**：`done` 时把 `event.analysis` 存进 `state.lastAnalysis`（空白归一为 `null`），
-写回内容永远是 `prefix + result.optimized`。鼠标悬停 / Tab 聚焦按钮且 `status !== 'loading'` 时，
-`DiagnosisCard` 浮在按钮上方展示它；此时按钮原生 `title` 置 `''`（避免与自绘卡片双重 tooltip），
-文案改由 `aria-label` 承载。诊断按会话隔离：`state.last.sessionId !== props.sessionId` 时不显示。
+写回内容永远是 `prefix + result.optimized`。点击按钮右上角圆点（`status !== 'loading'` 且诊断属于当前会话时才显示）
+展开 `DiagnosisCard`：固定浮在按钮上方，可滚动、可选中复制；Esc / 点按钮与卡片以外区域 / 再点圆点收起，
+切会话自动收起（新一轮优化开始也会收起，结束后不会自动弹回）。原生 `title` 始终保留（不再为避双重
+tooltip 而清空）。诊断按会话隔离：`state.last.sessionId !== props.sessionId` 时不显示。
 `settle()` 不清 `lastAnalysis`（写回后还能回看），`close()` 随 `INITIAL` 复位。
 
 ## 注意什么
@@ -84,17 +85,19 @@
   effect 依赖 `state.status`，离开 loading / 卸载时 `clearInterval`。
 - **`done` 的竞态护栏**：取消后（`abort=null`）或已换新请求（`abort` 被换掉）时，迟到的 `done` / `error`
   帧一律丢弃。否则会出现「点了取消，草稿却被替换」。
-- **诊断只读不写**：`lastAnalysis` 只服务浮卡，**不许**拼进 `setDraft`，也不许进 `previous`
+- **诊断只读不写**：`lastAnalysis` 只服务诊断卡，**不许**拼进 `setDraft`，也不许进 `previous`
   （记忆链用的仍是 `result.optimized`）。一旦混进草稿，下一轮优化会把诊断当提示词一起优化。
-- **浮卡与原生 title 二选一**：卡片会出现时必须把 `title` 置 `''`，否则两个 tooltip 同时弹出。
-- **浮卡裁切已实测排除**：核对官方 `dsh-client-ui-conversation` 的 InputBar CSS，
+- **不再需要「卡片 vs 原生 title 二选一」**：hover 版会同时冒两个 tooltip，所以那时要清空 `title`；
+  改成点击展开后没有 hover 触发路径，`title` 始终保留（卡片只在点击后出现，两者不打架）。
+- **诊断卡裁切已实测排除**：核对官方 `dsh-client-ui-conversation` 的 InputBar CSS，
   祖先链（`_card`(position:relative) / `_root` / `_row` / `_dock`）均无 `overflow:hidden`；
   `overflow` 只在 `_scroll` / `_input` / `_placeholder` 三处，都不在按钮祖先链上。
-  因此绝对定位浮卡不会被裁切（真出现异常再考虑 portal）。
-- **鼠标事件挂 `span` 不挂 `button`**：empty 态按钮 `disabled`，Chrome/Safari 对 disabled 元素
-  **不派发鼠标事件**（React 合成事件同样收不到）。浮卡要能「清空输入框后也能查诊断」，
-  所以 `onMouseEnter` / `onMouseLeave` 必须挂在外层 `span`；`onFocus` / `onBlur` 仍留 button
-  （focus 不冒泡，且焦点只会落在 button 上）。
+  因此绝对定位诊断卡不会被裁切（真出现异常再考虑 portal）。
+- **圆点必须是独立 `button`、点击必须 `stopPropagation`**：圆点贴在主按钮右上角外缘，
+  事件能冒泡到主按钮的 `onClick`（发起优化 / 还原）与 `document` 的「点外部关闭」监听，
+  两者都会造成误动作，所以用独立 `button` + `event.stopPropagation()`。
+  另外 hover 版把 `onMouseEnter` 挂在外层 `span` 是为了绕开 empty 态 `disabled` 按钮不派发鼠标事件；
+  点击版不需要这条 —— 圆点自己是独立元素，`disabled` 的主按钮不影响它。
 - **图标不许退回实心**：DSH 官方图标一律 `viewBox=24` + `stroke=currentColor` + `fill=none`；
   实心色块在工具行里明显重于邻居。strokeWidth 用 1.5（14px 显示下的等效观感，官方是 1@24）。
 - **`lib/` 是产物**：改 `src/` 必须 `pnpm run build`；`lib/client.js` 由 `scripts/build.mjs` 生成，

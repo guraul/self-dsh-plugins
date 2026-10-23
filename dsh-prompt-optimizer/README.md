@@ -18,7 +18,7 @@ DeepSeek Harness 插件：发送栏旁一个**纯图标按钮**，点击后用�
 |---|---|---|
 | 按钮 | 实心四芒星 + 文字「优化」 | **线性描边**四芒星，**无文字**，正方形内边距（贴住 14px 图标） |
 | 结果呈现 | 输入卡上方弹结果面板，需手动点「替换输入框」 | **面板移除**：`done` 即写回输入框草稿，无需二次确认 |
-| 诊断分析 | 面板里和优化稿一起展示 | **悬停按钮浮出小卡片**查看（`lastAnalysis`），**不进输入框**；写回内容永远只有优化稿 |
+| 诊断分析 | 面板里和优化稿一起展示 | **点击按钮右上角圆点展开**查看（`lastAnalysis`），**不进输入框**；写回内容永远只有优化稿 |
 | 面板文件 | `src/client/ResultDock.tsx` | **删除**；`conversation.input.dock` 槽位不再注册 |
 | loading | 透明脉冲；按钮禁用 | 转圈图标（CSS `0.9s linear infinite`）+ hover 显示**已用秒数**（每秒刷新）；**再点一次 = 取消** |
 | 错误 | 面板内展示 + 重试按钮 | 图标变红 + hover 提示**错误原文**，3 秒自动复位；再点一次即重试，**草稿原样保留** |
@@ -60,9 +60,10 @@ pnpm install
 - **按钮状态机**：同一个位置四种外观，不弹任何面板 ——
   idle（四芒星）/ loading（转圈 + 已用秒数）/ applied（撤回箭头）/ error（红色四芒星）。
   空草稿时降透明度并 `disabled`，`title` 提示先输入。
-- **诊断浮卡**：`full` 模式产出的诊断存在 controller 里（`lastAnalysis`），鼠标悬停按钮（或 Tab 聚焦）
-  时在按钮上方浮出查看，带「诊断分析」标题；移开/失焦即收起。浮卡不挡点击、走 DSW 令牌样式；
-  浮卡可用时按钮原生 `title` 置空（避免双重 tooltip），文案改由 `aria-label` 承载。
+- **诊断卡**：`full` 模式产出的诊断存在 controller 里（`lastAnalysis`），点击按钮右上角圆点
+  （诊断属于当前会话且非 loading 时才显示）在按钮上方展开查看，带「诊断分析」标题；
+  卡片可滚动、可选中复制，Esc / 点按钮与卡片以外的区域 / 再点圆点收起，切会话自动收起
+  （新一轮优化开始也会收起，结束后不会自动弹回）。原生 `title` 始终保留（不再为避双重 tooltip 清空）。
   诊断**只在这张卡里**：写回输入框的永远只有优化稿（full / fast 一致），切会话不串台，
   `settle()` 不清（写回后仍可回看），`close()` 才复位。
 - **取消**：优化中再点一次按钮即中止；已生成的部分不写回，草稿保持你点之前的内容。
@@ -83,7 +84,7 @@ pnpm install
 cd dsh-prompt-optimizer
 pnpm install            # pnpm 12：pnpm-workspace.yaml 的 allowBuilds 放行 esbuild
 pnpm run typecheck      # tsc --noEmit
-pnpm test               # smoke / prompt / controller / slot-guard / button-state
+pnpm test               # smoke / prompt / controller / slot-guard / button-state / diagnosis-ui
 pnpm run build          # lib/index.js、lib/client.js、lib/prompt.js、lib/controller.js
 node --check lib/index.js && node --check lib/client.js
 ```
@@ -94,11 +95,11 @@ node --check lib/index.js && node --check lib/client.js
 
 ## 5. 已知限制
 
-- 面板移除后，「完整」模式的诊断改由**悬停浮卡**展示；默认模式仍是「快速」（不产出诊断）。
-  设置卡「完整」选项的 `title` 已标注「诊断在鼠标悬停按钮时查看」。
-- 浮卡是 `position:absolute` 挂在按钮外层 `span` 上；已核对官方 `dsh-client-ui-conversation`
+- 面板移除后，「完整」模式的诊断改由**按钮右上角圆点展开**展示；默认模式仍是「快速」（不产出诊断）。
+  设置卡「完整」选项的 `title` 已标注「诊断点按钮右上角圆点查看」。
+- 诊断卡是 `position:absolute` 挂在按钮外层 `span` 上；已核对官方 `dsh-client-ui-conversation`
   的 InputBar CSS，按钮祖先链（`_card` / `_root` / `_row` / `_dock`）**没有 `overflow:hidden`**，
-  绝对定位浮卡不会被裁切（`overflow` 只出现在 `_scroll` / `_input` / `_placeholder`，不在祖先链上）。
+  绝对定位诊断卡不会被裁切（`overflow` 只出现在 `_scroll` / `_input` / `_placeholder`，不在祖先链上）。
 - 撤销只保留**最近一次**写回：连续点两次优化，只能还原到第二次写回前的文本。
 - 纯前端改动，未在真实 0.2.1 桌面端逐帧核对旋转动画的视觉手感。
 
