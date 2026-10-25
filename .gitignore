@@ -57,6 +57,9 @@ build/
 *.orig
 *.rej
 
+# 本机验收截图（docs 正文不引用它们，需要时贴到 issue / PR 里）
+/docs/screenshots/
+
 # 敏感 / 本机专属：dsh web 的 token URL（每次启动都会变，且是访问凭据）
 .dsh-web/url.txt
 .dsh-web/restart-once.log
