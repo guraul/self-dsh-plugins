@@ -28,6 +28,21 @@ import { createProductSubmitTool } from './tools/product-submit.js'
  */
 
 export const name = 'product-relay'
+
+/**
+ * `tools` is the only service this entry needs.
+ *
+ * `systemPrompt` deliberately stays OUT of `inject` (issue #50, a regression of
+ * #49): every Cordis inject entry is **required** — the fiber stays PENDING
+ * until the service is active, and `dsh-agent-preset-registry` audits such a row
+ * as `waiting for systemPrompt`, so a relay scope that cannot see the service
+ * would load no tools at all. Cordis also has no `{ required, optional }` form:
+ * the object shape is `serviceName → intercept config`, so writing one would
+ * make the fiber wait for services literally named `required` / `optional`.
+ * `installRelayContract` probes the service with the non-throwing `ctx.get()`
+ * instead — it registers the section where the service is visible and silently
+ * skips it where it is not.
+ */
 export const inject = ['tools']
 
 export function apply(ctx, config = {}) {

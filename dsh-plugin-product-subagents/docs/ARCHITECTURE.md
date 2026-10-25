@@ -106,14 +106,25 @@ turn; a successful return value must be echoed character for character,
 including its trailing tag; nothing else may appear in the final answer.
 
 - `lib/relay.js` registers it as the system section `product-relay:contract`
-  through the caller-bound `ctx.systemPrompt.section(...)`. Registration happens
-  in the `product-relay` preset's scope (the preset tree is mounted under
-  `createScope()` in `dsh-agent-preset-registry`), and a child joins that scope
-  as its parent — so every relay child inherits the section and the root agent
-  never sees it. No harness change, no global section.
+  through `ctx.systemPrompt.section(...)` **when that service is visible from
+  the relay scope**. Registration happens in the `product-relay` preset's scope
+  (the preset tree is mounted under `createScope()` in
+  `dsh-agent-preset-registry`), and a child joins that scope as its parent — so
+  every relay child inherits the section and the root agent never sees it. No
+  harness change, no global section.
+- The probe is `ctx.get('systemPrompt')` — the non-throwing accessor — and never
+  only a bare property read: Cordis raises
+  `cannot get property "systemPrompt" without inject` for a service the plugin
+  did not `inject`, and that throw aborted the whole preset mount, taking every
+  background delegation with it (issue #50). `systemPrompt` cannot just be added
+  to `inject` either: every Cordis inject entry is **required** (the fiber stays
+  pending, and the preset registry audits the row as `waiting for …`), so an
+  invisible service would leave the relay with no tools at all. Where the
+  service is not visible, registration is a no-op.
 - `buildRelayPrompt()` (lib/tools/product-delegate.js) repeats the same text in
-  the relay prompt. That is the fallback for a profile without a `systemPrompt`
-  service, and it keeps the contract in the same message as the task.
+  the relay prompt. That is the fallback for a scope without a `systemPrompt`
+  service — and, in a stock relay scope, the channel that actually carries the
+  contract — and it keeps the contract in the same message as the task.
 
 **2. Machine tag (`product_submit` → `verifyRelayAnswer`)**
 

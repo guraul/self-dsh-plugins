@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.8] — 2026-10-25
+
+`0.4.7` broke the `product-relay` preset itself: `installRelayContract()` read
+`ctx.systemPrompt` before falling back to `ctx.get()`, and Cordis throws on that
+property read for a service the plugin did not `inject`. Every background
+delegation failed at mount with `cannot get property "systemPrompt" without
+inject`; foreground delegation was unaffected.
+
+### Fixed
+- **Relay preset failed to mount when `systemPrompt` was not injected** (issue
+  #50, a regression of #49). The service is now probed with the non-throwing
+  `ctx.get('systemPrompt')` first; the property read remains only as a guarded
+  fallback for plain (non-Cordis) contexts, and the whole registration is
+  wrapped so a missing service is a no-op instead of a mount failure. The relay
+  child still gets the contract through `buildRelayPrompt()`.
+- **`systemPrompt` stays out of `inject`** (and is now pinned by a test). Cordis
+  has no `{ required, optional }` form — the object shape is
+  `serviceName → intercept config` — and every entry of `inject` is required, so
+  a service the relay scope cannot see would keep the row pending with no tools
+  at all instead of merely skipping the section.
+
+### Tests
+- `test/relay-contract.test.js`: a Cordis-like context proxy (unknown property
+  reads throw) must be skipped, not fatal; `ctx.get` must be probed before the
+  throwing property read; a throwing `ctx.get` and a throwing property must both
+  degrade to no-op; `lib/relay.js` `inject` must be exactly `['tools']`;
+  `buildRelayPrompt()` must still carry the contract. Suite 89 → 94.
+
 ## [0.4.7] — 2026-10-25
 
 A relay child could hand its caller a **fabricated** answer: when the remote

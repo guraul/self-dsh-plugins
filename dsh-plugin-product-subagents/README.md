@@ -144,8 +144,10 @@ of a prompt promise (issue #42):
   child's scope — every relay child inherits it, the parent never sees it. It
   forbids answering on its own, requires `RELAY_FAILED: <error>` when the submit
   fails (then stop), and requires the submit's return value verbatim on success.
-  `product_delegate` repeats the same rules in the relay prompt, so the contract
-  also holds on a profile without a `systemPrompt` service.
+  The section is best-effort: the service is probed with the non-throwing
+  `ctx.get('systemPrompt')`, and a scope that does not expose it gets no section
+  instead of a failed mount (issue #50). `product_delegate` repeats the same
+  rules in the relay prompt, so the contract holds either way.
 - **Machine tag.** `product_submit` appends
   `<!--product-session:<remoteId>-->` (the child session id when the bridge has
   no remote id yet) to every successful result. Only that tool can mint it, so
