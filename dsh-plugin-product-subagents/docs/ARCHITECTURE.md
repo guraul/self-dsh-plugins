@@ -52,6 +52,13 @@ interface Bridge {
 `settings` carries `{ model?, reasoningEffort?, permissionMode? }`. The
 permission flags are translated per product inside the bridge.
 
+`signal` is the child turn's abort signal, aborted by `interrupt_agent` /
+`agent.cancel()`. Every bridge must honour it: the harness never abandons a
+started tool body (it waits for quiescence), and a bridge that ignores the
+signal leaves the remote working after the child already reads `inactive`.
+claude/codex kill the product process (`runCommand(signal)`); ACP sends
+`session/cancel`, the protocol's only channel into a running turn (issue #12).
+
 **Adding a product** = add a bridge + register it in `lib/providers.js`
 (built-in) or declare it via `config.providers` (any ACP CLI, no code).
 

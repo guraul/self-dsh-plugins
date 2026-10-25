@@ -42,6 +42,10 @@ permission ceiling, and cross-platform process launching.
   Gemini (`gemini --acp`) and more via `config.providers`; no code needed.
 - **Resource management** — idle disposal, configurable timeouts, concurrency
   cap.
+- **Stopping really stops** — interrupting a child (`interrupt_agent`) cancels
+  the remote turn too (`session/cancel` for ACP, process kill for
+  claude/codex), so a stopped child cannot keep editing the workspace
+  unsupervised.
 - **Cross-platform** — Windows `.cmd` shims, Windows-safe path escaping;
   CI runs macOS / Ubuntu / Windows.
 

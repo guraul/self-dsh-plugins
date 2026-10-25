@@ -174,6 +174,38 @@ harness 产生的文本（`dsh-subagent` 的 `createSettlementMessage()` 用 chi
 `PRODUCT_SESSION:` / `<!--product-session:…-->`（issue #52 已记录，修复需 DSH 侧 hook 或改 relay 收尾契约）。
 `foldProgress().lastAnswer` 也会先剥离标记，所以 `subagent_progress` 里不会出现标记。
 
+## 停止子代理：远端必须一起停（#12）
+
+**现象**：对后台子代理执行 `interrupt_agent` 后，DSH 侧 `list_agents` 显示 inactive，
+远端 opencode 会话仍在跑（继续 grep / 起 git），只有手工 kill `opencode acp` 才消失。
+
+**信号链（实测代码路径，DSH 0.2.1-rc.2）**：
+
+1. `interrupt_agent` → `ctx.subagents.interrupt()`（`dsh-tool-subagent-control/lib/index.js:86`）。
+2. 本插件的 provider 有 `prepareContinuable`，所以 child 是 **local** activation，
+   中断走 `activation.handle.agent.cancel({ kind }, { keepInbox: true })`
+   （`dsh-subagent/lib/index.js:1266-1270`；external 分支才是 `controller.abort()`）。
+3. `cancel()` 直接 abort 当前 phase 的 signal（`dsh-agent-loop/lib/index.js:815-820`）。
+4. 该 signal 就是 turn 里每一次工具调用的 `exec.signal`（`dsh-agent-loop/lib/index.js:1166`
+   构造 `exec.signal`），`product_submit` 再把它传给 `bridge.submit(..., signal, ...)`。
+
+**结论：停止信号拿得到**（就是 `exec.signal` 的 abort），不需要 DSH 侧新 hook。
+坑在 bridge：claude/codex 把 `signal` 交给 `runCommand()`（abort 即杀进程），
+ACP 的 `submit()` 收下 `signal` 却**从未使用**，`prompt()` 一直等到 agent 自己结束；
+而 kill ACP 客户端也不等于停会话——opencode v2 是 `serve --service` 常驻架构，
+turn 在服务端跑（issue #12 记录的真实原因）。
+
+**现行实现**（`lib/bridges/acp.js`）：
+
+- `submit()` 在 `prompt()` 期间监听 `signal` 的 abort → 发 `session/cancel`
+  （ACP 协议唯一能进入「正在跑的那一轮」的通道；agent 随后用
+  `stopReason: cancelled` 回复原来的 `session/prompt`）。失败只 warn，不抛。
+- `dispose()` 先 `cancel` 再 `closeSession` + SIGTERM。
+- abort 后的死传输重试被禁用：否则会把调用方刚停掉的任务重放进一个新会话。
+
+**仍不覆盖**：`product_wait` 超时只结束等待，不结束 child（设计如此）；
+插件进程被 `kill -9` 时没有清理机会，远端会话会留到 `opencode serve` 自己回收。
+
 ## 设计规则（不可协商）
 
 1. **relay model 永远是只读管道。** child 的 `toolFilter` 只可能含 `product_submit`，
