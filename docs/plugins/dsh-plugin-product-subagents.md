@@ -148,11 +148,13 @@ promise（`dsh-subagent/lib/index.js:2075`）；它被存进 binding（`record.s
 
 1. **提示词层**：`RELAY_CONTRACT_TEXT`（唯一动作是 `product_submit`；失败原样报
    `RELAY_FAILED: <error>` 并停止；成功原样返回含尾部标记的返回值；别的一律不许出现）。
-   - `lib/relay.js` 用 caller-bound 的 `ctx.systemPrompt.section(...)` 注册成 system 段
-     `product-relay:contract`。注册发生在 `product-relay` preset 的 scope 里（preset tree 挂在
-     `dsh-agent-preset-registry` 的 `createScope()` 下，child 以该 scope 为父加入）→
-     **所有 relay child 都继承，根 agent 看不到**。不改 DSH 本体。
-   - `buildRelayPrompt()` 在 relay prompt 里重复同一段：既是 `systemPrompt` 服务缺失时的兜底，
+   - `lib/relay.js` 把契约注册成 system 段 `product-relay:contract`。注册发生在
+     `product-relay` preset 的 scope 里（preset tree 挂在 `dsh-agent-preset-registry` 的
+     `createScope()` 下，child 以该 scope 为父加入）→ **所有 relay child 都继承，根 agent 看不到**。
+     不改 DSH 本体。服务探测走不抛错的 `ctx.get('systemPrompt')`：作用域里看不到该服务就不注册
+     （而不是让 preset 挂载失败，issue #50）；**不能**把 `systemPrompt` 写进 `inject`——Cordis 的
+     `inject` 每一项都是必需项，看不到的服务会让 relay 行永远 pending、连 `product_submit` 都没有。
+   - `buildRelayPrompt()` 在 relay prompt 里重复同一段：既是 `systemPrompt` 不可见时的兜底，
      也让规则和任务文本在同一条消息里。
 2. **结构层**：`product_submit` 成功时在返回值末尾追加 `<!--product-session:<remoteId>-->`
    （bridge 还没暴露远端 id 时用 child session id；**不新增任何网络请求**，id 就是 binding 里已有的）。
@@ -337,4 +339,13 @@ harness 产生的文本，插件改不了；本插件返回的每条答案都已
     同步剥离标记；
   - **测试**：新增 `test/relay-contract.test.js`（9 条）；`test/product-wait.test.js` 补 6 条验收用例
     （共 14 条），成功夹具改为带标记；套件 74 → 89 全绿。
+- **`0.4.8`（issue #50：#49 回归——relay preset 加载失败）**：
+  - 现象：DSH 重启后**任何 background 委派**都立刻失败
+    `product-relay-tools (dsh-plugin-product-subagents/lib/relay.js): cannot get property "systemPrompt" without inject`。
+  - 根因：`installRelayContract()` **先**读 `ctx.systemPrompt`，而 `lib/relay.js` 的 `inject` 只有 `['tools']`；
+    Cordis 对未声明 / 作用域不可见的服务属性访问直接抛错 → `apply()` 抛出 → preset 行 mount 失败。
+  - 修法：`inject` 保持 `['tools']`（Cordis 无 `{ required, optional }` 形态，每一项都必需，写进去等于
+    preset 永不加载）；服务探测改为**先 `ctx.get()`**、再 try/catch 回落属性读，整体 try/catch → 拿不到就 no-op。
+  - 测试：`test/relay-contract.test.js` 新增 5 条（模拟 Cordis Proxy 抛错、探测顺序、双重抛错、
+    `inject` 精确为 `['tools']`、`buildRelayPrompt` 兜底仍在）；套件 89 → 94 全绿。
 

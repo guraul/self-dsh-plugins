@@ -111,6 +111,48 @@ export function verifyRelayAnswer(text) {
 }
 
 /**
+ * Locate the `systemPrompt` service without ever throwing.
+ *
+ * Two access paths, and the order matters (issue #50, a regression of #49):
+ *
+ *  - `ctx.get(name)` is Cordis' non-throwing accessor. It returns `undefined`
+ *    for a service this plugin did not `inject`, for one the current scope
+ *    cannot see, and for one that is not active yet.
+ *  - `ctx.systemPrompt` is the *throwing* path: Cordis' context proxy raises
+ *    `cannot get property "systemPrompt" without inject` for a service that is
+ *    not declared in `inject` and not visible from this scope. Reading it first
+ *    — which is what #49 did — aborted the whole `product-relay` preset mount,
+ *    so every background delegation failed before `product_submit` existed.
+ *
+ * The property read is kept only for plain (non-Cordis) contexts — tests and
+ * older harnesses — and is guarded, because it is the path that throws.
+ *
+ * Declaring `systemPrompt` in `inject` is *not* an alternative: Cordis treats
+ * every entry as required, so an invisible service would keep the relay fiber
+ * PENDING forever (the preset registry audits that row as `waiting for …`), and
+ * the relay would end up with no tools at all. See `lib/relay.js`.
+ *
+ * @param {any} ctx the relay plugin context.
+ * @returns {any} the service, or `undefined`.
+ */
+function probeSystemPrompt(ctx) {
+  if (!ctx) return undefined
+  try {
+    if (typeof ctx.get === 'function') {
+      const viaGet = ctx.get('systemPrompt')
+      if (viaGet) return viaGet
+    }
+  } catch {
+    // Not every harness exposes `get`; fall through to the guarded property read.
+  }
+  try {
+    return ctx.systemPrompt || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Register the relay contract as a fixed system section in the calling scope.
  *
  * Called from `lib/relay.js`, i.e. inside a relay preset's composition: the
@@ -119,20 +161,32 @@ export function verifyRelayAnswer(text) {
  * `ctx.systemPrompt` is caller-bound, which is what makes the scoped
  * registration possible without touching the harness.
  *
+ * Registration is best-effort by contract: a profile whose relay scope does not
+ * expose `systemPrompt` (the common case — the preset mounts only
+ * `product_submit`) must still get a working relay child, because
+ * `buildRelayPrompt` repeats the same contract inside the relay prompt. So this
+ * function never throws; it reports whether a section was registered and the
+ * caller ignores the answer.
+ *
  * @param {any} ctx the relay plugin context.
  * @returns {boolean} whether a section was registered.
  */
 export function installRelayContract(ctx) {
-  const prompt = (ctx && ctx.systemPrompt)
-    || (ctx && typeof ctx.get === 'function' ? ctx.get('systemPrompt') : undefined)
-  if (!prompt || typeof prompt.section !== 'function') return false
-  prompt.section({
-    name: RELAY_CONTRACT_SECTION,
-    order: RELAY_CONTRACT_ORDER,
-    text: RELAY_CONTRACT_TEXT,
-    // Literal text: a `{{…}}` in the contract must never be read as a prompt
-    // variable (strict interpolation throws on unknown names).
-    interpolate: false,
-  })
-  return true
+  try {
+    const prompt = probeSystemPrompt(ctx)
+    if (!prompt || typeof prompt.section !== 'function') return false
+    prompt.section({
+      name: RELAY_CONTRACT_SECTION,
+      order: RELAY_CONTRACT_ORDER,
+      text: RELAY_CONTRACT_TEXT,
+      // Literal text: a `{{…}}` in the contract must never be read as a prompt
+      // variable (strict interpolation throws on unknown names).
+      interpolate: false,
+    })
+    return true
+  } catch {
+    // A section registry that rejects the registration must not take the relay
+    // down with it; the in-prompt copy still enforces the contract.
+    return false
+  }
 }

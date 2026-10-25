@@ -111,8 +111,9 @@ product_wait subagent_id=<childId>
   (`product-relay:contract`,见 `lib/relay-contract.js`)——每个 relay child 都继承,
   父会话看不到。规则禁止自己作答;要求 submit 失败时**原样**回报
   `RELAY_FAILED: <error>` 后立即结束;成功时原样返回 submit 的返回值。
-  `product_delegate` 在 relay prompt 里重复同一套规则,因此没有 `systemPrompt`
-  服务的 profile 也照样生效。
+  这一段是**尽力而为**:服务用不抛错的 `ctx.get('systemPrompt')` 探测,作用域里
+  看不到该服务就不注册(而不是让 preset 挂载失败,issue #50)。
+  `product_delegate` 在 relay prompt 里重复同一套规则,两种情况下契约都成立。
 - **机器标记。** `product_submit` 在每次成功返回的末尾追加
   `<!--product-session:<remoteId>-->`(bridge 尚未拿到远端 id 时用 child session id)。
   只有这个工具能生成它,所以 relay 自己写的文本不可能带标记。

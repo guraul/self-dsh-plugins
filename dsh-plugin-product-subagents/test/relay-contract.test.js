@@ -1,5 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import * as relayEntry from '../lib/relay.js'
+import { buildRelayPrompt } from '../lib/tools/product-delegate.js'
 import {
   RELAY_CONTRACT_SECTION,
   RELAY_CONTRACT_TEXT,
@@ -41,6 +43,77 @@ test('installRelayContract falls back to ctx.get and reports a missing service',
   assert.equal(sections.length, 1)
   assert.equal(installRelayContract({}), false)
   assert.equal(installRelayContract(undefined), false)
+})
+
+/**
+ * Issue #50 (regression of #49): Cordis throws on a context *property* read for
+ * a service the plugin did not `inject` — and on any service the current scope
+ * cannot see. Reading `ctx.systemPrompt` first therefore aborted the whole
+ * `product-relay` preset mount and every background delegation with
+ * `cannot get property "systemPrompt" without inject`.
+ *
+ * The fake below reproduces the Cordis context proxy: every property that is
+ * not on the plain target throws exactly that error.
+ */
+function cordisLikeContext(target = {}) {
+  return new Proxy(target, {
+    get(object, prop) {
+      if (Reflect.has(object, prop)) return Reflect.get(object, prop)
+      throw new Error(`cannot get property "${String(prop)}" without inject`)
+    },
+    has: (object, prop) => Reflect.has(object, prop),
+  })
+}
+
+test('an unreachable systemPrompt service is skipped instead of aborting the mount', () => {
+  const ctx = cordisLikeContext({ tools: { register() {} } })
+  // Must not throw: a throw here is what killed the preset.
+  assert.equal(installRelayContract(ctx), false)
+})
+
+test('the non-throwing ctx.get is probed before the throwing property read', () => {
+  const sections = []
+  const ctx = {
+    get: (name) => (name === 'systemPrompt' ? { section: (section) => sections.push(section) } : undefined),
+    get systemPrompt() {
+      throw new Error('cannot get property "systemPrompt" without inject')
+    },
+  }
+  assert.equal(installRelayContract(ctx), true)
+  assert.equal(sections.length, 1)
+  assert.equal(sections[0].name, RELAY_CONTRACT_SECTION)
+})
+
+test('a throwing ctx.get degrades to the property, and never escapes', () => {
+  const sections = []
+  const viaProperty = {
+    systemPrompt: { section: (section) => sections.push(section) },
+    get: () => { throw new Error('get exploded') },
+  }
+  assert.equal(installRelayContract(viaProperty), true)
+  assert.equal(sections.length, 1)
+
+  const bothBroken = {
+    get: () => { throw new Error('get exploded') },
+    get systemPrompt() { throw new Error('property exploded') },
+  }
+  assert.equal(installRelayContract(bothBroken), false)
+})
+
+test('the relay entry never declares systemPrompt in inject (every entry is required)', () => {
+  // Cordis waits for every injected service before `apply` runs, and the preset
+  // registry audits such a row as "waiting for …" — a `systemPrompt` that the
+  // relay scope cannot see would leave the relay with no tools at all.
+  const declared = Array.isArray(relayEntry.inject)
+    ? relayEntry.inject
+    : Object.keys(relayEntry.inject ?? {})
+  assert.deepEqual(declared, ['tools'])
+})
+
+test('buildRelayPrompt still carries the contract as the in-prompt fallback', () => {
+  const prompt = buildRelayPrompt('opencode', { command: 'opencode' }, 'TASK')
+  assert.ok(prompt.includes(RELAY_CONTRACT_TEXT))
+  assert.match(prompt, /BEGIN TEXT ADDRESSED TO THE REMOTE PRODUCT AGENT/)
 })
 
 test('the tag round-trips and is stripped with the blank lines it leaves', () => {
