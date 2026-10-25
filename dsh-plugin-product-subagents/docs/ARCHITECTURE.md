@@ -141,6 +141,16 @@ the child session id) — no extra request. Only this tool can mint the tag.
 | no tag | `status: "failed"` (`unverifiable origin`), no `answer` — the rejected text is never returned |
 | tag present | body with the tag stripped, `status` unchanged |
 
+`lastAnswerFull()` — the log fallback `product_wait` uses when the activation
+carries no `output` — runs the same check before returning, so the fold itself
+is fail-closed, not just the tool that consumes it. A verified answer comes
+back with the tag stripped; an unverifiable or missing one comes back as
+`RELAY_FAILED: 输出缺少 product-session 标记，来源不可验证`, never the rejected
+text. A relay's own `RELAY_FAILED: <error>` report keeps its message, since
+that error is what the caller needs. `product_wait` only consults the fallback
+when the log has any events, so an already-settled child with no readable log
+keeps `status: "ready"` and simply has no answer.
+
 Non-terminal statuses (`timeout` / `aborted` / `unknown`) keep their meaning; an
 unverifiable answer read from the log is withheld rather than returned.
 `foldProgress().lastAnswer` strips the tag as well, so it never shows up in

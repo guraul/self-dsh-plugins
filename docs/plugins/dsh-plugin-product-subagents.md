@@ -101,6 +101,10 @@ promise（`dsh-subagent/lib/index.js:2075`）；它被存进 binding（`record.s
   **不会**把任何内容当作 `answer` 返回。
 - `answer` 取自 activation 结算值的 `output`（文本块拼接）；`output` 缺失时回退到 child 日志里
   最后一条 `assistant/message` / `tool/result`（`lastAnswerFull()`，**不截断**）。`stopReason` 同源。
+  这条兜底自身就 fail-closed：`lastAnswerFull()` 先过 `verifyRelayAnswer()`，验证通过返回剥离标记的
+  正文，否则返回 `RELAY_FAILED: 输出缺少 product-session 标记，来源不可验证`（relay 自己报的
+  `RELAY_FAILED: <error>` 保留原错误），**绝不返回被拒原文**（issue #52）。日志为空时
+  `product_wait` 不调用它，`ready` 语义与「无 answer」保持不变。
   `foldProgress.lastAnswer` 仍是 300 字符的**展示用**摘要（`subagent_progress` 的语义），两者不要混用。
 - `finish` 会 `clearTimeout` + `clearInterval` + 取消 `subagent/end` 订阅与 abort 监听；轮询 interval
   额外 `unref()`，不会拖住进程。结果仍经 `stripUndefined()`，保持严格 lossless JSON。
@@ -161,9 +165,13 @@ promise（`dsh-subagent/lib/index.js:2075`）；它被存进 binding（`record.s
    只有这个工具能生成标记 → relay 自己写的文本不可能带标记。
    `product_wait` 用 `verifyRelayAnswer()` 校验：`RELAY_FAILED:` 开头 → failed + 错误原文；
    无标记 → failed（`unverifiable origin`）且**不返回该文本**；有标记 → 剥离后返回正文。
+   日志兜底 `lastAnswerFull()` 走同一套校验（issue #52），所以「折叠 → 交付」这条链上不存在
+   未经校验的文本。
 
 **边界**：DSH 自己投递给父会话的 activation settlement notice（`delivery: 'parent'`）是
-harness 产生的文本，插件改不了；本插件返回的每条答案都已校验。
+harness 产生的文本（`dsh-subagent` 的 `createSettlementMessage()` 用 child 的 closing message 拼成），
+插件没有 hook、改不了；本插件返回的每条答案都已校验。因此后台委派的收尾文本里仍可能看到
+`PRODUCT_SESSION:` / `<!--product-session:…-->`（issue #52 已记录，修复需 DSH 侧 hook 或改 relay 收尾契约）。
 `foldProgress().lastAnswer` 也会先剥离标记，所以 `subagent_progress` 里不会出现标记。
 
 ## 设计规则（不可协商）
