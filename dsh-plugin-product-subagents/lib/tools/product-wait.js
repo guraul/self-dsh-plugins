@@ -1,7 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { stripUndefined } from '../lossless.js'
 import { findChildEntry } from '../children.js'
-import { verifyRelayAnswer } from '../relay-contract.js'
+import { verifyRelayAnswer, verifyRelayAnswerWithAttestation } from '../relay-contract.js'
 import { loadEvents } from '../session-events.js'
 
 const DEFAULT_TIMEOUT_MS = 300000
@@ -30,10 +30,10 @@ const MAX_TIMEOUT_MS = 600000
  * settlement handle exists (e.g. a child started by an earlier process).
  */
 export function registerProductWait(ctx, deps) {
-  const { foldProgress, foldTrace, lastAnswerFull, bindings } = deps
+  const { foldProgress, foldTrace, lastAnswerResult, bindings, registry } = deps
   ctx.tools.register(defineTool({
     name: 'product_wait',
-    description: 'Block until the given product subagent finishes (or the timeout elapses), then return its final answer, stop reason, and latest trace. Attaches to a background subagent id returned by product_delegate. `detectedBy` reports which signal woke the call: "activation" (the child activation settled — the normal path), "already-settled", "event", "timeout", "aborted" or "unknown".',
+    description: 'Block until the given product subagent finishes (or the timeout elapses), then return its final answer, stop reason, and latest trace. Attaches to a background subagent id returned by product_delegate. `detectedBy` reports which signal woke the call: "activation" (the child activation settled — the normal path), "already-settled", "event", "timeout", "aborted" or "unknown". `attested` reports how the answer was verified: "tag" (the product-submit machine tag) or "reconciled" (the tag was lost but the text matches the recorded successful product_submit result).',
     parameters: {
       subagent_id: { type: 'string', required: true, description: 'The continuable child session id returned by product_delegate.' },
       timeout_ms: { type: 'number', description: 'Max milliseconds to wait (default 300000, capped 600000).' },
@@ -148,36 +148,49 @@ export function registerProductWait(ctx, deps) {
       const blocks = outcome.terminal && Array.isArray(outcome.terminal.output)
         ? outcome.terminal.output
         : (outcome.info && outcome.info.lastAssistantMessage)
-      // `lastAnswerFull()` is fail-closed on a *present* answer, so it reports a
-      // failure string even for an empty log. Only ask it when the log has
-      // anything to read: an already-settled child with no readable log keeps
-      // its `ready` status and simply has no answer (the check only applies to
-      // an answer that exists).
-      const logAnswer = sessionLike.events.length > 0 ? lastAnswerFull(sessionLike) : undefined
-      const rawAnswer = Array.isArray(blocks)
+      // The digest of this child's last successful `product_submit` (issue
+      // #56). Present only when that submit happened through this plugin's
+      // registry; without it the check below is exactly the pre-#56 one.
+      const entry = registry && typeof registry.get === 'function' ? registry.get(childId) : undefined
+      const attest = entry && entry.attest
+      // `lastAnswerResult()` is fail-closed on a *present* answer, so it reports
+      // a failure even for an empty log. Only ask it when the log has anything
+      // to read: an already-settled child with no readable log keeps its
+      // `ready` status and simply has no answer (the check only applies to an
+      // answer that exists).
+      const logResult = sessionLike.events.length > 0 ? lastAnswerResult(sessionLike, attest) : undefined
+      const blockAnswer = Array.isArray(blocks)
         ? blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n')
-        : (logAnswer || (fold ? fold.lastAnswer : undefined))
+        : undefined
 
       const stopReason = outcome.terminal
         ? outcome.terminal.stopReason
         : (outcome.info ? outcome.info.stopReason : undefined)
 
-      // Fail-closed on the relay's final text (issue #42). A relay whose
-      // `product_submit` failed used to be able to answer on its own, so a
-      // completed child is not proof of a product answer: only `product_submit`
-      // mints the product-session tag, and an answer without one is rejected
-      // instead of being handed to the caller as the result. The rejected text
-      // is never returned — passing it on would defeat the check.
+      // Fail-closed on the relay's final text (issue #42), with the #56
+      // attestation fallback. A relay whose `product_submit` failed used to be
+      // able to answer on its own, so a completed child is not proof of a
+      // product answer: only `product_submit` mints the product-session tag,
+      // and an answer without one is rejected instead of being handed to the
+      // caller as the result — unless the child's recorded attestation claims
+      // the text, which is the one case where an untagged answer is provably
+      // the remote's (the relay paraphrased it and dropped the tag). The
+      // rejected text is never returned — passing it on would defeat the check.
+      const verified = blockAnswer !== undefined
+        ? verifyRelayAnswerWithAttestation(blockAnswer, attest)
+        : (logResult !== undefined
+            ? logResult
+            : (fold && fold.lastAnswer !== undefined ? verifyRelayAnswer(fold.lastAnswer) : undefined))
       let status = outcome.status
       let failure = outcome.failure
-      let answer = rawAnswer
+      let answer
+      let attested
       let answerRejected = false
-      if (rawAnswer !== undefined) {
-        const verified = verifyRelayAnswer(rawAnswer)
+      if (verified !== undefined) {
         if (verified.ok) {
           answer = verified.text
+          attested = verified.mode
         } else {
-          answer = undefined
           answerRejected = true
           // A terminal answer that fails verification is a failed run. A
           // non-terminal status (timeout / aborted / unknown) keeps its own
@@ -199,6 +212,10 @@ export function registerProductWait(ctx, deps) {
         failure,
         stopReason,
         answer: answer || undefined,
+        // How the answer was verified (issue #56): "tag" when the relay
+        // returned the product-session tag, "reconciled" when the tag was lost
+        // but the text matched the recorded product_submit digest.
+        attested,
         pinnedProduct: (record && record.product) || (fold ? fold.product : undefined),
         remoteSessionId: (record && record.remote && (record.remote.sessionId || record.remote.threadId)) || (fold ? fold.remoteSessionId : undefined),
         progress: outcome.status === 'timeout' ? {

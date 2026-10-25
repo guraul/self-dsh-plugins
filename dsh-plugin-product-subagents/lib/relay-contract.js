@@ -20,7 +20,16 @@
  *
  * The tag is structural, not a prompt promise: only `product_submit` can mint
  * it, so text the relay produced on its own cannot carry one.
+ *
+ * Issue #56 added the complementary path: a relay that *paraphrases* a long
+ * genuine answer drops the tag, and rejecting that answer is a false negative.
+ * `product_submit` therefore records a digest of every successful answer in the
+ * child's registry entry, and `verifyRelayAnswerWithAttestation` accepts
+ * untagged text only when it can be claimed by that record. Without a matching
+ * record the answer stays rejected — the fail-closed default is unchanged.
  */
+
+import { attestationClaims } from './attestation.js'
 
 /** Prefix a relay must use to report a failed submit. */
 export const RELAY_FAILED_PREFIX = 'RELAY_FAILED:'
@@ -108,6 +117,47 @@ export function verifyRelayAnswer(text) {
     }
   }
   return { ok: true, text: stripProductSessionTag(text) }
+}
+
+function defaultWarn(text) {
+  if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+    console.warn(`[product-subagents] ${text}`)
+  }
+}
+
+/**
+ * Fail-closed check with the issue #56 attestation fallback.
+ *
+ * Same contract as {@link verifyRelayAnswer}, plus one narrow acceptance: when
+ * the answer carries no tag but the child has a recorded attestation from its
+ * last successful `product_submit` and the answer can be claimed by it
+ * (`normalize(text)` contains the attested 200-character head, or its hash
+ * equals the attested hash), the text is accepted as `mode: 'reconciled'` —
+ * the relay paraphrased a genuine answer and lost the tag. A warn is logged so
+ * a repeated tag loss stays visible.
+ *
+ * Anything else keeps the old outcome: no tag and no claimable record is still
+ * `ok: false`. `RELAY_FAILED` reports are never reconciled — they are an
+ * explicit failure, not an answer missing a receipt.
+ *
+ * @param {string} text the relay's final text.
+ * @param {object|undefined} attest `{ remoteId, at, head, len, hash }` from the
+ *   child's registry entry, if one was recorded.
+ * @param {{ warn?: ((text: string) => void) | null }} [options] warn sink;
+ *   pass `null` to silence (tests).
+ * @returns {{ ok: true, text: string, mode: 'tag' | 'reconciled' }
+ *   | { ok: false, failure: string, relayFailed: boolean }}
+ */
+export function verifyRelayAnswerWithAttestation(text, attest, options = {}) {
+  const base = verifyRelayAnswer(text)
+  if (base.ok) return { ...base, mode: 'tag' }
+  if (base.relayFailed) return base
+  if (!attestationClaims(text, attest)) return base
+  const warn = options.warn === undefined ? defaultWarn : options.warn
+  if (typeof warn === 'function') {
+    warn('relay answer reconciled by attestation: the product-session tag was lost, but the text matches the recorded successful product_submit result')
+  }
+  return { ok: true, mode: 'reconciled', text }
 }
 
 /**

@@ -124,10 +124,23 @@ product_wait subagent_id=<childId>
 | 最终文本 | `product_wait` 返回 |
 |---|---|
 | 以 `RELAY_FAILED:` 开头 | `status: "failed"`,`failure` = 上报的错误原文,无 `answer` |
-| 不含 product-session 标记 | `status: "failed"`,`failure` 说明缺标记,**无 `answer`** |
-| 含标记 | `status: "completed"`,`answer` = 剥离标记后的正文 |
+| 含 product-session 标记 | `status: "completed"`,`answer` = 剥离标记后的正文,`attested: "tag"` |
+| 无标记,但能被该子代理记录的 attestation 认领 | `status: "completed"`,`answer` = 原文,`attested: "reconciled"`(并记一条 warn) |
+| 无标记且不可认领 | `status: "failed"`,`failure` 说明缺标记,**无 `answer`** |
 
 因此 relay 自己编的回答不会作为答案送到你手里——即使它与任务要求的那段文本一字不差。
+
+**attestation(issue #56)。** relay 对远端长答案做**转述**时会丢掉标记,此时拒收真实答案属于误判。
+因此每次成功的 `product_submit` 会把答案摘要写进该 child 的 registry 记录(**不新增存储文件**):
+
+```json
+{ "remoteId": "sess-…", "at": 1760000000000,
+  "head": "<归一化后前 200 字>", "len": 812, "hash": "<归一化全文的 sha256>" }
+```
+
+`head` 与 `hash` 都基于归一化正文:所有空白折叠为单空格并去首尾空白;**不**剥离 markdown。
+无标记的回答只有在归一化文本**包含 `head`**、或 hash 与记录**相等**时才被认领;
+其余仍然拒绝,`RELAY_FAILED` 报告永远不参与认领。
 
 ## 配置
 

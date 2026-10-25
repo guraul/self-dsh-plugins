@@ -1,7 +1,7 @@
 import { bindings, MARKER, recoverRemoteSessionId } from './bindings.js'
 import { buildBridgeSet } from './bridge-set.js'
 import { validateConfig } from './config.js'
-import { foldProgress, foldTrace, foldTokenUsage, lastAnswerFull } from './progress.js'
+import { foldProgress, foldTrace, foldTokenUsage, lastAnswerFull, lastAnswerResult } from './progress.js'
 import { DEFAULT_PROVIDER_NAMESPACE, runtimeProviderName } from './providers.js'
 import { createRegistry } from './registry.js'
 import { registerRelayPreset } from './relay-preset.js'
@@ -51,6 +51,16 @@ export function apply(ctx, config = {}) {
     const remoteId = record && record.remote && (record.remote.sessionId || record.remote.threadId)
     if (!remoteId) return
     registry.set(childId, { product: record.product, remoteId, cwd })
+  }
+
+  /**
+   * Persist the digest of the child's last successful `product_submit` on the
+   * same registry entry (issue #56) — no separate storage file. The entry is
+   * re-read first because `persistRemote` replaces it wholesale.
+   */
+  const recordAttestation = (childId, attest) => {
+    const existing = registry.get(childId) || {}
+    registry.set(childId, { ...existing, attest })
   }
 
   // Idle disposal: a settled child's remote session (a persistent ACP server
@@ -172,8 +182,8 @@ export function apply(ctx, config = {}) {
   const deps = {
     bindings, MARKER, recoverRemoteSessionId,
     bridges, availability, providers, roles,
-    registry, persistRemote, cancelDispose,
-    foldProgress, foldTrace, foldTokenUsage, lastAnswerFull,
+    registry, persistRemote, cancelDispose, recordAttestation,
+    foldProgress, foldTrace, foldTokenUsage, lastAnswerFull, lastAnswerResult,
     state, maxConcurrent, availableProviders, runtimeName,
     relayPreset: () => relay.ready,
     maxDelegationDepth: cfg.maxDelegationDepth !== undefined ? cfg.maxDelegationDepth : 2,

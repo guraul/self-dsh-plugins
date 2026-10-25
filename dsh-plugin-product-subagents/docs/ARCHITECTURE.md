@@ -30,7 +30,8 @@ subagents** with a role-based permission model.
 - **The relay may not answer on its own.** A restricted toolset does not
   restrict output, so the relay composition also carries a fixed contract and
   `product_submit` stamps every result; `product_wait` rejects an unstamped
-  answer (see "Relay output contract" below).
+  answer unless a recorded digest of the real submit can claim it (see "Relay
+  output contract" below).
 - **Permissions are for the remote product.** `permissionMode` per role maps
   to the product's own CLI flags (`readonly` / `default` / `full`).
 - **Permissions inherit down the delegation tree.** A child cannot spawn a
@@ -140,18 +141,30 @@ result, next to the `PRODUCT_SESSION:<product>:<id>` recovery marker. The id is
 the one the binding already holds (`remote.sessionId || remote.threadId`, else
 the child session id) — no extra request. Only this tool can mint the tag.
 
-`product_wait` runs `verifyRelayAnswer()` on the child's final text:
+`product_wait` runs `verifyRelayAnswerWithAttestation()` on the child's final text:
 
 | Final text | Result |
 |---|---|
 | starts with `RELAY_FAILED:` | `status: "failed"`, `failure` = the reported error, no `answer` |
-| no tag | `status: "failed"` (`unverifiable origin`), no `answer` — the rejected text is never returned |
-| tag present | body with the tag stripped, `status` unchanged |
+| tag present | body with the tag stripped, `attested: "tag"`, `status` unchanged |
+| no tag, claimed by the recorded attestation | body as received, `attested: "reconciled"`, `status` unchanged, a warn is logged |
+| no tag, no claimable record | `status: "failed"` (`unverifiable origin`), no `answer` — the rejected text is never returned |
+
+**Attestation (issue #56).** A relay that paraphrases a long answer drops the
+tag; rejecting that genuine answer is a false negative. `product_submit`
+therefore persists `{ remoteId, at, head, len, hash }` on the child's registry
+entry (`lib/attestation.js`): `head` = the first 200 characters of the
+normalized body, `hash` = SHA-256 of the whole normalized body, normalization =
+collapse every whitespace run to one space and trim (markdown is *not*
+stripped). `verifyRelayAnswerWithAttestation()` accepts untagged text only when
+`normalize(text)` contains `head` or its hash equals `hash`; otherwise the
+pre-#56 fail-closed outcome stands. `RELAY_FAILED` is never reconciled.
 
 `lastAnswerFull()` — the log fallback `product_wait` uses when the activation
-carries no `output` — runs the same check before returning, so the fold itself
-is fail-closed, not just the tool that consumes it. A verified answer comes
-back with the tag stripped; an unverifiable or missing one comes back as
+carries no `output` — runs the same check (and takes the same optional
+attestation) before returning, so the fold itself is fail-closed, not just the
+tool that consumes it. A verified answer comes back with the tag stripped; an
+unverifiable or missing one comes back as
 `RELAY_FAILED: 输出缺少 product-session 标记，来源不可验证`, never the rejected
 text. A relay's own `RELAY_FAILED: <error>` report keeps its message, since
 that error is what the caller needs. `product_wait` only consults the fallback

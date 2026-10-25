@@ -13,6 +13,10 @@ import { dirname, join } from 'node:path'
  *
  * Writes are small and atomic (temp file + rename). Stale entries (a deleted
  * child) are harmless: reconnection falls back to a fresh product session.
+ *
+ * An entry may also carry `attest` — the digest of the child's last successful
+ * `product_submit` answer (issue #56, written by `recordAttestation` in
+ * lib/index.js). It lives on the same entry on purpose: no second storage file.
  */
 const DEFAULT_PATH = join(homedir(), '.dsh', 'product-subagents-registry.json')
 

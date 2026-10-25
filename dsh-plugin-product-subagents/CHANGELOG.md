@@ -2,6 +2,50 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.11] — 2026-10-25
+
+A background delegation could finish its real work and still be reported as
+failed: the relay paraphrased the remote's long answer, the
+`<!--product-session:…-->` tag was lost, and the #42 fail-closed check rejected
+the whole turn as "unverifiable origin" (issue #56). Rejecting a genuine answer
+is the opposite failure of the one #42 guards against, so the receipt is now
+backed by a record of the submit itself — without giving up the default.
+
+### Fixed
+- **`product_submit` records a structured attestation of every successful
+  answer** (issue #56): `{ remoteId, at, head, len, hash }` is written onto the
+  child's existing registry entry (no new storage file). `head` is the first
+  200 characters and `hash` the SHA-256 of the *normalized* body; normalization
+  collapses every whitespace run to one space and trims, and deliberately does
+  **not** strip markdown. Helpers live in `lib/attestation.js` (`normalizeAnswerText`,
+  `buildAttestation`, `attestationClaims`).
+- **`verifyRelayAnswerWithAttestation(text, attest)`** adds one narrow
+  acceptance to the #42 check: no tag, but the normalized answer contains the
+  recorded `head` (or its hash equals the recorded `hash`) → `ok`,
+  `mode: "reconciled"`, body returned as received, plus a warn. A tag still
+  wins (`mode: "tag"`). `RELAY_FAILED` reports are never reconciled, and
+  `verifyRelayAnswer(text)` keeps its exact signature and behaviour.
+- **`product_wait` uses the new check** and reports how the answer was
+  verified: `attested: "tag" | "reconciled"`. `lastAnswerFull()` / the new
+  `lastAnswerResult()` in `lib/progress.js` take the same optional attestation,
+  so the log fallback reconciles too — with no record it degrades to the old
+  fail-closed result.
+- **The log fallback no longer re-checks already-stripped text.** The fallback
+  had returned the verified body (tag stripped) and `product_wait` then ran the
+  tag check on it again, so every answer read from the log failed as
+  "unverifiable origin". It now consumes the verifier's result directly, which
+  is what makes a successful log answer pass at all.
+
+### Tests
+- `test/relay-contract.test.js`: +8 cases (verbatim tag; paraphrase claimed by
+  `head`; exact untagged copy claimed by `hash`; self-answer rejected; no
+  attestation + no tag rejected; `RELAY_FAILED` never reconciled; whitespace
+  normalization; differently formatted answer still claimed).
+- `test/product-wait.test.js`: +4 cases (reconciled settlement with
+  `attested: "reconciled"`; a self-answer with a record for another answer still
+  fails; the log fallback reconciles; a tagged log answer verifies as
+  `attested: "tag"`). Suite 105 → 117.
+
 ## [0.4.10] — 2026-10-25
 
 Stopping a product child used to stop only the local half. `product_submit`

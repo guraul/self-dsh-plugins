@@ -1,5 +1,5 @@
 import { recoverRemoteSessionId } from './bindings.js'
-import { RELAY_FAILED_PREFIX, stripProductSessionTag, verifyRelayAnswer } from './relay-contract.js'
+import { RELAY_FAILED_PREFIX, stripProductSessionTag, verifyRelayAnswerWithAttestation } from './relay-contract.js'
 
 /**
  * What `lastAnswerFull()` returns when the log's last answer does not verify
@@ -112,18 +112,39 @@ function displayAnswer(text) {
  * the 300-character display cap — `product_wait` returns this as the child's
  * real answer.
  *
- * The whole text goes through `verifyRelayAnswer()` first (issue #42, the
- * same check `product_wait` applies): a relay final answer is proof of a
- * product answer only when it carries the `product_submit` tag. A verified
- * answer comes back with the tag stripped; anything else — unverifiable text,
- * an empty log, or a missing session — comes back as
- * {@link RELAY_UNVERIFIED_ANSWER}, never the rejected text. A relay's own
- * `RELAY_FAILED: <error>` report keeps its message, because that is the failure
- * the caller needs to see, not a fabricated body.
+ * The whole text goes through `verifyRelayAnswerWithAttestation()` first (issue
+ * #42, extended by #56): a relay final answer is proof of a product answer only
+ * when it carries the `product_submit` tag, or when an `attest` record from the
+ * child's last successful submit claims it. A verified answer comes back with
+ * the tag stripped; anything else — unverifiable text, an empty log, or a
+ * missing session — comes back as {@link RELAY_UNVERIFIED_ANSWER}, never the
+ * rejected text. A relay's own `RELAY_FAILED: <error>` report keeps its
+ * message, because that is the failure the caller needs to see, not a
+ * fabricated body.
+ *
+ * @param {unknown} session session-like `{ events }`.
+ * @param {object|undefined} attest recorded attestation (lib/attestation.js).
  */
-export function lastAnswerFull(session) {
+export function lastAnswerFull(session, attest) {
+  const result = lastAnswerResult(session, attest)
+  if (result.ok) return result.text
+  if (result.relayFailed) return `${RELAY_FAILED_PREFIX} ${result.failure}`
+  return RELAY_UNVERIFIED_ANSWER
+}
+
+/**
+ * Structured form of {@link lastAnswerFull}: the verifier's own result, so
+ * `product_wait` can report *how* an answer was verified (`mode: 'tag'` or
+ * `'reconciled'`) without re-checking already-stripped text.
+ *
+ * @param {unknown} session session-like `{ events }`.
+ * @param {object|undefined} attest recorded attestation.
+ * @returns {{ ok: true, text: string, mode: 'tag' | 'reconciled' }
+ *   | { ok: false, relayFailed: boolean, failure: string }}
+ */
+export function lastAnswerResult(session, attest) {
   const events = session && session.events
-  if (!Array.isArray(events)) return RELAY_UNVERIFIED_ANSWER
+  if (!Array.isArray(events)) return { ok: false, relayFailed: false, failure: 'relay answer rejected: empty answer' }
   let answer
   const start = Math.max(0, events.length - 150)
   for (let i = start; i < events.length; i += 1) {
@@ -138,10 +159,7 @@ export function lastAnswerFull(session) {
       if (text) answer = text
     }
   }
-  const verified = verifyRelayAnswer(answer)
-  if (verified.ok) return verified.text
-  if (verified.relayFailed) return `${RELAY_FAILED_PREFIX} ${verified.failure}`
-  return RELAY_UNVERIFIED_ANSWER
+  return verifyRelayAnswerWithAttestation(answer, attest)
 }
 
 /**
