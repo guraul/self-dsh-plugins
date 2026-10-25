@@ -1,6 +1,7 @@
 import { bindings, MARKER, recoverRemoteSessionId } from './bindings.js'
 import { buildBridgeSet } from './bridge-set.js'
 import { validateConfig } from './config.js'
+import { installRelayContract } from './relay-contract.js'
 import { createRegistry } from './registry.js'
 import { createProductSubmitTool } from './tools/product-submit.js'
 
@@ -33,6 +34,13 @@ export function apply(ctx, config = {}) {
   const cfg = validateConfig(config)
   const { bridges } = buildBridgeSet(cfg)
   const registry = createRegistry(cfg.registryPath)
+  // The toolset is restricted, the OUTPUT is not: this fixed section is what
+  // stops the relay from answering on its own when `product_submit` fails
+  // (issue #42). It registers into this preset's scope, so exactly the relay
+  // children inherit it — never the parent. `buildRelayPrompt` repeats the same
+  // rules in the child's prompt, which covers a profile whose `systemPrompt`
+  // service is unavailable.
+  installRelayContract(ctx)
 
   const persistRemote = (childId, record, cwd) => {
     const remoteId = record && record.remote && (record.remote.sessionId || record.remote.threadId)

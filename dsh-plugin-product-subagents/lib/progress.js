@@ -1,4 +1,5 @@
 import { recoverRemoteSessionId } from './bindings.js'
+import { stripProductSessionTag } from './relay-contract.js'
 
 /**
  * Fold the tail of one child session's durable events into a compact progress
@@ -55,7 +56,7 @@ export function foldProgress(session) {
       case 'assistant/message': {
         const text = messageText(payload)
         if (text) {
-          out.lastAnswer = text.slice(0, 300)
+          out.lastAnswer = displayAnswer(text)
           if (ts !== undefined) out.lastActivityAt = ts
         }
         break
@@ -69,7 +70,7 @@ export function foldProgress(session) {
       case 'tool/result': {
         const text = toolResultText(payload)
         if (text) {
-          out.lastAnswer = text.slice(0, 300)
+          out.lastAnswer = displayAnswer(text)
           if (ts !== undefined) out.lastActivityAt = ts
         }
         break
@@ -84,6 +85,15 @@ export function foldProgress(session) {
     out.remoteSessionId = marker.sessionId
   }
   return out
+}
+
+/**
+ * One answer as `subagent_progress` displays it: the machine tag
+ * `product_submit` appends is stripped first, so the marker never shows up in
+ * model-visible progress output (only `product_wait` may read it, to verify).
+ */
+function displayAnswer(text) {
+  return stripProductSessionTag(text).slice(0, 300)
 }
 
 /**

@@ -18,7 +18,7 @@ subagents** with a role-based permission model.
       │         │        │ (deepseek,   │   task text + settings │  (claude/
       │         │        │  read-only   │                        │   codex/
       │         │        │  pipe)       │◄───────────────────────┤   acp)
-      │         │        └──────────────┘   answer + marker      │
+      │         │        └──────────────┘   answer + markers      │
       └─────────┴────────────────────────────────────────────────┘
                      child session ◄─binding──► remote session
 ```
@@ -27,6 +27,10 @@ subagents** with a role-based permission model.
   contains `product_submit` (plus `product_delegate` when the role allows
   delegation). It never receives write-capable tools. All real work happens
   in the remote product.
+- **The relay may not answer on its own.** A restricted toolset does not
+  restrict output, so the relay composition also carries a fixed contract and
+  `product_submit` stamps every result; `product_wait` rejects an unstamped
+  answer (see "Relay output contract" below).
 - **Permissions are for the remote product.** `permissionMode` per role maps
   to the product's own CLI flags (`readonly` / `default` / `full`).
 - **Permissions inherit down the delegation tree.** A child cannot spawn a
@@ -85,6 +89,59 @@ durably recorded:
 
 Idle disposal releases a settled child's remote session after
 `idleTimeoutMs`; reuse cancels the pending release.
+
+## Relay output contract (fail-closed)
+
+Restricting the relay's toolset does not restrict its *output*: with only
+`product_submit` mounted, the relay could still answer the task itself — and
+when the remote failed it did, replying with the text the task said it expected
+(issue #42). A well-formed fake is indistinguishable from a real answer unless
+the transport says which is which, so the contract is enforced twice.
+
+**1. Prompt (`lib/relay-contract.js`)**
+
+`RELAY_CONTRACT_TEXT` is one fixed block: the only action is `product_submit`;
+a submit error must be reported verbatim as `RELAY_FAILED: <error>` and end the
+turn; a successful return value must be echoed character for character,
+including its trailing tag; nothing else may appear in the final answer.
+
+- `lib/relay.js` registers it as the system section `product-relay:contract`
+  through the caller-bound `ctx.systemPrompt.section(...)`. Registration happens
+  in the `product-relay` preset's scope (the preset tree is mounted under
+  `createScope()` in `dsh-agent-preset-registry`), and a child joins that scope
+  as its parent — so every relay child inherits the section and the root agent
+  never sees it. No harness change, no global section.
+- `buildRelayPrompt()` (lib/tools/product-delegate.js) repeats the same text in
+  the relay prompt. That is the fallback for a profile without a `systemPrompt`
+  service, and it keeps the contract in the same message as the task.
+
+**2. Machine tag (`product_submit` → `verifyRelayAnswer`)**
+
+`product_submit` appends `<!--product-session:<remoteId>-->` to every successful
+result, next to the `PRODUCT_SESSION:<product>:<id>` recovery marker. The id is
+the one the binding already holds (`remote.sessionId || remote.threadId`, else
+the child session id) — no extra request. Only this tool can mint the tag.
+
+`product_wait` runs `verifyRelayAnswer()` on the child's final text:
+
+| Final text | Result |
+|---|---|
+| starts with `RELAY_FAILED:` | `status: "failed"`, `failure` = the reported error, no `answer` |
+| no tag | `status: "failed"` (`unverifiable origin`), no `answer` — the rejected text is never returned |
+| tag present | body with the tag stripped, `status` unchanged |
+
+Non-terminal statuses (`timeout` / `aborted` / `unknown`) keep their meaning; an
+unverifiable answer read from the log is withheld rather than returned.
+`foldProgress().lastAnswer` strips the tag as well, so it never shows up in
+`subagent_progress`, which also sees the relay's text.
+
+The result's `trace` is model-visible, so a rejected answer is blanked there
+too (`answer: (withheld — unverifiable relay output)`); turn/step/tool entries
+stay, since they carry the diagnostic value without the text.
+
+Deliberately out of scope: the activation settlement notice DSH itself delivers
+to the parent (`delivery: 'parent'`) is harness-owned text and cannot be
+rewritten here. Verification covers every answer this plugin returns.
 
 ## Role system
 

@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { productSessionTag } from '../relay-contract.js'
 
 /**
  * The per-child bridge tool: continuable children submit task work to their
@@ -62,7 +63,16 @@ export function createProductSubmitTool(deps) {
         const out = await record.bridge.submit(record.remote, args.task, exec.signal, cwd, record.settings)
         const remoteId = record.remote.sessionId || record.remote.threadId
         const marker = remoteId ? `${MARKER}${record.product}:${remoteId}` : ''
-        const text = marker ? `${out.text}\n${marker}` : out.text
+        // Two markers with different jobs:
+        //  - `PRODUCT_SESSION:<product>:<id>` names the product too, and is what
+        //    `recoverRemoteSessionId` scans the child's log for.
+        //  - the HTML tag is the machine receipt `verifyRelayAnswer` requires in
+        //    the relay's final answer: it can only come from this return value,
+        //    so an answer the relay wrote on its own never carries one (#42).
+        //    It falls back to the child session id — the binding key, unique per
+        //    child — when the bridge has not exposed a remote id yet.
+        const tag = productSessionTag(remoteId || childSessionId)
+        const text = [`${out.text}`, marker, tag].filter(Boolean).join('\n')
         return { text }
       } finally {
         // Persist the remote id whenever it becomes known (after a successful
