@@ -148,9 +148,15 @@ export function registerProductWait(ctx, deps) {
       const blocks = outcome.terminal && Array.isArray(outcome.terminal.output)
         ? outcome.terminal.output
         : (outcome.info && outcome.info.lastAssistantMessage)
+      // `lastAnswerFull()` is fail-closed on a *present* answer, so it reports a
+      // failure string even for an empty log. Only ask it when the log has
+      // anything to read: an already-settled child with no readable log keeps
+      // its `ready` status and simply has no answer (the check only applies to
+      // an answer that exists).
+      const logAnswer = sessionLike.events.length > 0 ? lastAnswerFull(sessionLike) : undefined
       const rawAnswer = Array.isArray(blocks)
         ? blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n')
-        : (lastAnswerFull(sessionLike) || (fold ? fold.lastAnswer : undefined))
+        : (logAnswer || (fold ? fold.lastAnswer : undefined))
 
       const stopReason = outcome.terminal
         ? outcome.terminal.stopReason

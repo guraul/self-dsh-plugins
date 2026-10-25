@@ -2,6 +2,39 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.9] — 2026-10-25
+
+The log fallback `product_wait` uses was the last path that could hand back an
+**unverified** relay answer: `lastAnswerFull()` returned the raw text, and the
+#42 check only ran afterwards inside `product_wait`. The fold itself is now
+fail-closed, so no caller can obtain the text without the tag check.
+
+### Fixed
+- **`lastAnswerFull()` did not verify or strip the product-session tag** (issue
+  #52, a #42 coverage gap). The whole answer now goes through
+  `verifyRelayAnswer()`: a tagged answer comes back with the tag stripped; an
+  untagged one comes back as `RELAY_FAILED: 输出缺少 product-session 标记，来源不可验证`
+  and **never** as the rejected text; an empty log / empty answer / undefined
+  fails the same way instead of throwing. A relay's own `RELAY_FAILED: <error>`
+  keeps its message, because that error is the failure the caller needs.
+- **`product_wait` only uses that fallback when the log has events.** An
+  already-settled child with no readable log keeps `status: "ready"` and has no
+  answer, instead of being reported as a verification failure.
+
+### Not covered
+- The activation settlement notice DSH delivers to the parent
+  (`delivery: 'parent'`) is still harness-owned text
+  (`dsh-subagent` `createSettlementMessage()`), so a background delegation's
+  closing message can still show the markers. Fixing that needs a DSH-side hook
+  or a relay-contract change; it is recorded, not addressed here.
+
+### Tests
+- `test/progress.test.js`: +5 cases (tagged answer stripped; the bare
+  `PRODUCT_SESSION:` recovery marker is not a receipt; untagged answer is
+  rejected and not echoed; empty/undefined fails closed without throwing; a
+  relay `RELAY_FAILED` keeps its error). Two old fixtures that used untagged
+  text were updated to the `verifyRelayAnswer` semantics. Suite 94 → 99.
+
 ## [0.4.8] — 2026-10-25
 
 `0.4.7` broke the `product-relay` preset itself: `installRelayContract()` read

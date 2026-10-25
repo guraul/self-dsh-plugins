@@ -1,5 +1,13 @@
 import { recoverRemoteSessionId } from './bindings.js'
-import { stripProductSessionTag } from './relay-contract.js'
+import { RELAY_FAILED_PREFIX, stripProductSessionTag, verifyRelayAnswer } from './relay-contract.js'
+
+/**
+ * What `lastAnswerFull()` returns when the log's last answer does not verify
+ * (issue #42): a tagged answer is the only proof the text came from a
+ * successful `product_submit`. The rejected text itself is never returned —
+ * passing it on would defeat the check.
+ */
+export const RELAY_UNVERIFIED_ANSWER = `${RELAY_FAILED_PREFIX} 输出缺少 product-session 标记，来源不可验证`
 
 /**
  * Fold the tail of one child session's durable events into a compact progress
@@ -97,14 +105,25 @@ function displayAnswer(text) {
 }
 
 /**
- * The latest answer text of one child session, UNTRUNCATED. Same tail scan and
- * same precedence as `foldProgress().lastAnswer` (a later `assistant/message`
- * or `tool/result` overwrites an earlier one), but without the 300-character
- * display cap — `product_wait` returns this as the child's real answer.
+ * The latest answer text of one child session, UNTRUNCATED and fail-closed.
+ *
+ * Same tail scan and same precedence as `foldProgress().lastAnswer` (a later
+ * `assistant/message` or `tool/result` overwrites an earlier one), but without
+ * the 300-character display cap — `product_wait` returns this as the child's
+ * real answer.
+ *
+ * The whole text goes through `verifyRelayAnswer()` first (issue #42, the
+ * same check `product_wait` applies): a relay final answer is proof of a
+ * product answer only when it carries the `product_submit` tag. A verified
+ * answer comes back with the tag stripped; anything else — unverifiable text,
+ * an empty log, or a missing session — comes back as
+ * {@link RELAY_UNVERIFIED_ANSWER}, never the rejected text. A relay's own
+ * `RELAY_FAILED: <error>` report keeps its message, because that is the failure
+ * the caller needs to see, not a fabricated body.
  */
 export function lastAnswerFull(session) {
   const events = session && session.events
-  if (!Array.isArray(events)) return undefined
+  if (!Array.isArray(events)) return RELAY_UNVERIFIED_ANSWER
   let answer
   const start = Math.max(0, events.length - 150)
   for (let i = start; i < events.length; i += 1) {
@@ -119,7 +138,10 @@ export function lastAnswerFull(session) {
       if (text) answer = text
     }
   }
-  return answer
+  const verified = verifyRelayAnswer(answer)
+  if (verified.ok) return verified.text
+  if (verified.relayFailed) return `${RELAY_FAILED_PREFIX} ${verified.failure}`
+  return RELAY_UNVERIFIED_ANSWER
 }
 
 /**
