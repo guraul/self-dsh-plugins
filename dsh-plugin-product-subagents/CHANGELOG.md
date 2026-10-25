@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.10] — 2026-10-25
+
+Stopping a product child used to stop only the local half. `product_submit`
+runs inside the relay child's turn, so `interrupt_agent` aborted `exec.signal`
+— but the ACP bridge never read that signal, and `prompt()` stayed open until
+the agent finished on its own. Killing the client was no help either: a v2
+agent runs the turn in a resident backend (`opencode serve --service`), so the
+session kept grepping and spawning git minutes after `list_agents` showed the
+child as inactive (issue #12).
+
+### Fixed
+- **ACP turns now honour caller cancellation.** The bridge translates an
+  aborted `signal` into the protocol's `session/cancel` notification, the only
+  channel that reaches a running turn (the agent then answers the original
+  `session/prompt` with `stopReason: cancelled`). A failed notification only
+  warns — it never breaks the turn.
+- **`dispose()` cancels before closing.** `closeSession` + SIGTERM release the
+  client side only, so a turn still live in a resident backend is cancelled
+  first.
+- **A cancelled turn is never replayed.** The dead-transport retry no longer
+  reconnects and re-sends the task after the caller aborted; that would have
+  started a fresh remote session for work the caller had just stopped.
+
+claude-code and codex needed no change: their bridges already pass `signal` to
+`runCommand()`, which kills the product process on abort.
+
+### Tests
+- `test/acp-cancel.test.js`: +6 cases (abort sends `session/cancel`; an
+  already-aborted signal cancels immediately; a rejected and a synchronously
+  throwing `cancel` only warn; a completed turn is not cancelled
+  retroactively; `dispose` cancels before `closeSession`). Suite 99 → 105.
+
 ## [0.4.9] — 2026-10-25
 
 The log fallback `product_wait` uses was the last path that could hand back an

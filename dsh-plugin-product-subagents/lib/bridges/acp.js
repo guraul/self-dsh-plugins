@@ -17,6 +17,7 @@ export function createAcpBridge(options = {}) {
   const command = options.command || 'opencode'
   const args = options.args || ['acp']
   const env = options.env || {}
+  const warn = typeof options.warn === 'function' ? options.warn : defaultWarn
 
   function makeClient(onText) {
     return {
@@ -101,6 +102,43 @@ export function createAcpBridge(options = {}) {
     remote.sessionId = handle.sessionId
   }
 
+  /**
+   * Run one prompt turn, translating caller cancellation into the protocol's
+   * `session/cancel` notification.
+   *
+   * ACP has no client-side abort: `prompt()` stays open until the AGENT ends
+   * the turn, and `cancel()` is the only channel that reaches it. Killing the
+   * ACP client process is NOT a substitute — a v2 agent (`opencode acp`) can
+   * run the turn in a resident backend (`opencode serve --service`), which
+   * keeps working after the client dies (issue #12: the relay child showed as
+   * stopped while the remote kept grepping and spawning git for minutes).
+   * Best-effort: a failed notification warns, it never breaks the turn.
+   */
+  async function promptTurn(remote, task, signal) {
+    const cancel = () => {
+      let sending
+      try {
+        sending = remote.connection.cancel({ sessionId: remote.sessionId })
+      } catch (error) {
+        warn(`session/cancel failed: ${messageOf(error)}`)
+        return
+      }
+      Promise.resolve(sending).catch((error) => warn(`session/cancel failed: ${messageOf(error)}`))
+    }
+    if (signal && typeof signal.addEventListener === 'function') {
+      if (signal.aborted) cancel()
+      else signal.addEventListener('abort', cancel, { once: true })
+    }
+    try {
+      return await remote.connection.prompt({
+        sessionId: remote.sessionId,
+        prompt: [{ type: 'text', text: task }],
+      })
+    } finally {
+      if (signal && typeof signal.removeEventListener === 'function') signal.removeEventListener('abort', cancel)
+    }
+  }
+
   return {
     async create(cwd) {
       const handle = await connect(cwd)
@@ -123,23 +161,16 @@ export function createAcpBridge(options = {}) {
       // prompt fails on a dead transport, reconnect once and retry (the prompt
       // cannot have been delivered to a dead process, so a retry is safe).
       try {
-        const response = await remote.connection.prompt({
-          sessionId: remote.sessionId,
-          prompt: [{ type: 'text', text: task }],
-        })
-        const rawStop = response && response.stopReason ? String(response.stopReason) : 'end_turn'
-        const stopReason = rawStop === 'end_turn' ? 'completed' : rawStop
-        return { text: remote.drainText(), stopReason }
+        const response = await promptTurn(remote, task, signal)
+        return { text: remote.drainText(), stopReason: stopReasonOf(response) }
       } catch (error) {
+        // A caller cancellation is not a dead transport: reconnecting here
+        // would replay a task the caller already stopped into a fresh session.
+        if (signal && signal.aborted) throw error
         if (!transportDead(remote)) throw error
         await reconnectRemote(remote, cwd)
-        const response = await remote.connection.prompt({
-          sessionId: remote.sessionId,
-          prompt: [{ type: 'text', text: task }],
-        })
-        const rawStop = response && response.stopReason ? String(response.stopReason) : 'end_turn'
-        const stopReason = rawStop === 'end_turn' ? 'completed' : rawStop
-        return { text: remote.drainText(), stopReason }
+        const response = await promptTurn(remote, task, signal)
+        return { text: remote.drainText(), stopReason: stopReasonOf(response) }
       }
     },
     async reconnect(sessionId, cwd) {
@@ -158,6 +189,14 @@ export function createAcpBridge(options = {}) {
       return { kind: 'acp', ...handle }
     },
     async dispose(remote) {
+      // A turn the agent is still running in a resident backend survives the
+      // transport: `closeSession` + SIGTERM only release the client side
+      // (issue #12), so cancel it explicitly before tearing the connection down.
+      try {
+        await remote.connection.cancel({ sessionId: remote.sessionId })
+      } catch {
+        // no live turn, or the connection is already gone
+      }
       try {
         await remote.connection.closeSession({ sessionId: remote.sessionId })
       } catch {
@@ -170,4 +209,21 @@ export function createAcpBridge(options = {}) {
       }
     },
   }
+}
+
+/** Map an ACP prompt response onto the plugin's stop-reason vocabulary. */
+function stopReasonOf(response) {
+  const rawStop = response && response.stopReason ? String(response.stopReason) : 'end_turn'
+  return rawStop === 'end_turn' ? 'completed' : rawStop
+}
+
+/** A cancelled turn must not go unnoticed, but it must never break the turn. */
+function defaultWarn(text) {
+  if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+    console.warn(`[product-subagents] ${text}`)
+  }
+}
+
+function messageOf(error) {
+  return error instanceof Error ? error.message : String(error)
 }

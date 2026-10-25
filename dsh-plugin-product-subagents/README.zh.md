@@ -15,6 +15,7 @@
 - **权限天花板** — 子代理不能派生出比自己权限更高的后代。
 - **任意 ACP Agent** — 通过 `config.providers` 加 Cursor(`agent acp`)、CodeBuddy(`cbc --acp`)、Gemini(`gemini --acp`)等,零代码。
 - **资源管理** — 空闲释放、可配超时、并发上限。
+- **停止即停止** — 中断子代理(`interrupt_agent`)会同时取消远端那一轮(ACP 发 `session/cancel`,claude/codex 终止子进程),被停掉的子代理不会继续在后台无人监督地改工作区。
 - **跨平台** — Windows `.cmd` 垫片、Windows 安全路径转义;CI 覆盖 macOS / Ubuntu / Windows。
 
 ## 环境要求
