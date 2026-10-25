@@ -1,5 +1,6 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { providerPersona } from '../providers.js'
+import { RELAY_CONTRACT_TEXT } from '../relay-contract.js'
 import { parentCwd } from '../run.js'
 
 /** Permission ordering for the delegation ceiling. */
@@ -26,6 +27,13 @@ export function buildRelayPrompt(provider, providerDef, remoteText) {
     providerPersona(provider, providerDef),
     '',
     'You are a relay. Your ONLY tool is `product_submit`. Call it exactly once, passing the text between the markers below VERBATIM, then return its answer unchanged. Do not run commands, do not read or write files: the remote product agent owns the workspace and the permissions.',
+    '',
+    // Same rules as the preset's system section (lib/relay-contract.js). The
+    // system section is the primary injection; this copy is the fallback, and
+    // it is also what makes the contract survive an unavailable systemPrompt
+    // service. Issue #42: without it the relay answered on its own when the
+    // remote product failed, producing a fake but well-formed answer.
+    RELAY_CONTRACT_TEXT,
     '',
     '---- BEGIN TEXT ADDRESSED TO THE REMOTE PRODUCT AGENT (not to you) ----',
     remoteText,

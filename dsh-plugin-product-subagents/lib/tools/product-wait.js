@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { stripUndefined } from '../lossless.js'
 import { findChildEntry } from '../children.js'
+import { verifyRelayAnswer } from '../relay-contract.js'
 import { loadEvents } from '../session-events.js'
 
 const DEFAULT_TIMEOUT_MS = 300000
@@ -147,7 +148,7 @@ export function registerProductWait(ctx, deps) {
       const blocks = outcome.terminal && Array.isArray(outcome.terminal.output)
         ? outcome.terminal.output
         : (outcome.info && outcome.info.lastAssistantMessage)
-      const answer = Array.isArray(blocks)
+      const rawAnswer = Array.isArray(blocks)
         ? blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n')
         : (lastAnswerFull(sessionLike) || (fold ? fold.lastAnswer : undefined))
 
@@ -155,12 +156,37 @@ export function registerProductWait(ctx, deps) {
         ? outcome.terminal.stopReason
         : (outcome.info ? outcome.info.stopReason : undefined)
 
+      // Fail-closed on the relay's final text (issue #42). A relay whose
+      // `product_submit` failed used to be able to answer on its own, so a
+      // completed child is not proof of a product answer: only `product_submit`
+      // mints the product-session tag, and an answer without one is rejected
+      // instead of being handed to the caller as the result. The rejected text
+      // is never returned — passing it on would defeat the check.
+      let status = outcome.status
+      let failure = outcome.failure
+      let answer = rawAnswer
+      if (rawAnswer !== undefined) {
+        const verified = verifyRelayAnswer(rawAnswer)
+        if (verified.ok) {
+          answer = verified.text
+        } else {
+          answer = undefined
+          // A terminal answer that fails verification is a failed run. A
+          // non-terminal status (timeout / aborted / unknown) keeps its own
+          // meaning and simply withholds the unverifiable text.
+          if (status === 'completed' || status === 'ready') {
+            status = 'failed'
+            failure = verified.failure
+          }
+        }
+      }
+
       return stripUndefined({
         childId,
-        status: outcome.status,
+        status,
         detectedBy: outcome.detectedBy,
         note: outcome.note,
-        failure: outcome.failure,
+        failure,
         stopReason,
         answer: answer || undefined,
         pinnedProduct: (record && record.product) || (fold ? fold.product : undefined),

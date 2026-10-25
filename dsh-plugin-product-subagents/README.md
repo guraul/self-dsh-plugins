@@ -133,6 +133,35 @@ product_delegate role=general task="Refactor demo-project/calc.js and run its te
 product_wait subagent_id=<childId>
 ```
 
+## Relay output contract
+
+A delegated child is a relay: it can only call `product_submit`, and its final
+answer must be that tool's return value. Two guards make this checkable instead
+of a prompt promise (issue #42):
+
+- **Injected rules.** The `product-relay` preset registers a fixed system
+  section (`product-relay:contract`, see `lib/relay-contract.js`) in the relay
+  child's scope — every relay child inherits it, the parent never sees it. It
+  forbids answering on its own, requires `RELAY_FAILED: <error>` when the submit
+  fails (then stop), and requires the submit's return value verbatim on success.
+  `product_delegate` repeats the same rules in the relay prompt, so the contract
+  also holds on a profile without a `systemPrompt` service.
+- **Machine tag.** `product_submit` appends
+  `<!--product-session:<remoteId>-->` (the child session id when the bridge has
+  no remote id yet) to every successful result. Only that tool can mint it, so
+  text the relay produced on its own cannot carry one.
+
+`product_wait` is fail-closed on the final text:
+
+| Final text | `product_wait` result |
+|---|---|
+| starts with `RELAY_FAILED:` | `status: "failed"`, `failure` = the reported error, no `answer` |
+| no product-session tag | `status: "failed"`, `failure` explains the missing tag, **no `answer`** |
+| tag present | `status: "completed"`, `answer` = the text with the tag stripped |
+
+A relay that answers on its own therefore cannot reach you as an answer — not
+even when the text matches what the task asked for.
+
 ## Configuration
 
 ```yaml

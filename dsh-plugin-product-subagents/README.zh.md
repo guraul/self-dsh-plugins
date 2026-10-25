@@ -102,6 +102,31 @@ product_delegate role=general task="重构 demo-project/calc.js 并运行测试"
 product_wait subagent_id=<childId>
 ```
 
+## relay 输出契约
+
+被委派的 child 是 relay:它只能调用 `product_submit`,最终回答必须是该工具的返回值。
+以下两道保障让这件事**可校验**,而不是一句提示词承诺(issue #42):
+
+- **注入规则。** `product-relay` preset 在 relay child 的作用域里注册固定 system 段
+  (`product-relay:contract`,见 `lib/relay-contract.js`)——每个 relay child 都继承,
+  父会话看不到。规则禁止自己作答;要求 submit 失败时**原样**回报
+  `RELAY_FAILED: <error>` 后立即结束;成功时原样返回 submit 的返回值。
+  `product_delegate` 在 relay prompt 里重复同一套规则,因此没有 `systemPrompt`
+  服务的 profile 也照样生效。
+- **机器标记。** `product_submit` 在每次成功返回的末尾追加
+  `<!--product-session:<remoteId>-->`(bridge 尚未拿到远端 id 时用 child session id)。
+  只有这个工具能生成它,所以 relay 自己写的文本不可能带标记。
+
+`product_wait` 对最终文本 **fail-closed**:
+
+| 最终文本 | `product_wait` 返回 |
+|---|---|
+| 以 `RELAY_FAILED:` 开头 | `status: "failed"`,`failure` = 上报的错误原文,无 `answer` |
+| 不含 product-session 标记 | `status: "failed"`,`failure` 说明缺标记,**无 `answer`** |
+| 含标记 | `status: "completed"`,`answer` = 剥离标记后的正文 |
+
+因此 relay 自己编的回答不会作为答案送到你手里——即使它与任务要求的那段文本一字不差。
+
 ## 配置
 
 ```yaml

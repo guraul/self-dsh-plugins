@@ -50,6 +50,7 @@ lib/
   bindings.js         # child → remote 绑定表 + log-marker 恢复
   session-events.js   # sessionQuery 读事件 + 归一化（payload/timestamp）
   progress.js         # 会话日志折叠（progress / trace / token usage）
+  relay-contract.js   # relay 输出契约：system 段 + product-session 标记 + fail-closed 校验
   children.js         # listChildren() 并集：身份行 vs 诊断行
   lossless.js         # stripUndefined()：工具结果必须是 lossless JSON
 roles/                # 声明式角色文件（*.json）
@@ -134,10 +135,41 @@ promise（`dsh-subagent/lib/index.js:2075`）；它被存进 binding（`record.s
 实现要点：5s 超时（`AbortSignal` 之外的软超时，超时即退化为兜底/空）；**不做缓存**（运行中的日志会增长）；
 告警只打一次（`warnOnce`），避免每轮 `subagent_progress` 刷日志。
 
+## relay 输出契约：远端失败必须 fail-closed（#42）
+
+**现象**：远端 product 挂了（例如额度耗尽），relay 子代理**把任务里「期望的输出」原样吐出来**
+（实测 `WAIT_FIX_VERIFY`），看起来像成功——调用方无法分辨真假。有时又表现正常（如实报错），
+说明是模型判断层面的不稳定行为。
+
+**根因**：预设只限制了 **工具集**（只有 `product_submit`），没限制 **输出**；提示词也没规定
+「远端失败必须失败结束」。所以 `product_submit` 报错后模型可以自己回答。
+
+**修法 = 两道独立保障**（`lib/relay-contract.js`）：
+
+1. **提示词层**：`RELAY_CONTRACT_TEXT`（唯一动作是 `product_submit`；失败原样报
+   `RELAY_FAILED: <error>` 并停止；成功原样返回含尾部标记的返回值；别的一律不许出现）。
+   - `lib/relay.js` 用 caller-bound 的 `ctx.systemPrompt.section(...)` 注册成 system 段
+     `product-relay:contract`。注册发生在 `product-relay` preset 的 scope 里（preset tree 挂在
+     `dsh-agent-preset-registry` 的 `createScope()` 下，child 以该 scope 为父加入）→
+     **所有 relay child 都继承，根 agent 看不到**。不改 DSH 本体。
+   - `buildRelayPrompt()` 在 relay prompt 里重复同一段：既是 `systemPrompt` 服务缺失时的兜底，
+     也让规则和任务文本在同一条消息里。
+2. **结构层**：`product_submit` 成功时在返回值末尾追加 `<!--product-session:<remoteId>-->`
+   （bridge 还没暴露远端 id 时用 child session id；**不新增任何网络请求**，id 就是 binding 里已有的）。
+   只有这个工具能生成标记 → relay 自己写的文本不可能带标记。
+   `product_wait` 用 `verifyRelayAnswer()` 校验：`RELAY_FAILED:` 开头 → failed + 错误原文；
+   无标记 → failed（`unverifiable origin`）且**不返回该文本**；有标记 → 剥离后返回正文。
+
+**边界**：DSH 自己投递给父会话的 activation settlement notice（`delivery: 'parent'`）是
+harness 产生的文本，插件改不了；本插件返回的每条答案都已校验。
+`foldProgress().lastAnswer` 也会先剥离标记，所以 `subagent_progress` 里不会出现标记。
+
 ## 设计规则（不可协商）
 
 1. **relay model 永远是只读管道。** child 的 `toolFilter` 只可能含 `product_submit`，
    以及在角色允许委派时加上 `product_delegate`。**绝不**给 child 添加任何有写能力的工具。
+   工具集受限**不等于**输出受限：relay 的最终回答必须是 `product_submit` 的返回值，
+   远端失败必须 `RELAY_FAILED:` 结束，无 product-session 标记的答案由 `product_wait` 判失败（#42）。
 2. **权限是给远端 product 的。** `permissionMode`（`readonly` / `default` / `full`）
    映射到 product 自己的 CLI 参数。
 3. **绝不把裸 product id 注册到 `ctx.subagents`。** 本插件的 provider key
@@ -293,4 +325,14 @@ promise（`dsh-subagent/lib/index.js:2075`）；它被存进 binding（`record.s
     `bindings.recoverRemoteSessionId` 同步接受 `data` 与 live `snapshotEvents()`；
   - **测试**：新增 `test/session-events.test.js`（真实事件信封、回退、抛错、超时）；
     `test/progress.test.js` 补 `data` 信封与 `data.message.usage` 用例；`product_wait` 八条时序用例不变全过。
+- **`0.4.7`（issue #42：远端失败时 relay 伪造期望答案）**：
+  - 新增 `lib/relay-contract.js`：`RELAY_CONTRACT_TEXT`（system 段内容）、
+    `installRelayContract()`（caller-bound `ctx.systemPrompt.section()`，注册在 preset scope）、
+    `productSessionTag()` / `stripProductSessionTag()`、`verifyRelayAnswer()`（fail-closed 判定）；
+  - `lib/relay.js` 注入 `product-relay:contract`；`buildRelayPrompt()` 复述同一段（无 `systemPrompt`
+    服务时的兜底）；`product_submit` 成功返回末尾追加 `<!--product-session:<id>-->`；
+  - `product_wait` 对最终文本校验：`RELAY_FAILED:` → failed + 错误原文；无标记 → failed（`unverifiable
+    origin`）且**不返回文本**；有标记 → 剥离后返回正文。`foldProgress().lastAnswer` 同步剥离标记；
+  - **测试**：新增 `test/relay-contract.test.js`（9 条）；`test/product-wait.test.js` 补 5 条验收用例
+    （共 13 条），成功夹具改为带标记；套件 74 → 88 全绿。
 

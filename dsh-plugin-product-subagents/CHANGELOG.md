@@ -2,6 +2,58 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.7] — 2026-10-25
+
+A relay child could hand its caller a **fabricated** answer: when the remote
+product failed, the relay model sometimes replied with the text the task said it
+expected. The toolset was restricted; the *output* was not. The relay contract
+is now injected into the relay composition, `product_submit` stamps every
+successful result, and `product_wait` fail-closes on a final answer that carries
+no stamp.
+
+### Fixed
+- **Relay answered on its own when `product_submit` failed** (issue #42). Two
+  independent causes, two guards:
+  1. **Prompt** — new `lib/relay-contract.js` holds the fixed contract
+     (only action is `product_submit`; a submit error must be reported verbatim
+     as `RELAY_FAILED: <error>` and end the turn; a successful return value must
+     be echoed verbatim; nothing else may appear in the final answer). `lib/relay.js`
+     injects it as the system section `product-relay:contract` through the
+     caller-bound `ctx.systemPrompt.section(...)` — it lands in the relay
+     preset's scope, so every relay child inherits it and the parent never sees
+     it. `buildRelayPrompt` repeats the same rules in the relay prompt, which
+     covers a profile without a `systemPrompt` service.
+  2. **Structure** — `product_submit` now appends a machine tag
+     `<!--product-session:<remoteId>-->` to every successful result (the child
+     session id when the bridge has not exposed a remote id yet). Only that tool
+     can mint the tag, so text the relay produced on its own cannot carry one.
+     No extra network call: the id is the one the binding already holds.
+- **`product_wait` is fail-closed on the relay's final text** (`verifyRelayAnswer`):
+  - starts with `RELAY_FAILED:` → `status: "failed"`, `failure` = the reported
+    error text verbatim, no `answer`;
+  - no product-session tag → `status: "failed"` with an "unverifiable origin"
+    `failure`, **no `answer`** (the rejected text is never returned, otherwise
+    the check would be pointless);
+  - tag present → the body with the tag stripped. The success path is otherwise
+    unchanged.
+  Non-terminal statuses (`timeout` / `aborted` / `unknown`) keep their own
+  meaning, but an unverifiable answer read from the log is withheld instead of
+  returned.
+- **`foldProgress().lastAnswer`** strips the tag before the 300-character cap,
+  so the marker never shows up in `subagent_progress` output either.
+
+### Tests
+- New `test/relay-contract.test.js` (9 cases): the contract text, the scoped
+  section registration (plus the `ctx.get` fallback and a missing service), tag
+  round-trip/strip, and `verifyRelayAnswer` for success, missing tag,
+  `RELAY_FAILED`, malformed/empty input and leading whitespace.
+- `test/product-wait.test.js` (13 cases, +5): the issue #42 acceptance set —
+  remote failure + task's expected text → failed and the text is absent from the
+  whole result; `RELAY_FAILED` passthrough; tagged success with the tag
+  stripped; success-looking answer without a tag → failed; unverifiable answer
+  on timeout withheld. The two existing success fixtures now carry the tag.
+- 88 tests pass, 0 fail (baseline before this change: 74).
+
 ## [0.4.6] — 2026-10-23
 
 `subagent_progress` could never report anything: `foldProgress()` read a
