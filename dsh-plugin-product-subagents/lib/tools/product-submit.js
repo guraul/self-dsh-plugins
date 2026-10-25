@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { buildAttestation } from '../attestation.js'
 import { productSessionTag } from '../relay-contract.js'
 
 /**
@@ -20,7 +21,7 @@ import { productSessionTag } from '../relay-contract.js'
  * registrations observe the same child→remote map.
  */
 export function createProductSubmitTool(deps) {
-  const { bindings, MARKER, recoverRemoteSessionId, bridges, registry, persistRemote, cancelDispose } = deps
+  const { bindings, MARKER, recoverRemoteSessionId, bridges, registry, persistRemote, recordAttestation, cancelDispose } = deps
   return defineTool({
     name: 'product_submit',
     description: 'Submit one task to the persistent remote product session bound to this agent (Codex / Claude Code / ACP CLI) and return the product agent\'s answer. The remote session remembers the full conversation, so later submissions continue it. Use this for all task work while you are a product subagent.',
@@ -59,6 +60,10 @@ export function createProductSubmitTool(deps) {
         bindings.set(childSessionId, record)
       }
       const cwd = (agent.session.header && agent.session.header.cwd) || process.cwd()
+      // Set only on a successful submit; the finally block persists it next to
+      // the remote id so `product_wait` can recognise a paraphrased answer
+      // whose machine tag the relay dropped (issue #56).
+      let attestation
       try {
         const out = await record.bridge.submit(record.remote, args.task, exec.signal, cwd, record.settings)
         const remoteId = record.remote.sessionId || record.remote.threadId
@@ -72,6 +77,10 @@ export function createProductSubmitTool(deps) {
         //    It falls back to the child session id — the binding key, unique per
         //    child — when the bridge has not exposed a remote id yet.
         const tag = productSessionTag(remoteId || childSessionId)
+        // Attest the answer body only, without the marker/tag suffix: `head`
+        // must always start with real product text, so a paraphrase that keeps
+        // the opening still claims even when the suffix was dropped.
+        attestation = buildAttestation(out.text, remoteId || childSessionId)
         const text = [`${out.text}`, marker, tag].filter(Boolean).join('\n')
         return { text }
       } finally {
@@ -79,6 +88,11 @@ export function createProductSubmitTool(deps) {
         // submit, or after the claude bridge recovered it from disk on a
         // failed/interrupted submit).
         if (typeof persistRemote === 'function') persistRemote(childSessionId, record, cwd)
+        // Record after `persistRemote` (which replaces the entry) so the digest
+        // survives. No new storage file: it lives on the same registry entry.
+        if (attestation && attestation.len > 0 && typeof recordAttestation === 'function') {
+          recordAttestation(childSessionId, attestation)
+        }
       }
     },
   })

@@ -162,11 +162,28 @@ of a prompt promise (issue #42):
 | Final text | `product_wait` result |
 |---|---|
 | starts with `RELAY_FAILED:` | `status: "failed"`, `failure` = the reported error, no `answer` |
-| no product-session tag | `status: "failed"`, `failure` explains the missing tag, **no `answer`** |
-| tag present | `status: "completed"`, `answer` = the text with the tag stripped |
+| tag present | `status: "completed"`, `answer` = the text with the tag stripped, `attested: "tag"` |
+| no tag, but the child's recorded attestation claims it | `status: "completed"`, `answer` = the text as received, `attested: "reconciled"` (a warn is logged) |
+| no tag and no claimable record | `status: "failed"`, `failure` explains the missing tag, **no `answer`** |
 
 A relay that answers on its own therefore cannot reach you as an answer — not
 even when the text matches what the task asked for.
+
+**Attestation (issue #56).** A relay that *paraphrases* a long genuine answer
+drops the tag, and rejecting that answer is a false negative. So every
+successful `product_submit` also records a digest of its answer on the child's
+registry entry — no extra storage file:
+
+```json
+{ "remoteId": "sess-…", "at": 1760000000000,
+  "head": "<first 200 chars>", "len": 812, "hash": "<sha256 of the full text>" }
+```
+
+Both `head` and `hash` are computed over a normalized body: every whitespace run
+collapses to one space and the ends are trimmed; markdown is **not** stripped.
+An untagged answer is reconciled only when its normalized text contains the
+recorded `head`, or its hash equals the recorded `hash`. Anything else stays
+rejected, and a `RELAY_FAILED` report is never reconciled.
 
 ## Configuration
 

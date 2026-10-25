@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerProductWait } from '../lib/tools/product-wait.js'
-import { foldProgress, foldTrace, lastAnswerFull } from '../lib/progress.js'
+import { foldProgress, foldTrace, lastAnswerResult } from '../lib/progress.js'
+import { buildAttestation } from '../lib/attestation.js'
 import { productSessionTag } from '../lib/relay-contract.js'
 
 const CHILD_ID = 'child-1'
@@ -28,7 +29,7 @@ function relayAnswer(text) {
   return textBlocks(`${text}\n${TAG}`)
 }
 
-function makeHarness({ children = [child('running')], settle, session, listChildren } = {}) {
+function makeHarness({ children = [child('running')], settle, session, listChildren, registry } = {}) {
   const handlers = new Set()
   let definition
   const bindings = new Map()
@@ -42,7 +43,7 @@ function makeHarness({ children = [child('running')], settle, session, listChild
       return () => handlers.delete(handler)
     },
   }
-  registerProductWait(ctx, { foldProgress, foldTrace, lastAnswerFull, bindings })
+  registerProductWait(ctx, { foldProgress, foldTrace, lastAnswerResult, bindings, registry })
   return { tool: definition, handlers, emit(info) { for (const handler of [...handlers]) handler(info) } }
 }
 
@@ -172,6 +173,7 @@ test('#42: a tagged relay answer succeeds with the tag stripped', async () => {
   const result = await settleWith(relayAnswer('the real product answer'))
   assert.equal(result.status, 'completed')
   assert.equal(result.answer, 'the real product answer')
+  assert.equal(result.attested, 'tag')
   assert.equal(JSON.stringify(result).includes('product-session'), false)
 })
 
@@ -212,4 +214,76 @@ test('#42: an unverifiable answer on a non-terminal status is withheld without r
   const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 30 }, exec())
   assert.equal(result.status, 'timeout')
   assert.equal(result.answer, undefined)
+})
+
+// ── issue #56: reconciled answers from the recorded product_submit digest ────
+
+/** A long remote answer, as the child's last successful submit returned it. */
+const LONG_ANSWER = Array.from(
+  { length: 12 },
+  (_, i) => `Step ${i + 1}: the remote edited the module and re-ran the full suite.`,
+).join(' ')
+
+/** A registry holding one child's attestation (lib/registry.js shape). */
+function registryWith(attest) {
+  return { get: (id) => (id === CHILD_ID ? { product: 'codebuddy', remoteId: 'sess-56', attest } : undefined) }
+}
+
+/** A relay answer that paraphrases `text` and loses the machine tag. */
+function paraphrased(text) {
+  return `Here is what the remote reported:\n\n${text.slice(0, 200)}\n\nIn short, the work is done and the PR is open.`
+}
+
+test('#56: a paraphrase the record can claim succeeds with attested "reconciled"', async () => {
+  const settle = deferred()
+  const harness = makeHarness({ settle, registry: registryWith(buildAttestation(LONG_ANSWER, 'sess-56')) })
+  const pending = harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 5000 }, exec())
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  settle.resolve({ output: textBlocks(paraphrased(LONG_ANSWER)), stopReason: 'completed' })
+  const result = await pending
+  assert.equal(result.status, 'completed')
+  assert.equal(result.attested, 'reconciled')
+  assert.equal(result.answer, paraphrased(LONG_ANSWER))
+})
+
+test('#56: a self-answer is still rejected when the record names a different answer', async () => {
+  const settle = deferred()
+  const harness = makeHarness({ settle, registry: registryWith(buildAttestation(LONG_ANSWER, 'sess-56')) })
+  const pending = harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 5000 }, exec())
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  settle.resolve({ output: textBlocks('I could not reach the product, but it probably worked.'), stopReason: 'completed' })
+  const result = await pending
+  assert.equal(result.status, 'failed')
+  assert.equal(result.answer, undefined)
+  assert.match(result.failure, /unverifiable origin/)
+})
+
+test('#56: the log fallback reconciles too, instead of rejecting a genuine answer', async () => {
+  const session = {
+    snapshotEvents: () => [
+      { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: paraphrased(LONG_ANSWER) }] } } },
+    ],
+  }
+  const harness = makeHarness({
+    children: [child('inactive')],
+    session,
+    registry: registryWith(buildAttestation(LONG_ANSWER, 'sess-56')),
+  })
+  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 50 }, exec())
+  assert.equal(result.status, 'ready')
+  assert.equal(result.attested, 'reconciled')
+  assert.equal(result.answer, paraphrased(LONG_ANSWER))
+})
+
+test('#56: a tagged answer read from the log is no longer re-checked without its tag', async () => {
+  const session = {
+    snapshotEvents: () => [
+      { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: `from the product\n${TAG}` }] } } },
+    ],
+  }
+  const harness = makeHarness({ children: [child('inactive')], session })
+  const result = await harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 50 }, exec())
+  assert.equal(result.status, 'ready')
+  assert.equal(result.attested, 'tag')
+  assert.equal(result.answer, 'from the product')
 })
