@@ -335,6 +335,21 @@ function resolveWecomSession(frame) {
 	return singleRef(sender);
 }
 //#endregion
+//#region src/prompt-variable.ts
+/**
+* Register one prompt variable, best effort: an older host without
+* `variable()` (or one that rejects a duplicate name) must not break the
+* channel install, so failures only warn.
+*/
+function registerPromptVariable(prompt, name, provider) {
+	try {
+		prompt.variable(name, provider);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.warn(`[im-bridge] 注册 {{${name}}} 提示词变量失败: ${message}`);
+	}
+}
+//#endregion
 //#region src/workspace-router.ts
 /**
 * Command heads the bridge handles itself: `/ws`, `/workspace`, `/workspaces`
@@ -9253,7 +9268,7 @@ function apply(ctx, config) {
 		* yields a microtask and can publish the Agent before the section exists;
 		* `adopt` never re-runs setup.
 		*/
-		function installWecomChannel(agentCtx, st) {
+		function installWecomChannel(agentCtx, st, cwdOf) {
 			if (st.wecomPromptInstalled) return;
 			const host = agentCtx;
 			if (host.get("systemPrompt") === void 0 || host.systemPrompt === void 0) {
@@ -9261,6 +9276,7 @@ function apply(ctx, config) {
 				return;
 			}
 			const prompt = host.systemPrompt;
+			registerPromptVariable(prompt, "cwd", () => cwdOf());
 			try {
 				prompt.section({
 					name: "deployment:persona",
@@ -9325,7 +9341,7 @@ function apply(ctx, config) {
 				st.kind = ref.kind;
 				if (agent.ctx === void 0) console.warn("[im-bridge] Agent 没有 ctx，无法注入企微提示词");
 				else {
-					installWecomChannel(agent.ctx, st);
+					installWecomChannel(agent.ctx, st, () => agent.session.header?.cwd ?? stored?.cwd ?? binding.path);
 					installOfficeLayer(agent.ctx, st);
 				}
 				unpinLegacyWecomTitle(agent);
@@ -9351,7 +9367,7 @@ function apply(ctx, config) {
 					assembled: void 0
 				});
 				if (presets !== void 0) await presets.mount(agentCtx, resolvedId);
-				installWecomChannel(agentCtx, st);
+				installWecomChannel(agentCtx, st, () => binding.path);
 			};
 			const agentOptions = {
 				provider: selection.provider,

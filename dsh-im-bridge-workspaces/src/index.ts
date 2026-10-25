@@ -43,6 +43,7 @@ import {
   WecomSessionReject,
   type WecomSessionRef,
 } from './session-key.ts'
+import { registerPromptVariable, type PromptVariableRegistry } from './prompt-variable.ts'
 import {
   parseWorkspaceCommand,
   resolveWorkspaceSelector,
@@ -406,7 +407,7 @@ interface AgentPresets {
   mount(agentCtx: Context, id: string): Promise<unknown>
 }
 
-interface SystemPromptService {
+interface SystemPromptService extends PromptVariableRegistry {
   section(entry: { name: string; order: number; text: () => string }): unknown
 }
 
@@ -1146,7 +1147,7 @@ export function apply(ctx: Context, config: Config): void {
      * yields a microtask and can publish the Agent before the section exists;
      * `adopt` never re-runs setup.
      */
-    function installWecomChannel(agentCtx: Context, st: ChatState): void {
+    function installWecomChannel(agentCtx: Context, st: ChatState, cwdOf: () => string): void {
       if (st.wecomPromptInstalled) return
       const host = agentCtx as Context & PromptHost
       if (host.get('systemPrompt') === undefined || host.systemPrompt === undefined) {
@@ -1154,6 +1155,10 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
       const prompt = host.systemPrompt
+      // DSH ≥0.2.1 只注册 provider/model 两个提示词变量，内置 persona 与用户
+      // personaFile 里的 `{{cwd}}` 会按严格模式抛错（unknown prompt variable）
+      // → 整轮直接失败。这里在 Agent 作用域补注册，恢复文档承诺的占位符。
+      registerPromptVariable(prompt, 'cwd', () => cwdOf())
       try {
         prompt.section({
           name: 'deployment:persona',
@@ -1243,7 +1248,7 @@ export function apply(ctx: Context, config: Config): void {
         if (agent.ctx === undefined) {
           console.warn('[im-bridge] Agent 没有 ctx，无法注入企微提示词')
         } else {
-          installWecomChannel(agent.ctx, st)
+          installWecomChannel(agent.ctx, st, () => agent.session.header?.cwd ?? stored?.cwd ?? binding.path)
           installOfficeLayer(agent.ctx, st)
         }
         void unpinLegacyWecomTitle(agent)
@@ -1279,7 +1284,7 @@ export function apply(ctx: Context, config: Config): void {
         const selected = { current: selection, assembled: undefined }
         installModelSelection(agentCtx, selected)
         if (presets !== undefined) await presets.mount(agentCtx, resolvedId)
-        installWecomChannel(agentCtx, st)
+        installWecomChannel(agentCtx, st, () => binding.path)
       }
       const agentOptions = { provider: selection.provider, model: selection.model }
 
