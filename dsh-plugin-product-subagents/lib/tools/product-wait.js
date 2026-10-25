@@ -165,12 +165,14 @@ export function registerProductWait(ctx, deps) {
       let status = outcome.status
       let failure = outcome.failure
       let answer = rawAnswer
+      let answerRejected = false
       if (rawAnswer !== undefined) {
         const verified = verifyRelayAnswer(rawAnswer)
         if (verified.ok) {
           answer = verified.text
         } else {
           answer = undefined
+          answerRejected = true
           // A terminal answer that fails verification is a failed run. A
           // non-terminal status (timeout / aborted / unknown) keeps its own
           // meaning and simply withholds the unverifiable text.
@@ -180,6 +182,8 @@ export function registerProductWait(ctx, deps) {
           }
         }
       }
+
+      const trace = sessionLike.events.length > 0 ? foldTrace(sessionLike) : undefined
 
       return stripUndefined({
         childId,
@@ -198,8 +202,22 @@ export function registerProductWait(ctx, deps) {
           receivedChars: fold && fold.lastAnswer ? fold.lastAnswer.length : 0,
           lastTask: fold ? fold.lastTask : undefined,
         } : undefined,
-        trace: sessionLike.events.length > 0 ? foldTrace(sessionLike) : undefined,
+        // The trace is model-visible too, so it must not become a side channel
+        // for the text the answer check just refused.
+        trace: answerRejected ? redactTraceAnswers(trace) : trace,
       })
     },
   }))
+}
+
+/**
+ * Blank the answer briefs of a trace whose answer was rejected (issue #42):
+ * a rejected relay answer must not reappear inside the same tool result.
+ * Turn/step/tool entries are kept — they are the diagnostic value.
+ */
+function redactTraceAnswers(trace) {
+  if (!Array.isArray(trace)) return trace
+  return trace.map((entry) => (entry && entry.event === 'assistant/message'
+    ? { ...entry, brief: 'answer: (withheld — unverifiable relay output)' }
+    : entry))
 }

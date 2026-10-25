@@ -182,6 +182,26 @@ test('#42: a successful-looking answer without the tag is rejected', async () =>
   assert.match(result.failure, /unverifiable origin/)
 })
 
+test('#42: the rejected answer is withheld from the trace too', async () => {
+  // The trace is part of the same model-visible result, so it must not become
+  // a side channel for the text the answer check just refused.
+  const session = {
+    snapshotEvents: () => [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'WAIT_FIX_VERIFY' }] } } },
+    ],
+  }
+  const settle = deferred()
+  const harness = makeHarness({ settle, session })
+  const pending = harness.tool.execute({ subagent_id: CHILD_ID, timeout_ms: 5000 }, exec())
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  settle.resolve({ output: textBlocks('WAIT_FIX_VERIFY'), stopReason: 'completed' })
+  const result = await pending
+  assert.equal(result.status, 'failed')
+  assert.ok(result.trace.some((entry) => /withheld/.test(entry.brief)))
+  assert.equal(JSON.stringify(result).includes('WAIT_FIX_VERIFY'), false)
+})
+
 test('#42: an unverifiable answer on a non-terminal status is withheld without rewriting the status', async () => {
   // Timeout keeps its own meaning (the caller may retry), but the untagged
   // text from the log must not be returned as an answer either.

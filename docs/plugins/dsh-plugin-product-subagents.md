@@ -332,7 +332,9 @@ harness 产生的文本，插件改不了；本插件返回的每条答案都已
   - `lib/relay.js` 注入 `product-relay:contract`；`buildRelayPrompt()` 复述同一段（无 `systemPrompt`
     服务时的兜底）；`product_submit` 成功返回末尾追加 `<!--product-session:<id>-->`；
   - `product_wait` 对最终文本校验：`RELAY_FAILED:` → failed + 错误原文；无标记 → failed（`unverifiable
-    origin`）且**不返回文本**；有标记 → 剥离后返回正文。`foldProgress().lastAnswer` 同步剥离标记；
-  - **测试**：新增 `test/relay-contract.test.js`（9 条）；`test/product-wait.test.js` 补 5 条验收用例
-    （共 13 条），成功夹具改为带标记；套件 74 → 88 全绿。
+    origin`）且**不返回文本**；有标记 → 剥离后返回正文。被拒答案同时从返回的 `trace` 里抹掉
+    （`assistant/message` 的 brief 改为 withheld，turn/step/tool 条目保留）；`foldProgress().lastAnswer`
+    同步剥离标记；
+  - **测试**：新增 `test/relay-contract.test.js`（9 条）；`test/product-wait.test.js` 补 6 条验收用例
+    （共 14 条），成功夹具改为带标记；套件 74 → 89 全绿。
 

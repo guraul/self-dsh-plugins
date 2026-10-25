@@ -135,6 +135,10 @@ unverifiable answer read from the log is withheld rather than returned.
 `foldProgress().lastAnswer` strips the tag as well, so it never shows up in
 `subagent_progress`, which also sees the relay's text.
 
+The result's `trace` is model-visible, so a rejected answer is blanked there
+too (`answer: (withheld — unverifiable relay output)`); turn/step/tool entries
+stay, since they carry the diagnostic value without the text.
+
 Deliberately out of scope: the activation settlement notice DSH itself delivers
 to the parent (`delivery: 'parent'`) is harness-owned text and cannot be
 rewritten here. Verification covers every answer this plugin returns.
