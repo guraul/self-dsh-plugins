@@ -1,10 +1,11 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { checkDelegationPermission, PERM_RANK } from '../permission-gate.js'
 import { providerPersona } from '../providers.js'
 import { RELAY_CONTRACT_TEXT } from '../relay-contract.js'
 import { parentCwd } from '../run.js'
 
-/** Permission ordering for the delegation ceiling. */
-export const PERM_RANK = { readonly: 0, default: 1, full: 2 }
+/** Permission ordering for the delegation ceiling (single source: lib/permission-gate.js). */
+export { PERM_RANK }
 
 /**
  * Build the prompt of the LOCAL relay child (DSH 0.2.1+).
@@ -141,15 +142,12 @@ export function registerProductDelegate(ctx, deps) {
       // itself — otherwise a read-only child could escape its restriction by
       // spawning a full-permission grandchild. `readonly < default < full`.
       const callerRecord = parent ? bindings.get(parent.session.id) : undefined
-      const requestedRank = PERM_RANK[role.permissionMode] ?? 1
-      if (callerRecord) {
-        const callerMode = callerRecord.settings && callerRecord.settings.permissionMode
-        const callerRank = callerMode === undefined ? 1 : (PERM_RANK[callerMode] ?? 1)
-        if (requestedRank > callerRank) {
-          throw new Error(
-            `product_delegate: permission escalation blocked — this subagent's permissionMode is "${callerMode || 'default'}" and cannot spawn a "${role.permissionMode}" descendant. The delegating parent must grant the needed permission in the first place.`,
-          )
-        }
+      // 天花板只在调用方**已声明**权限时生效（见 lib/permission-gate.js：#58）
+      const gate = checkDelegationPermission(callerRecord, role.permissionMode)
+      if (!gate.ok) {
+        throw new Error(
+          `product_delegate: permission escalation blocked — this subagent's permissionMode is "${gate.callerMode}" and cannot spawn a "${gate.requestedMode}" descendant. The delegating parent must grant the needed permission in the first place.`,
+        )
       }
       const settings = { permissionMode: role.permissionMode }
       if (args.model) settings.model = args.model
