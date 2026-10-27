@@ -144,6 +144,13 @@ export function registerProductDelegate(ctx, deps) {
       const callerRecord = parent ? bindings.get(parent.session.id) : undefined
       // 天花板只在调用方**已声明**权限时生效（见 lib/permission-gate.js：#58）
       const gate = checkDelegationPermission(callerRecord, role.permissionMode)
+      if (gate.ok && gate.undeclared) {
+        // 诊断（#58）：绑定表里有一条没有 settings 的记录，说明它不是"已声明权限的 product 子代理"。
+        // 这里放行；如果它反复出现，这行日志就是追查"谁写进了绑定表"的抓手。
+        console.warn(
+          `[product-delegate] 绑定记录未声明 permissionMode（session ${String(parent && parent.session && parent.session.id).slice(0, 8)}…），按根代理放行`,
+        )
+      }
       if (!gate.ok) {
         throw new Error(
           `product_delegate: permission escalation blocked — this subagent's permissionMode is "${gate.callerMode}" and cannot spawn a "${gate.requestedMode}" descendant. The delegating parent must grant the needed permission in the first place.`,

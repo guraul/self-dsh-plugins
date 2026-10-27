@@ -1,36 +1,46 @@
-import { test } from 'node:test'
+import test from 'node:test'
 import assert from 'node:assert/strict'
-import { PERM_RANK } from '../lib/tools/product-delegate.js'
+
+import { PERM_RANK, checkDelegationPermission } from '../lib/permission-gate.js'
 
 /**
- * The delegation permission ceiling: a child may not spawn a descendant with
- * a HIGHER permission rank. readonly(0) < default(1) < full(2). The root
- * (no binding) has no ceiling.
+ * 委派权限天花板：readonly(0) < default(1) < full(2)。
+ * 根（无绑定）无上限；合法 product 子代理不能派生比自己更高的后代。
+ *
+ * ⚠️ 这里直接调**实现**（`checkDelegationPermission`），不再本地复刻一份判定——
+ * 复刻版曾把这个 bug 测成「通过」（issue #58）。
  */
-function ceilingBlocked(callerMode, requestedMode, isChild) {
-  if (!isChild) return false
-  const callerRank = callerMode === undefined ? 1 : (PERM_RANK[callerMode] ?? 1)
-  const requestedRank = PERM_RANK[requestedMode] ?? 1
-  return requestedRank > callerRank
-}
-
-test('root (no binding) has no ceiling', () => {
-  assert.equal(ceilingBlocked(undefined, 'full', false), false)
+test('PERM_RANK 顺序固定', () => {
+  assert.deepEqual(PERM_RANK, { readonly: 0, default: 1, full: 2 })
 })
 
-test('default child cannot spawn full', () => {
-  assert.equal(ceilingBlocked(undefined, 'full', true), true)
-  assert.equal(ceilingBlocked('default', 'full', true), true)
+test('根代理（无绑定）无上限', () => {
+  assert.equal(checkDelegationPermission(undefined, 'full').ok, true)
 })
 
-test('readonly child can only spawn readonly', () => {
-  assert.equal(ceilingBlocked('readonly', 'full', true), true)
-  assert.equal(ceilingBlocked('readonly', 'default', true), true)
-  assert.equal(ceilingBlocked('readonly', 'readonly', true), false)
+test('default 子代理不能派生 full', () => {
+  const caller = { settings: { permissionMode: 'default' } }
+  assert.equal(checkDelegationPermission(caller, 'full').ok, false)
+  assert.equal(checkDelegationPermission(caller, 'default').ok, true)
 })
 
-test('full child may spawn anything', () => {
-  assert.equal(ceilingBlocked('full', 'full', true), false)
-  assert.equal(ceilingBlocked('full', 'readonly', true), false)
-  assert.equal(ceilingBlocked('full', 'default', true), false)
+test('readonly 子代理只能派生 readonly', () => {
+  const caller = { settings: { permissionMode: 'readonly' } }
+  assert.equal(checkDelegationPermission(caller, 'readonly').ok, true)
+  assert.equal(checkDelegationPermission(caller, 'default').ok, false)
+  assert.equal(checkDelegationPermission(caller, 'full').ok, false)
+})
+
+test('full 子代理可派生任意后代', () => {
+  const caller = { settings: { permissionMode: 'full' } }
+  for (const mode of ['readonly', 'default', 'full']) {
+    assert.equal(checkDelegationPermission(caller, mode).ok, true)
+  }
+})
+
+test('#58 回归：绑定存在但 settings 缺失 → 视为未声明，不拦', () => {
+  const stale = { product: 'codebuddy', remote: { sessionId: 'ses_x' }, settings: undefined }
+  const gate = checkDelegationPermission(stale, 'full')
+  assert.equal(gate.ok, true)
+  assert.equal(gate.undeclared, true)
 })
