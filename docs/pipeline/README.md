@@ -114,6 +114,36 @@ scripts/pipeline/install-check.sh dsh-external-discuss
 | ⚠️ 安全 | **绝不触碰真实 `~/.dsh`**；全程只写临时目录，`trap ... EXIT` 兜底清理（异常退出也清理） |
 | 退出码 | 0 = 全部插件装配成功；1 = 任一插件 add 失败或 dump-config 里没有该包名 |
 
+### audit-subagents.mjs
+
+定时审计 product 子代理会话（issue #10）：**只读、确定性、不调模型**。用 launchd / cron 直接跑，不要挂到 DSH 的 schedule 提醒上（那会唤醒会话、花模型调用）。
+
+```bash
+node scripts/pipeline/audit-subagents.mjs                       # 最近 24h（默认）
+node scripts/pipeline/audit-subagents.mjs --hours 0 --json      # 全部历史 + 机器可读
+node scripts/pipeline/audit-subagents.mjs --self-test           # 内置 fixture 断言（不读真实会话）
+node --test scripts/pipeline/audit-subagents.test.mjs           # 单测 + 两类 fixture 集成
+```
+
+**扫什么**：`$DSH_HOME/sessions/<workspace>/<session>/session.v4.jsonl.zstd`，按 mtime 取最近 `--hours` 小时（`0` = 不限）。
+
+**多帧 zstd**：DSH 是逐条追加的多帧压缩，Node 内置 `zstdDecompressSync` 只解首帧，本机 `zstd` CLI 报 `incorrect library version`。脚本按 magic `28 b5 2f fd` 找所有候选偏移逐帧解，解不出的伪偏移 / 截断帧跳过。
+
+**判定规则**（只对 product 子代理会话生效）：
+
+| 规则 | 条件 | 含义 |
+|---|---|---|
+| 识别 | `origin === 'subagent'` 且满足任一：`subagent/descriptor.provider` 以 `product-subagents:` 开头 / `agentPreset === 'product-relay'` / 调过 `product_*` 工具 | 只有 product 子代理才判，普通 subagent 与主会话跳过 |
+| A | `agentPreset !== 'product-relay'` | preset 漂移（composition 约束没生效） |
+| B | `tool/call` 出现 `bash` / `read` / `write` / `edit` / `glob` / `grep` | 本地自执行，绕过产品路径 |
+| C | `product_submit` 调用 0 次 **且** 有 `turn/end` | 走完了却没走产品路径；进行中的会话不判 |
+
+**输出**：日报 `.dsh-web/audit/<YYYY-MM-DD>.json`（每个会话一行判定记录，同日重跑覆盖）；stdout 一行 `audited N sessions, X violations (A=… B=… C=…)`。有违规 → exit 1，并在 stderr 列出会话与命中的规则；全绿 → exit 0、无 stderr。参数 / IO 错误 exit 2。`--json` 把完整报告打到 stdout（仍写日报）。
+
+**调度**：模板 [`.dsh-web/com.deepseek.dsh-audit.plist`](../../.dsh-web/com.deepseek.dsh-audit.plist)（每天 03:30，**不自动加载**），日志追加到 `.dsh-web/audit/run.log`。
+
+**已知口径**：`agentPreset` 取会话首行 `session.agentPreset`；早期（product-relay preset 引入前）的历史会话会因 A 规则被判违规，用默认 24h 窗口即可只看现行状态。
+
 ## 三、worktree 与分支命名契约
 
 | 项 | 契约 |

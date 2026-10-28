@@ -65,6 +65,9 @@ build/
 .dsh-web/restart-once.log
 .dsh-web/*.log
 
+# audit-subagents.mjs 的运行产物（日报 + run.log），属本机运行态
+.dsh-web/audit/
+
 # 系统 / 编辑器
 .DS_Store
 .vscode/
