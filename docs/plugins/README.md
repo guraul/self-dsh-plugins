@@ -11,6 +11,7 @@
 | `dsh-im-bridge-workspaces/` | [`dsh-im-bridge-workspaces.md`](./dsh-im-bridge-workspaces.md) | `@mhfire/dsh-im-bridge` | fork（npm `@mhfire/dsh-im-bridge@0.4.4`） |
 | `dsh-plugin-product-subagents/` | [`dsh-plugin-product-subagents.md`](./dsh-plugin-product-subagents.md) | `dsh-plugin-product-subagents` | fork（`shaokeyibb/dsh-plugin-product-subagents` v0.4.0） |
 | `dsh-prompt-optimizer/` | [`dsh-prompt-optimizer.md`](./dsh-prompt-optimizer.md) | `@y1x1n/dsh-prompt-optimizer` | fork（npm `@y1x1n/dsh-prompt-optimizer@0.6.1`） |
+| `dsh-zhihu-sidebar/` | [`dsh-zhihu-sidebar.md`](./dsh-zhihu-sidebar.md) | `dsh-plugin-zhihu-sidebar` | 原创 |
 
 各插件目录内仍保留面向**使用者**的 `README.md`（安装 / 配置 / 已知限制）；
 本目录的文档面向**在此仓库动手的 agent**，与 README 互补，不重复整篇内容。

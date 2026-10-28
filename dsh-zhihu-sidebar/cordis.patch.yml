@@ -1,0 +1,4 @@
+
+- insert:
+    - id: dsh-zhihu-sidebar
+      name: 'dsh-plugin-zhihu-sidebar'
