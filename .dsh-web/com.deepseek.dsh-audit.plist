@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  product 子代理会话审计（issue #10）的 LaunchAgent 模板。
+
+  ⚠️ 这是模板，不会被自动加载。需要启用时：
+    1. 确认下面三条绝对路径与本机一致（node / 仓库 / DSH_HOME）
+    2. cp .dsh-web/com.deepseek.dsh-audit.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.deepseek.dsh-audit.plist
+    4. 首次可 launchctl start com.deepseek.dsh-audit 立即跑一次
+
+  只读：脚本不写会话、不改配置；只追加 .dsh-web/audit/ 下的日报与 run.log。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.deepseek.dsh-audit</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>mkdir -p /Users/gubin/workspace/self-dsh-plugins/.dsh-web/audit &amp;&amp; exec /Users/gubin/.nvm/versions/node/v24.21.0/bin/node /Users/gubin/workspace/self-dsh-plugins/scripts/pipeline/audit-subagents.mjs --hours 24 &gt;&gt; /Users/gubin/workspace/self-dsh-plugins/.dsh-web/audit/run.log 2&gt;&amp;1</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/gubin/workspace/self-dsh-plugins</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/gubin/.nvm/versions/node/v24.21.0/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/gubin</string>
+    <key>DSH_HOME</key>
+    <string>/Users/gubin/.dsh</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+</dict>
+</plist>

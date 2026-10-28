@@ -178,3 +178,19 @@ jobs:
             node --check "${f}"
             echo "  ✓ ${f}"
           done
+
+  # pipeline 脚本自己的自测（issue #10）：纯 Node、零依赖，单独一个 job。
+  pipeline-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      - name: 语法检查
+        run: node --check scripts/pipeline/audit-subagents.mjs
+
+      - name: audit-subagents 单测（含内置 --self-test）
+        run: node --test scripts/pipeline/audit-subagents.test.mjs
