@@ -1,0 +1,55 @@
+{
+  "name": "dsh-plugin-zhihu-sidebar",
+  "version": "0.1.0",
+  "description": "Zhihu data for the DeepSeek Harness Web UI right sidebar: hot list, Zhihu search and the account's own creations, read through the official zhihu-cli (JSON only, no credentials touched by this plugin).",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/host/cli.js && node --check lib/host/queue.js && node --check lib/host/cache.js && node --check lib/host/backoff.js && node --check lib/host/quota.js && node --check lib/host/parse.js && node --check lib/host/http.js && node --check lib/host/service.js",
+    "format": "prettier --write \"lib/**/*.js\" \"test/**/*.mjs\" \"*.md\"",
+    "format:check": "prettier --check \"lib/**/*.js\" \"test/**/*.mjs\" \"*.md\""
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guraul/self-dsh-plugins.git",
+    "directory": "dsh-zhihu-sidebar"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "zhihu",
+    "sidebar"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ],
+      "platform": "web"
+    }
+  }
+}
