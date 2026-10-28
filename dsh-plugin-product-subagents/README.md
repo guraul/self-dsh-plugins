@@ -200,6 +200,28 @@ config:
                               # ctx.subagents; '' registers the bare keys
 ```
 
+### Interrupting a delegation: what stops, and what lingers
+
+`interrupt_agent` (any abort of the child activation) reaches the remote in two
+separate stages. Watching `ps` without knowing this makes a healthy system look
+leaky:
+
+1. **The turn stops immediately.** The ACP bridge's `submit()` watches the abort
+   signal and sends `session/cancel`, so the remote stops producing output within
+   a second or two. Verified live (issue #12) with a remote looping
+   `echo … >> log; sleep 4`: the log stopped growing between ticks and never
+   resumed across the following 87 s.
+2. **The process is released later, on purpose.** A continuable child's remote
+   session stays alive so a follow-up `send_message` resumes it without a
+   reconnect. `dispose()` (cancel → `closeSession` → `SIGTERM`) runs only after
+   the child has been idle for `idleTimeoutMs`.
+
+So `opencode acp` still showing in `ps` right after an interrupt is **expected**,
+not a leak. Re-check after `idleTimeoutMs` (10 min by default): both the bridge
+process and its child (`opencode serve --stdio`) must be gone. Parent gone but
+child alive **is** a bug — `dispose()` only signals the process it spawned, not
+its process group.
+
 ### Provider ids
 
 `claude-code`, `codex`, `acp` (and any `config.providers` key) stay the names
