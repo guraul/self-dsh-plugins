@@ -44,22 +44,17 @@
 
 ## 怎么验证
 
-### ⚠️ 干净 checkout 里装不上依赖（跟踪 issue #3）
+### ✅ 干净 checkout 能装依赖（issue #3 已修，2026-10-28）
 
-**在干净的 checkout 里 `pnpm install` 必然失败，不是配置错**：
-
-- 本插件的 `peerDependencies` 用 `*` 声明 `@deepseek-ai/dsh-session` 等（连同
-  `@deepseek-ai/cordis` / `dsh-agent` / `dsh-llm` / `dsh-settings` / `schemastery`）。
-- `*` 会解析到 npm 上**陈旧的 `@deepseek-ai/dsh-session@0.0.1-rc.1`**，而它依赖**未发布的内部包**
-  `@deepseek-ai/dsh-type-meta`——**npmjs 与 npmmirror 都是 404**。
-- DSH 真正在用的 `dsh-session@0.2.0-rc.2` **并没有单独发布到公共 registry**。
-- 已试无效：`pnpm install --config.auto-install-peers=false` 仍报同一个 404。
-
-后果：本机之所以能跑，是因为 `node_modules` 早就装好（`~/.dsh/profiles/web` 的解析层提供 peer），
-**CI 在干净 checkout 里装不上**。因此 `.github/workflows/ci.yml` 里这一项
-`install: false`——**只跑 `node --check` 语法门禁**（两个入口已入库，无需依赖），
-并在 job 里打印明确的跳过原因。收紧 `peerDependencies` 范围是 issue #3 的备选方案之一，
-需用户拍板，**不在本仓库统一治理（#1）范围内**。
+- 根因：`peerDependencies` 原来全用 `*`。`*` 取的是 `dist-tags.latest`，而这些包的 latest 长期停在
+  `0.0.1-rc.1`；`@deepseek-ai/dsh-session@0.0.1-rc.1` 的 peer 里有**未发布的内部包**
+  `@deepseek-ai/dsh-type-meta`（npmjs / npmmirror 均 404），于是整棵树解析失败。
+- 修法：把 DSH 运行时 peer 与客户端 peer 一律收窄到**实测版本 `0.2.1-rc.2`**（该版本在公共 registry 上齐全，
+  且不引用 `dsh-type-meta`）；`cordis` / `schemastery` 保持 `*`（其 latest 本来就是可用版本）。
+  全部仍是 `optional: true`，profile 侧仍由 DSH 自身提供 peer。
+- 副作用：`pnpm test`（18 例）与 `pnpm run typecheck` 现在在干净环境都能跑通，CI 也因此不再跳过安装。
+- ⚠️ **构建产物仍不可复现**：tsdown 打 client 包会把绝对路径和 CSS module 哈希写进 `lib/client.js`，
+  换机器重建必脏，所以 CI 对这项设 `fresh: false`（不跑新鲜度检查），**别手工重建后提交 client 产物**。
 
 ### 真实验收怎么走
 

@@ -8,8 +8,10 @@
 # 因此 CI 检出后 6 个插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
 # （例如新插件目录还没加进白名单），命中它是预期行为，不是失败。
 #
-# dsh-im-bridge-workspaces 是例外：干净 checkout 里装不上依赖（issue #3），
-# 该矩阵项的 install=false —— 只跑 node --check 语法门禁，并打印明确的跳过原因。
+# dsh-im-bridge-workspaces：依赖已在 issue #3 修复，可正常 `pnpm install`（peer 已按
+# 实测 DSH 0.2.1-rc.2 收窄，见 package.json）。但它**不做构建产物新鲜度检查**
+# （`fresh: false`）：tsdown 打 client 包时把绝对路径与 CSS module 哈希写进产物，
+# 换机器必然产出不同字节，重建即脏。
 name: ci
 
 on:
@@ -44,9 +46,10 @@ jobs:
               extension/background.js
               extension/dsh-content.js
               extension/qingyan-content.js
-          # 装不上依赖（issue #3）：只做语法门禁，见下面的"说明跳过原因"步骤。
           - dir: dsh-im-bridge-workspaces
-            install: false
+            install: true
+            # 构建产物不可复现（绝对路径 + CSS 哈希），不做新鲜度检查。
+            fresh: false
             entry: |
               lib/index.js
               lib/client.js
@@ -78,11 +81,6 @@ jobs:
             echo "exists=false" >> "${GITHUB_OUTPUT}"
           fi
 
-      - name: 说明跳过依赖安装的原因
-        if: steps.presence.outputs.exists == 'true' && matrix.install == false
-        run: |
-          echo "::warning::${{ matrix.dir }} 跳过依赖安装与测试：其 peerDependencies 用 '*' 声明 @deepseek-ai/dsh-session 等，会解析到 npm 上陈旧的 @deepseek-ai/dsh-session@0.0.1-rc.1，后者依赖未发布的内部包 @deepseek-ai/dsh-type-meta（npmjs 与 npmmirror 均 404）；DSH 实际在用的 dsh-session@0.2.0-rc.2 未单独发布到公共 registry。故本 job 只做 node --check 语法门禁；真实验收走 scripts/pipeline/install-check.sh（一次性 DSH profile）。跟踪 issue #3。"
-
       - uses: actions/setup-node@v4
         if: steps.presence.outputs.exists == 'true'
         with:
@@ -102,7 +100,7 @@ jobs:
           #   * dsh-external-discuss        —— 无任何 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
           #   * dsh-plugin-memx             —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           #   * dsh-plugin-product-subagents —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
-          #   * dsh-im-bridge-workspaces     —— 不进本步骤（install=false，见上面的说明步骤）
+          #   * dsh-im-bridge-workspaces     —— 无 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
           # 本仓库只留 pnpm-lock.yaml：npm 的 package-lock.json 已按全局约定清掉，并被 .gitignore 挡下。
           #
           # ⚠️ CI 下 pnpm 默认 frozen-lockfile=true：兜底必须显式 --no-frozen-lockfile。
@@ -114,7 +112,7 @@ jobs:
       # 有改动说明提交上去的 lib/* 是过期的（或在 CI 里才被改写），直接判红。
       # 仓库根校验：本步骤 working-directory 是插件目录，故用 git -C "${GITHUB_WORKSPACE}"。
       - name: 构建产物新鲜度（有 scripts.build 才跑）
-        if: steps.presence.outputs.exists == 'true' && matrix.install
+        if: steps.presence.outputs.exists == 'true' && matrix.install && matrix.fresh != false
         working-directory: ${{ matrix.dir }}
         run: |
           if node -e 'process.exit(require("./package.json").scripts && require("./package.json").scripts.build ? 0 : 1)'; then
