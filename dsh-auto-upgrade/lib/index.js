@@ -21,6 +21,13 @@ import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.
 import { isLoopbackRequest } from './host/loopback.js'
 import { DEFAULT_GITHUB_API, fetchReleaseNotes, repositorySlug } from './host/notes.js'
 import { loadOfficialAppBoot } from './host/official.js'
+import {
+  defaultRunGh,
+  issueBody,
+  issueTitle,
+  ReportError,
+  reportIssue as createIssue,
+} from './host/report-issue.js'
 import { ALLOW_SCRIPTS, API, CHANNELS, CODE, DECISION, DEFAULT_REGISTRY, DSH_PACKAGE } from './host/protocol.js'
 import { fetchPackument } from './host/registry.js'
 import { compareVersions, isExactVersion } from './host/semver.js'
@@ -124,6 +131,8 @@ export function apply(ctx, config = {}) {
   const exitProcess = typeof config.exit === 'function' ? config.exit : (code) => process.exit(code)
   /** 测试缝：默认真的 fork helper。 */
   const scheduleHelperSeam = typeof config.scheduleHelper === 'function' ? config.scheduleHelper : defaultScheduleHelper
+  /** 测试缝：默认真的执行 `gh`。 */
+  const runGhSeam = typeof config.runGh === 'function' ? config.runGh : defaultRunGh
   /** helper 是 POSIX sh 脚本，Windows 上不假装支持。 */
   const helperSupported = process.platform !== 'win32'
 
@@ -722,6 +731,47 @@ export function apply(ctx, config = {}) {
         const result = fresh ? cached.value : await fetchReleaseNotes({ slug, version, apiBase: githubApiBase })
         if (!fresh) notesCache.set(cacheKey, { at: Date.now(), value: result })
         writeJson(res, 200, { ok: true, version, slug, cached: fresh, ...result })
+      },
+    })
+
+    route(API.reportIssue, {
+      POST: async (req, res) => {
+        const body = expectObject(await readJsonBody(req), 'body')
+        const target = expectVersion(body.target, 'target')
+        if (target === undefined) throw new RequestError(400, CODE.BAD_REQUEST, 'target is required')
+        const slug = repositorySlug(ownPackage)
+        if (slug === undefined) {
+          throw new RequestError(400, CODE.BAD_REQUEST, 'package.json declares no GitHub repository; cannot open an issue')
+        }
+
+        // 标题与正文只由宿主根据检测结果生成：请求体里的 target 已校验为精确版本号，
+        // 任何额外字段都不会被写进 issue。
+        const state = await stores.state.read()
+        const lastCheck = state.lastCheck ?? null
+        const blockers = lastCheck !== null && lastCheck.target === target && Array.isArray(lastCheck.incompatible)
+          ? lastCheck.incompatible
+          : (await inspectPlugins(target)).incompatible
+        if (blockers.length === 0) {
+          throw new RequestError(400, CODE.BAD_REQUEST, `目标版本 ${target} 没有被阻塞的插件，无需开 issue`)
+        }
+
+        const installed = installation === undefined
+          ? (lastCheck?.installed ?? null)
+          : ((await readInstalledVersion(installation.manifestPath)) ?? lastCheck?.installed ?? null)
+        const title = issueTitle({ target, plugins: blockers })
+        const text = issueBody({
+          target,
+          installed,
+          profile: profileContext.name ?? 'web',
+          plugins: blockers,
+          port: typeof webServer.port === 'number' ? webServer.port : 3080,
+        })
+        try {
+          writeJson(res, 200, await createIssue({ runGh: runGhSeam, slug, title, body: text }))
+        } catch (error) {
+          if (error instanceof ReportError) throw new RequestError(error.status, CODE.INTERNAL, error.message)
+          throw error
+        }
       },
     })
 

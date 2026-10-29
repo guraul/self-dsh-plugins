@@ -33,6 +33,7 @@ window.__ModuleLoader__.load({
       restart: '/api/dsh-auto-upgrade/restart',
       restartDiagnostics: '/api/dsh-auto-upgrade/restart/diagnostics',
       notes: '/api/dsh-auto-upgrade/notes',
+      reportIssue: '/api/dsh-auto-upgrade/report-issue',
     }
 
     const RESULT_FRESH_MS = 10 * 60 * 1000
@@ -43,7 +44,16 @@ window.__ModuleLoader__.load({
       'overlay.checking': '正在检查…',
       'overlay.upToDate': '已是最新（{version}）',
       'overlay.available': '有新版本 {target}（当前 {installed}）',
-      'overlay.pluginRisk': '有 {target}，但 {count} 个插件不兼容，按策略不升级',
+      'overlay.pluginCannotUpgrade': '不能升级到 {target}：',
+      'overlay.requires': '要求 {requirement}',
+      'overlay.requirementExact': '{name} 精确 {range}',
+      'overlay.requirementRange': '{name} {range}',
+      'overlay.pluginRequirements': '要求明细（{count} 项）',
+      'overlay.requirementsMore': '等 {count} 项',
+      'overlay.pluginFix': '→ 修法：放宽该插件的 peer 声明后重跑其装配验收（scripts/pipeline/install-check.sh <插件目录>）；或为该版本组合申请版本豁免（dsh plugin --profile web allow-version …）',
+      'overlay.reportIssue': '开 issue 记录这个不兼容',
+      'overlay.reportIssueCreated': '已记录为 issue',
+      'overlay.reportIssueFailed': '开 issue 失败：{error}',
       'overlay.downgrade': '本机版本高于发布源（{installed} > {target}）',
       'overlay.downgradeDetail': '当前渠道 {channel} 最新 {target}，本机 {installed}',
       'overlay.downgradeHint': '把发布渠道改成 {channel} 就能继续升级',
@@ -61,7 +71,6 @@ window.__ModuleLoader__.load({
       'overlay.cancel': '取消',
       'overlay.backup': '升级前备份 {path}',
       'overlay.sessionsWarning': '{count} 个会话正在执行，升级会中断它们。仍要继续？',
-      'overlay.pluginBlocked': '按当前策略不升级：{count} 个插件与新版本不兼容',
       'overlay.handingOff': '正在交接给升级助手（{step}）…',
       'overlay.reconnecting': '服务重启中，页面会自动重新连接…',
       'overlay.upgradedTo': '已升级到 {version}',
@@ -83,6 +92,8 @@ window.__ModuleLoader__.load({
       'settings.checkNow': '立即检查',
       'settings.preflight': '本机体检',
       'settings.plugins': '已装插件兼容性',
+      'settings.pluginsFor': '已装插件兼容性（按 {target} 评估）',
+      'settings.pluginsForInstalled': '已装插件兼容性（按本机已装版本评估）',
       'settings.pluginOk': '兼容',
       'settings.pluginBad': '不兼容',
       'settings.pluginExempt': '已豁免',
@@ -104,7 +115,16 @@ window.__ModuleLoader__.load({
       'overlay.checking': 'Checking…',
       'overlay.upToDate': 'Up to date ({version})',
       'overlay.available': 'New version {target} (current {installed})',
-      'overlay.pluginRisk': '{target} is available but {count} plugins are incompatible; not upgrading by policy',
+      'overlay.pluginCannotUpgrade': 'Cannot upgrade to {target}:',
+      'overlay.requires': 'requires {requirement}',
+      'overlay.requirementExact': '{name} exactly {range}',
+      'overlay.requirementRange': '{name} {range}',
+      'overlay.pluginRequirements': 'Unmet requirements ({count})',
+      'overlay.requirementsMore': 'and {count} more',
+      'overlay.pluginFix': '→ Fix: widen the plugin peer declaration and re-run its assembly check (scripts/pipeline/install-check.sh <plugin dir>); or request a version exemption for this combination (dsh plugin --profile web allow-version …)',
+      'overlay.reportIssue': 'Open an issue for this incompatibility',
+      'overlay.reportIssueCreated': 'Recorded as issue',
+      'overlay.reportIssueFailed': 'Could not open the issue: {error}',
       'overlay.downgrade': 'Installed version is ahead of the release source ({installed} > {target})',
       'overlay.downgradeDetail': 'Channel {channel} latest is {target}; installed {installed}',
       'overlay.downgradeHint': 'Switch the release channel to {channel} to keep upgrading',
@@ -122,7 +142,6 @@ window.__ModuleLoader__.load({
       'overlay.cancel': 'Cancel',
       'overlay.backup': 'Backup before upgrading: {path}',
       'overlay.sessionsWarning': '{count} sessions are running; upgrading interrupts them. Continue anyway?',
-      'overlay.pluginBlocked': 'Not upgrading by policy: {count} plugins are incompatible with the new version',
       'overlay.handingOff': 'Handing over to the upgrade helper ({step})…',
       'overlay.reconnecting': 'Service is restarting; this page will reconnect automatically…',
       'overlay.upgradedTo': 'Upgraded to {version}',
@@ -144,6 +163,8 @@ window.__ModuleLoader__.load({
       'settings.checkNow': 'Check now',
       'settings.preflight': 'Local preflight',
       'settings.plugins': 'Installed plugin compatibility',
+      'settings.pluginsFor': 'Installed plugin compatibility (evaluated against {target})',
+      'settings.pluginsForInstalled': 'Installed plugin compatibility (evaluated against the installed version)',
       'settings.pluginOk': 'compatible',
       'settings.pluginBad': 'incompatible',
       'settings.pluginExempt': 'exempted',
@@ -308,6 +329,8 @@ window.__ModuleLoader__.load({
         '.dsh-au-bad{color:var(--dsw-alias-state-error-primary);}',
         '.dsh-au-ok{color:var(--dsw-alias-state-success-primary);}',
         '.dsh-au-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;}',
+        // 门禁拒绝块里的「开 issue」一行：与卡片动作行分开（动作行只放升级/不再提示）。
+        '.dsh-au-issue{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;}',
         // 浮层里的动作：官方 Button 的小尺寸 + 描边变体（sm = 28px / radius-sm / 12-18 /
         // border 0.5px border-l3 + hover 填充）；主操作是同一尺寸的 primary 实心。
         '.dsh-au-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:28px;padding:0 10px;',
@@ -475,6 +498,7 @@ window.__ModuleLoader__.load({
         if (result.ok === true) {
           io.setNotice(null)
           io.setPlan(null)
+          io.setBlocked(null)
           if (typeof io.setLastResult === 'function') io.setLastResult(null)
           io.setHandoff({ step: 'preflight', log: [] })
           if (typeof result.taskId === 'string') followTask(result.taskId)
@@ -489,7 +513,8 @@ window.__ModuleLoader__.load({
           return
         }
         if (result.code === 'E_PLUGIN_INCOMPATIBLE') {
-          io.setNotice(io.t('overlay.pluginBlocked', { count: result.detail?.plugins?.length ?? 0 }))
+          // 门禁拒绝时不再只说“有几个”：把宿主回报的插件与未满足要求原样交给共用渲染点名。
+          io.setBlocked({ target: io.getTarget(), plugins: result.detail?.plugins ?? [] })
           return
         }
         io.setNotice(result.error ?? 'update failed')
@@ -614,6 +639,102 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 把一条「未满足的 peer」格式化成 `名字 精确 版本`（范围不是精确版本时原样给出）。
+     * 取值全部来自官方 `evaluatePluginCompatibility` 的 `requirements`，这里只做显示，不自己算范围。
+     * @param {Function} t 翻译函数。
+     * @param {[string, string]} entry 名字与声明范围。
+     * @returns {string} 显示文本。
+     */
+    function formatRequirement(t, entry) {
+      const [name, range] = entry
+      const exact = typeof range === 'string' && parseVersion(range) !== undefined
+      return exact
+        ? t('overlay.requirementExact', { name, range })
+        : t('overlay.requirementRange', { name, range })
+    }
+
+    /**
+     * 门禁拒绝的共用渲染：点名不兼容插件 + 要求明细（最多 3 条，其余折叠）+ 修法 + 开 issue。
+     * 浮层与设置页共用这一份；各写一份必然漂移（`test/client-upgrade-entry.test.mjs` 有计数守卫）。
+     * @param {{t:Function, target:string|null, plugins:object[], busy:boolean, buttonClass:string, report:any, onReport:Function}} props 输入。
+     * @returns {any} React 元素。
+     */
+    function renderPluginBlock({ t, target, plugins, busy, buttonClass, report, onReport }) {
+      const list = Array.isArray(plugins) ? plugins : []
+      const rows = []
+      for (const plugin of list) {
+        const requirements = Object.entries(plugin.peers ?? {})
+        const shown = requirements.slice(0, 3)
+        const rest = requirements.length - shown.length
+        const first = shown.length === 0 ? '' : formatRequirement(t, shown[0])
+        rows.push(h('div', { key: `plugin-${plugin.name}`, className: 'dsh-au-warn' }, [
+          h('div', { key: 'name' }, `${plugin.name}@${plugin.version}${first === '' ? '' : ` ${t('overlay.requires', { requirement: first })}`}`),
+          requirements.length === 0
+            ? null
+            : h('details', { key: 'detail', className: 'dsh-au-details' }, [
+              h('summary', { key: 'summary' }, t('overlay.pluginRequirements', { count: requirements.length })),
+              h('div', { key: 'body', className: 'dsh-au-detail-body' }, [
+                ...shown.map((entry, index) => h('div', { key: `r${index}` }, formatRequirement(t, entry))),
+                rest === 0 ? null : h('div', { key: 'more' }, t('overlay.requirementsMore', { count: rest })),
+              ]),
+            ]),
+        ]))
+      }
+
+      let issue
+      if (report !== null && report !== undefined && report.ok === true) {
+        // 成功后保持可见：`#N` 本身就是链接。
+        issue = h('div', { key: 'issue', className: 'dsh-au-issue' }, [
+          h('span', { key: 'text', className: 'dsh-au-muted' }, t('overlay.reportIssueCreated')),
+          h('a', {
+            key: 'link',
+            className: 'dsh-au-notes-link',
+            href: report.url,
+            target: '_blank',
+            rel: 'noreferrer noopener',
+          }, `#${report.number}`),
+        ])
+      } else if (report !== null && report !== undefined && typeof report.error === 'string') {
+        issue = h('div', { key: 'issue', className: 'dsh-au-warn' }, t('overlay.reportIssueFailed', { error: report.error }))
+      } else {
+        const pending = report !== null && report !== undefined && report.pending === true
+        issue = h('div', { key: 'issue', className: 'dsh-au-issue' }, [
+          h('button', {
+            key: 'button',
+            className: buttonClass,
+            disabled: busy || pending,
+            onClick: () => onReport(target),
+          }, t('overlay.reportIssue')),
+        ])
+      }
+
+      return h('div', { key: 'plugins', className: 'dsh-au-panel' }, [
+        h('div', { key: 'head', className: 'dsh-au-warn' }, t('overlay.pluginCannotUpgrade', { target: target ?? '?' })),
+        ...rows,
+        h('div', { key: 'fix', className: 'dsh-au-muted' }, t('overlay.pluginFix')),
+        issue,
+      ])
+    }
+
+    /**
+     * 造一个「开 issue」提交器，浮层与设置页共用同一份实现。
+     * @param {(state:any)=>void} setReport 结果 setter。
+     * @returns {(target:string|null)=>Promise<void>} 提交函数。
+     */
+    function makeIssueReporter(setReport) {
+      return async (target) => {
+        if (target === null || target === undefined) return
+        setReport({ pending: true })
+        const result = await request(API.reportIssue, { method: 'POST', body: { target } })
+        if (result.ok === true) {
+          setReport({ ok: true, number: result.number, url: result.url, created: result.created })
+        } else {
+          setReport({ error: result.error ?? 'report failed' })
+        }
+      }
+    }
+
+    /**
      * 关闭图标：官方用的是 `@deepseek-ai/dsh-client-ui-primitives` 的 `IconCloseOutlineRegular`（size 10），
      * 该包在 dsh 0.2.1 的安装树里已不存在（实现被内联进各 bundle），所以按同尺寸内联一个等价的 10×10 ×。
      * @param {number} size 边长（px）。
@@ -647,6 +768,8 @@ window.__ModuleLoader__.load({
       const [hidden, setHidden] = react.useState(false)
       const [handoff, setHandoff] = react.useState(null)
       const [lastResult, setLastResult] = react.useState(null)
+      const [blocked, setBlocked] = react.useState(null)
+      const [report, setReport] = react.useState(null)
       const watchRef = react.useRef(null)
       const [position, setPosition] = react.useState(null)
 
@@ -751,10 +874,12 @@ window.__ModuleLoader__.load({
         setBusy,
         setNotice,
         setPlan,
+        setBlocked,
         setHandoff,
         setLastResult,
         onChecked: (result) => { setCheck(result); setHidden(false) },
       })
+      const reportIssue = makeIssueReporter(setReport)
 
       const dismissForever = async () => {
         setHidden(true)
@@ -771,9 +896,16 @@ window.__ModuleLoader__.load({
       else if (check === null) line = t('overlay.checking')
       else if (decision === 'up-to-date') line = t('overlay.upToDate', { version: installed })
       else if (decision === 'update-available') line = t('overlay.available', { target, installed })
-      else if (decision === 'update-with-plugin-risk') line = t('overlay.pluginRisk', { target, count: check.incompatible?.length ?? 0 })
+      // 有风险时不再用「N 个插件不兼容」这种没有名字的文案：正文交给 renderPluginBlock 点名。
+      else if (decision === 'update-with-plugin-risk') line = ''
       else if (decision === 'downgrade-guard') line = t('overlay.downgrade', { installed, target: target ?? '?' })
       else line = t('overlay.unknown', { error: check?.registryError ?? 'unknown' })
+
+      // 被门禁挡住时点名插件：优先用宿主 409 回传的那份，其次用本次检测结果。
+      const blockers = blocked !== null && Array.isArray(blocked.plugins) && blocked.plugins.length > 0
+        ? blocked.plugins
+        : (decision === 'update-with-plugin-risk' ? (check?.incompatible ?? []) : [])
+      const blockTarget = blocked?.target ?? target
 
       const actions = []
       const copy = [h('div', { key: 'title', className: 'dsh-au-title' }, [
@@ -796,6 +928,19 @@ window.__ModuleLoader__.load({
           busy,
           buttonClass: 'dsh-au-btn dsh-au-primary',
           onSwitch: (channel) => flow.switchChannel(channel),
+        }))
+      }
+
+      // 门禁拒绝时点名是哪个插件、卡在哪条要求，并给出一条可执行的修法 + 一键开 issue。
+      if (blockers.length > 0) {
+        copy.push(renderPluginBlock({
+          t,
+          target: blockTarget,
+          plugins: blockers,
+          busy,
+          buttonClass: 'dsh-au-btn',
+          report,
+          onReport: reportIssue,
         }))
       }
 
@@ -875,18 +1020,24 @@ window.__ModuleLoader__.load({
       const [state, setState] = react.useState(null)
       const [preflightFacts, setPreflightFacts] = react.useState(null)
       const [plugins, setPlugins] = react.useState([])
+      const [pluginsTarget, setPluginsTarget] = react.useState(null)
       const [diagnostics, setDiagnostics] = react.useState({ log: [], result: null, payload: null })
       const [saved, setSaved] = react.useState(false)
       const [busy, setBusy] = react.useState(false)
       const [notice, setNotice] = react.useState(null)
       const [plan, setPlan] = react.useState(null)
+      const [blocked, setBlocked] = react.useState(null)
+      const [report, setReport] = react.useState(null)
       const [progress, setProgress] = react.useState(null)
       const watchRef = react.useRef(null)
 
       const refresh = react.useCallback(async () => {
         const snapshot = await request(API.status)
         if (snapshot.ok === true) setState(snapshot)
-        const inventory = await request(API.plugins)
+        // 插件表必须按**判定目标版本**取数：宿主默认用已装版本，会和这次的升级结论自相矛盾。
+        const judged = snapshot.ok === true ? (snapshot.lastCheck?.target ?? null) : null
+        setPluginsTarget(judged)
+        const inventory = await request(judged === null ? API.plugins : `${API.plugins}?version=${encodeURIComponent(judged)}`)
         if (inventory.ok === true) setPlugins(inventory.plugins ?? [])
         const result = await request(API.restartDiagnostics)
         if (result.ok === true) {
@@ -914,6 +1065,11 @@ window.__ModuleLoader__.load({
       const target = check?.target ?? null
       const installed = check?.installed ?? state?.dsh?.installed ?? '?'
       const hasUpdate = decision === 'update-available' || decision === 'update-with-plugin-risk'
+      // 设置页与浮层同样点名：优先用宿主 409 回传的插件，其次用本次检测结果。
+      const blockers = blocked !== null && Array.isArray(blocked.plugins) && blocked.plugins.length > 0
+        ? blocked.plugins
+        : (decision === 'update-with-plugin-risk' ? (check?.incompatible ?? []) : [])
+      const blockTarget = blocked?.target ?? target
 
       // 升级流程与浮层共用同一份实现；浮层是否被 dismissed / hidden 都不影响这里。
       const flow = createUpgradeFlow({
@@ -923,9 +1079,11 @@ window.__ModuleLoader__.load({
         setBusy,
         setNotice,
         setPlan,
+        setBlocked,
         setHandoff: setProgress,
         onChecked: () => { void refresh() },
       })
+      const reportIssue = makeIssueReporter(setReport)
 
       const savePolicy = async (patch) => {
         setBusy(true)
@@ -1055,11 +1213,17 @@ window.__ModuleLoader__.load({
               disabled: busy || decision === 'update-with-plugin-risk',
               onClick: () => flow.openPlan(target),
             }, t('overlay.upgrade')),
-            decision === 'update-with-plugin-risk'
-              ? t('overlay.pluginRisk', { target: target ?? '?', count: check?.incompatible?.length ?? 0 })
-              : undefined,
           ),
         ]) : null,
+        blockers.length > 0 ? renderPluginBlock({
+          t,
+          target: blockTarget,
+          plugins: blockers,
+          busy,
+          buttonClass: 'dsh-au-selectbtn',
+          report,
+          onReport: reportIssue,
+        }) : null,
         plan !== null ? renderPlanPanel({
           t,
           plan,
@@ -1142,7 +1306,9 @@ window.__ModuleLoader__.load({
           h('div', { key: 'pre', className: 'dsh-au-pre' }, JSON.stringify(preflightFacts, null, 2)),
         ]),
         h('div', { key: 'plugins', className: 'dsh-au-panel' }, [
-          h('div', { key: 'l', className: 'dsh-au-title' }, t('settings.plugins')),
+          h('div', { key: 'l', className: 'dsh-au-title' }, pluginsTarget === null
+            ? t('settings.pluginsForInstalled')
+            : t('settings.pluginsFor', { target: pluginsTarget })),
           pluginRows.length === 0
             ? h('div', { key: 'e', className: 'dsh-au-muted' }, t('settings.noPlugins'))
             : h('div', { key: 'rows' }, pluginRows),

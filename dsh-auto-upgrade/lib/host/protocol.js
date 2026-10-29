@@ -26,6 +26,7 @@ export const API = {
   restart: `${API_PREFIX}/restart`,
   restartDiagnostics: `${API_PREFIX}/restart/diagnostics`,
   notes: `${API_PREFIX}/notes`,
+  reportIssue: `${API_PREFIX}/report-issue`,
 }
 
 /** 被升级的 npm 包。 */
