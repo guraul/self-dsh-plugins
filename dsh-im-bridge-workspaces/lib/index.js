@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createRequire as createRequire$1 } from "module";
-//#region \0rolldown/runtime.js
+// \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod, mod.exports), cb = null), mod.exports);
 var __require = /* #__PURE__ */ (() => createRequire(import.meta.url))();
 /** PNG signature (first 8 bytes). */
@@ -188,8 +188,7 @@ async function sendCollectedPngs(ws, chatid, images) {
 		failed
 	};
 }
-//#endregion
-//#region src/session-key.ts
+// src/session-key.ts
 /**
 * Route WeCom inbound frames onto one DSH session per chat window:
 * 1:1 by userid, groups by chatid.
@@ -334,8 +333,7 @@ function resolveWecomSession(frame) {
 	if (sender === "") throw new WecomSessionReject("无法识别发送者，已忽略");
 	return singleRef(sender);
 }
-//#endregion
-//#region src/prompt-variable.ts
+// src/prompt-variable.ts
 /**
 * Register one prompt variable, best effort: an older host without
 * `variable()` (or one that rejects a duplicate name) must not break the
@@ -349,8 +347,7 @@ function registerPromptVariable(prompt, name, provider) {
 		console.warn(`[im-bridge] 注册 {{${name}}} 提示词变量失败: ${message}`);
 	}
 }
-//#endregion
-//#region src/workspace-router.ts
+// src/workspace-router.ts
 /**
 * Command heads the bridge handles itself: `/ws`, `/workspace`, `/workspaces`
 * and `/工作区`, followed by optional arguments. A head glued to more letters
@@ -479,8 +476,7 @@ function resolveWorkspaceSelector(entries, selector) {
 		reason: `未找到匹配的工作区：${key}。发 /ws 查看列表`
 	};
 }
-//#endregion
-//#region node_modules/fflate/esm/index.mjs
+// node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/esm/index.mjs
 var require$1 = createRequire$1("/");
 var _a;
 try {
@@ -918,8 +914,7 @@ function unzipSync(data, opts) {
 	}
 	return files;
 }
-//#endregion
-//#region node_modules/yaml/dist/nodes/identity.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/identity.js
 var require_identity = /* @__PURE__ */ __commonJSMin(((exports) => {
 	const ALIAS = Symbol.for("yaml.alias");
 	const DOC = Symbol.for("yaml.document");
@@ -968,8 +963,7 @@ var require_identity = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.isScalar = isScalar;
 	exports.isSeq = isSeq;
 }));
-//#endregion
-//#region node_modules/yaml/dist/visit.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/visit.js
 var require_visit = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	const BREAK = Symbol("break visit");
@@ -1159,8 +1153,7 @@ var require_visit = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.visit = visit;
 	exports.visitAsync = visitAsync;
 }));
-//#endregion
-//#region node_modules/yaml/dist/doc/directives.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/directives.js
 var require_directives = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var visit = require_visit();
@@ -1323,8 +1316,7 @@ var require_directives = /* @__PURE__ */ __commonJSMin(((exports) => {
 	Directives.defaultTags = { "!!": "tag:yaml.org,2002:" };
 	exports.Directives = Directives;
 }));
-//#endregion
-//#region node_modules/yaml/dist/doc/anchors.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/anchors.js
 var require_anchors = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var visit = require_visit();
@@ -1390,8 +1382,7 @@ var require_anchors = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.createNodeAnchors = createNodeAnchors;
 	exports.findNewAnchor = findNewAnchor;
 }));
-//#endregion
-//#region node_modules/yaml/dist/doc/applyReviver.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/applyReviver.js
 var require_applyReviver = /* @__PURE__ */ __commonJSMin(((exports) => {
 	/**
 	* Applies the JSON.parse reviver algorithm as defined in the ECMA-262 spec,
@@ -1432,8 +1423,7 @@ var require_applyReviver = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.applyReviver = applyReviver;
 }));
-//#endregion
-//#region node_modules/yaml/dist/nodes/toJS.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/toJS.js
 var require_toJS = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	/**
@@ -1469,8 +1459,7 @@ var require_toJS = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.toJS = toJS;
 }));
-//#endregion
-//#region node_modules/yaml/dist/nodes/Node.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Node.js
 var require_Node = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var applyReviver = require_applyReviver();
 	var identity = require_identity();
@@ -1503,8 +1492,7 @@ var require_Node = /* @__PURE__ */ __commonJSMin(((exports) => {
 	};
 	exports.NodeBase = NodeBase;
 }));
-//#endregion
-//#region node_modules/yaml/dist/nodes/Alias.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Alias.js
 var require_Alias = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var anchors = require_anchors();
 	var visit = require_visit();
@@ -1599,8 +1587,7 @@ var require_Alias = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.Alias = Alias;
 }));
-//#endregion
-//#region node_modules/yaml/dist/nodes/Scalar.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Scalar.js
 var require_Scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var Node = require_Node();
@@ -1626,8 +1613,7 @@ var require_Scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.Scalar = Scalar;
 	exports.isScalarValue = isScalarValue;
 }));
-//#endregion
-//#region node_modules/yaml/dist/doc/createNode.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/createNode.js
 var require_createNode = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Alias = require_Alias();
 	var identity = require_identity();
@@ -1689,8 +1675,7 @@ var require_createNode = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.createNode = createNode;
 }));
-//#endregion
-//#region node_modules/yaml/dist/nodes/Collection.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Collection.js
 var require_Collection = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var createNode = require_createNode();
 	var identity = require_identity();
@@ -1810,8 +1795,7 @@ var require_Collection = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.collectionFromPath = collectionFromPath;
 	exports.isEmptyPath = isEmptyPath;
 }));
-//#endregion
-//#region node_modules/yaml/dist/stringify/stringifyComment.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyComment.js
 var require_stringifyComment = /* @__PURE__ */ __commonJSMin(((exports) => {
 	/**
 	* Stringifies a comment.
@@ -1830,8 +1814,7 @@ var require_stringifyComment = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.lineComment = lineComment;
 	exports.stringifyComment = stringifyComment;
 }));
-//#endregion
-//#region node_modules/yaml/dist/stringify/foldFlowLines.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/foldFlowLines.js
 var require_foldFlowLines = /* @__PURE__ */ __commonJSMin(((exports) => {
 	const FOLD_FLOW = "flow";
 	const FOLD_BLOCK = "block";
@@ -1950,8 +1933,7 @@ var require_foldFlowLines = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.FOLD_QUOTED = FOLD_QUOTED;
 	exports.foldFlowLines = foldFlowLines;
 }));
-//#endregion
-//#region node_modules/yaml/dist/stringify/stringifyString.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyString.js
 var require_stringifyString = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Scalar = require_Scalar();
 	var foldFlowLines = require_foldFlowLines();
@@ -2174,8 +2156,7 @@ var require_stringifyString = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.stringifyString = stringifyString;
 }));
-//#endregion
-//#region node_modules/yaml/dist/stringify/stringify.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringify.js
 var require_stringify = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var anchors = require_anchors();
 	var identity = require_identity();
@@ -2282,8 +2263,7 @@ var require_stringify = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.createStringifyContext = createStringifyContext;
 	exports.stringify = stringify;
 }));
-//#endregion
-//#region node_modules/yaml/dist/stringify/stringifyPair.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyPair.js
 var require_stringifyPair = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var Scalar = require_Scalar();
@@ -2379,8 +2359,7 @@ var require_stringifyPair = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.stringifyPair = stringifyPair;
 }));
-//#endregion
-//#region node_modules/yaml/dist/log.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/log.js
 var require_log = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var node_process = __require("process");
 	function debug(logLevel, ...messages) {
@@ -2395,8 +2374,7 @@ var require_log = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.debug = debug;
 	exports.warn = warn;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/merge.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/merge.js
 var require_merge = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var Scalar = require_Scalar();
@@ -2438,8 +2416,7 @@ var require_merge = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.isMergeKey = isMergeKey;
 	exports.merge = merge;
 }));
-//#endregion
-//#region node_modules/yaml/dist/nodes/addPairToJSMap.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/addPairToJSMap.js
 var require_addPairToJSMap = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var log = require_log();
 	var merge = require_merge();
@@ -2489,8 +2466,7 @@ var require_addPairToJSMap = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.addPairToJSMap = addPairToJSMap;
 }));
-//#endregion
-//#region node_modules/yaml/dist/nodes/Pair.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Pair.js
 var require_Pair = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var createNode = require_createNode();
 	var stringifyPair = require_stringifyPair();
@@ -2522,8 +2498,7 @@ var require_Pair = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.Pair = Pair;
 	exports.createPair = createPair;
 }));
-//#endregion
-//#region node_modules/yaml/dist/stringify/stringifyCollection.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyCollection.js
 var require_stringifyCollection = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var stringify = require_stringify();
@@ -2640,8 +2615,7 @@ var require_stringifyCollection = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.stringifyCollection = stringifyCollection;
 }));
-//#endregion
-//#region node_modules/yaml/dist/nodes/YAMLMap.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/YAMLMap.js
 var require_YAMLMap = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var stringifyCollection = require_stringifyCollection();
 	var addPairToJSMap = require_addPairToJSMap();
@@ -2749,8 +2723,7 @@ var require_YAMLMap = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.YAMLMap = YAMLMap;
 	exports.findPair = findPair;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/common/map.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/common/map.js
 var require_map = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var YAMLMap = require_YAMLMap();
@@ -2766,8 +2739,7 @@ var require_map = /* @__PURE__ */ __commonJSMin(((exports) => {
 		createNode: (schema, obj, ctx) => YAMLMap.YAMLMap.from(schema, obj, ctx)
 	};
 }));
-//#endregion
-//#region node_modules/yaml/dist/nodes/YAMLSeq.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/YAMLSeq.js
 var require_YAMLSeq = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var createNode = require_createNode();
 	var stringifyCollection = require_stringifyCollection();
@@ -2872,8 +2844,7 @@ var require_YAMLSeq = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.YAMLSeq = YAMLSeq;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/common/seq.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/common/seq.js
 var require_seq = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var YAMLSeq = require_YAMLSeq();
@@ -2889,8 +2860,7 @@ var require_seq = /* @__PURE__ */ __commonJSMin(((exports) => {
 		createNode: (schema, obj, ctx) => YAMLSeq.YAMLSeq.from(schema, obj, ctx)
 	};
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/common/string.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/common/string.js
 var require_string = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var stringifyString = require_stringifyString();
 	exports.string = {
@@ -2904,8 +2874,7 @@ var require_string = /* @__PURE__ */ __commonJSMin(((exports) => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/common/null.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/common/null.js
 var require_null = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Scalar = require_Scalar();
 	const nullTag = {
@@ -2919,8 +2888,7 @@ var require_null = /* @__PURE__ */ __commonJSMin(((exports) => {
 	};
 	exports.nullTag = nullTag;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/core/bool.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/core/bool.js
 var require_bool$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Scalar = require_Scalar();
 	const boolTag = {
@@ -2938,8 +2906,7 @@ var require_bool$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	};
 	exports.boolTag = boolTag;
 }));
-//#endregion
-//#region node_modules/yaml/dist/stringify/stringifyNumber.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyNumber.js
 var require_stringifyNumber = /* @__PURE__ */ __commonJSMin(((exports) => {
 	function stringifyNumber({ format, minFractionDigits, tag, value }) {
 		if (typeof value === "bigint") return String(value);
@@ -2959,8 +2926,7 @@ var require_stringifyNumber = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.stringifyNumber = stringifyNumber;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/core/float.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/core/float.js
 var require_float$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Scalar = require_Scalar();
 	var stringifyNumber = require_stringifyNumber();
@@ -3000,8 +2966,7 @@ var require_float$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.floatExp = floatExp;
 	exports.floatNaN = floatNaN;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/core/int.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/core/int.js
 var require_int$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var stringifyNumber = require_stringifyNumber();
 	const intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -3041,8 +3006,7 @@ var require_int$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.intHex = intHex;
 	exports.intOct = intOct;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/core/schema.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/core/schema.js
 var require_schema$2 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var map = require_map();
 	var _null = require_null();
@@ -3065,8 +3029,7 @@ var require_schema$2 = /* @__PURE__ */ __commonJSMin(((exports) => {
 		float.float
 	];
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/json/schema.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/json/schema.js
 var require_schema$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Scalar = require_Scalar();
 	var map = require_map();
@@ -3127,8 +3090,7 @@ var require_schema$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 		}
 	});
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/binary.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/binary.js
 var require_binary = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var node_buffer = __require("buffer");
 	var Scalar = require_Scalar();
@@ -3183,8 +3145,7 @@ var require_binary = /* @__PURE__ */ __commonJSMin(((exports) => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/pairs.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/pairs.js
 var require_pairs = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var Pair = require_Pair();
@@ -3244,8 +3205,7 @@ var require_pairs = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.pairs = pairs;
 	exports.resolvePairs = resolvePairs;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/omap.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/omap.js
 var require_omap = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var toJS = require_toJS();
@@ -3309,8 +3269,7 @@ var require_omap = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.YAMLOMap = YAMLOMap;
 	exports.omap = omap;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/bool.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/bool.js
 var require_bool = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Scalar = require_Scalar();
 	function boolStringify({ value, source }, ctx) {
@@ -3336,8 +3295,7 @@ var require_bool = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.falseTag = falseTag;
 	exports.trueTag = trueTag;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/float.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/float.js
 var require_float = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Scalar = require_Scalar();
 	var stringifyNumber = require_stringifyNumber();
@@ -3380,8 +3338,7 @@ var require_float = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.floatExp = floatExp;
 	exports.floatNaN = floatNaN;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/int.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/int.js
 var require_int = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var stringifyNumber = require_stringifyNumber();
 	const intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -3453,8 +3410,7 @@ var require_int = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.intHex = intHex;
 	exports.intOct = intOct;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/set.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/set.js
 var require_set = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var Pair = require_Pair();
@@ -3522,8 +3478,7 @@ var require_set = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.YAMLSet = YAMLSet;
 	exports.set = set;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
 var require_timestamp = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var stringifyNumber = require_stringifyNumber();
 	/** Internal types handle bigint as number, because TS can't figure it out. */
@@ -3605,8 +3560,7 @@ var require_timestamp = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.intTime = intTime;
 	exports.timestamp = timestamp;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/yaml-1.1/schema.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/schema.js
 var require_schema = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var map = require_map();
 	var _null = require_null();
@@ -3645,8 +3599,7 @@ var require_schema = /* @__PURE__ */ __commonJSMin(((exports) => {
 		timestamp.timestamp
 	];
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/tags.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/tags.js
 var require_tags = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var map = require_map();
 	var _null = require_null();
@@ -3731,8 +3684,7 @@ var require_tags = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.coreKnownTags = coreKnownTags;
 	exports.getTags = getTags;
 }));
-//#endregion
-//#region node_modules/yaml/dist/schema/Schema.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/Schema.js
 var require_Schema = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var map = require_map();
@@ -3759,8 +3711,7 @@ var require_Schema = /* @__PURE__ */ __commonJSMin(((exports) => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/yaml/dist/stringify/stringifyDocument.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyDocument.js
 var require_stringifyDocument = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var stringify = require_stringify();
@@ -3821,8 +3772,7 @@ var require_stringifyDocument = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.stringifyDocument = stringifyDocument;
 }));
-//#endregion
-//#region node_modules/yaml/dist/doc/Document.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/Document.js
 var require_Document = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Alias = require_Alias();
 	var Collection = require_Collection();
@@ -4102,8 +4052,7 @@ var require_Document = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.Document = Document;
 }));
-//#endregion
-//#region node_modules/yaml/dist/errors.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/errors.js
 var require_errors = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var YAMLError = class extends Error {
 		constructor(name, pos, code, message) {
@@ -4155,8 +4104,7 @@ var require_errors = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.YAMLWarning = YAMLWarning;
 	exports.prettifyError = prettifyError;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/resolve-props.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-props.js
 var require_resolve_props = /* @__PURE__ */ __commonJSMin(((exports) => {
 	function resolveProps(tokens, { flow, indicator, next, offset, onError, parentIndent, startOnNewline }) {
 		let spaceBefore = false;
@@ -4262,8 +4210,7 @@ var require_resolve_props = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.resolveProps = resolveProps;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/util-contains-newline.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/util-contains-newline.js
 var require_util_contains_newline = /* @__PURE__ */ __commonJSMin(((exports) => {
 	function containsNewline(key) {
 		if (!key) return null;
@@ -4291,8 +4238,7 @@ var require_util_contains_newline = /* @__PURE__ */ __commonJSMin(((exports) => 
 	}
 	exports.containsNewline = containsNewline;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/util-flow-indent-check.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/util-flow-indent-check.js
 var require_util_flow_indent_check = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var utilContainsNewline = require_util_contains_newline();
 	function flowIndentCheck(indent, fc, onError) {
@@ -4303,8 +4249,7 @@ var require_util_flow_indent_check = /* @__PURE__ */ __commonJSMin(((exports) =>
 	}
 	exports.flowIndentCheck = flowIndentCheck;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/util-map-includes.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/util-map-includes.js
 var require_util_map_includes = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	function mapIncludes(ctx, items, search) {
@@ -4315,8 +4260,7 @@ var require_util_map_includes = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.mapIncludes = mapIncludes;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/resolve-block-map.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-block-map.js
 var require_resolve_block_map = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Pair = require_Pair();
 	var YAMLMap = require_YAMLMap();
@@ -4403,8 +4347,7 @@ var require_resolve_block_map = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.resolveBlockMap = resolveBlockMap;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/resolve-block-seq.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-block-seq.js
 var require_resolve_block_seq = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var YAMLSeq = require_YAMLSeq();
 	var resolveProps = require_resolve_props();
@@ -4448,8 +4391,7 @@ var require_resolve_block_seq = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.resolveBlockSeq = resolveBlockSeq;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/resolve-end.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-end.js
 var require_resolve_end = /* @__PURE__ */ __commonJSMin(((exports) => {
 	function resolveEnd(end, offset, reqSpace, onError) {
 		let comment = "";
@@ -4486,8 +4428,7 @@ var require_resolve_end = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.resolveEnd = resolveEnd;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/resolve-flow-collection.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-flow-collection.js
 var require_resolve_flow_collection = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var Pair = require_Pair();
@@ -4649,8 +4590,7 @@ var require_resolve_flow_collection = /* @__PURE__ */ __commonJSMin(((exports) =
 	}
 	exports.resolveFlowCollection = resolveFlowCollection;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/compose-collection.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/compose-collection.js
 var require_compose_collection = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var Scalar = require_Scalar();
@@ -4701,8 +4641,7 @@ var require_compose_collection = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.composeCollection = composeCollection;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/resolve-block-scalar.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-block-scalar.js
 var require_resolve_block_scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Scalar = require_Scalar();
 	function resolveBlockScalar(ctx, scalar, onError) {
@@ -4878,8 +4817,7 @@ var require_resolve_block_scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.resolveBlockScalar = resolveBlockScalar;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/resolve-flow-scalar.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-flow-scalar.js
 var require_resolve_flow_scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Scalar = require_Scalar();
 	var resolveEnd = require_resolve_end();
@@ -5083,8 +5021,7 @@ var require_resolve_flow_scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.resolveFlowScalar = resolveFlowScalar;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/compose-scalar.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/compose-scalar.js
 var require_compose_scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var identity = require_identity();
 	var Scalar = require_Scalar();
@@ -5144,8 +5081,7 @@ var require_compose_scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.composeScalar = composeScalar;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/util-empty-scalar-position.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/util-empty-scalar-position.js
 var require_util_empty_scalar_position = /* @__PURE__ */ __commonJSMin(((exports) => {
 	function emptyScalarPosition(offset, before, pos) {
 		if (before) {
@@ -5171,8 +5107,7 @@ var require_util_empty_scalar_position = /* @__PURE__ */ __commonJSMin(((exports
 	}
 	exports.emptyScalarPosition = emptyScalarPosition;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/compose-node.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/compose-node.js
 var require_compose_node = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Alias = require_Alias();
 	var identity = require_identity();
@@ -5262,8 +5197,7 @@ var require_compose_node = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.composeEmptyNode = composeEmptyNode;
 	exports.composeNode = composeNode;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/compose-doc.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/compose-doc.js
 var require_compose_doc = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var Document = require_Document();
 	var composeNode = require_compose_node();
@@ -5304,8 +5238,7 @@ var require_compose_doc = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.composeDoc = composeDoc;
 }));
-//#endregion
-//#region node_modules/yaml/dist/compose/composer.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/composer.js
 var require_composer = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var node_process = __require("process");
 	var directives = require_directives();
@@ -5502,8 +5435,7 @@ var require_composer = /* @__PURE__ */ __commonJSMin(((exports) => {
 	};
 	exports.Composer = Composer;
 }));
-//#endregion
-//#region node_modules/yaml/dist/parse/cst-scalar.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/cst-scalar.js
 var require_cst_scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var resolveBlockScalar = require_resolve_block_scalar();
 	var resolveFlowScalar = require_resolve_flow_scalar();
@@ -5769,8 +5701,7 @@ var require_cst_scalar = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.resolveAsScalar = resolveAsScalar;
 	exports.setScalarValue = setScalarValue;
 }));
-//#endregion
-//#region node_modules/yaml/dist/parse/cst-stringify.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/cst-stringify.js
 var require_cst_stringify = /* @__PURE__ */ __commonJSMin(((exports) => {
 	/**
 	* Stringify a CST document, token, or collection item
@@ -5820,8 +5751,7 @@ var require_cst_stringify = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.stringify = stringify;
 }));
-//#endregion
-//#region node_modules/yaml/dist/parse/cst-visit.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/cst-visit.js
 var require_cst_visit = /* @__PURE__ */ __commonJSMin(((exports) => {
 	const BREAK = Symbol("break visit");
 	const SKIP = Symbol("skip children");
@@ -5911,8 +5841,7 @@ var require_cst_visit = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 	exports.visit = visit;
 }));
-//#endregion
-//#region node_modules/yaml/dist/parse/cst.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/cst.js
 var require_cst = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var cstScalar = require_cst_scalar();
 	var cstStringify = require_cst_stringify();
@@ -5990,8 +5919,7 @@ var require_cst = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.prettyToken = prettyToken;
 	exports.tokenType = tokenType;
 }));
-//#endregion
-//#region node_modules/yaml/dist/parse/lexer.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/lexer.js
 var require_lexer = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var cst = require_cst();
 	function isEmpty(ch) {
@@ -6523,8 +6451,7 @@ var require_lexer = /* @__PURE__ */ __commonJSMin(((exports) => {
 	};
 	exports.Lexer = Lexer;
 }));
-//#endregion
-//#region node_modules/yaml/dist/parse/line-counter.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/line-counter.js
 var require_line_counter = /* @__PURE__ */ __commonJSMin(((exports) => {
 	/**
 	* Tracks newlines during parsing in order to provide an efficient API for
@@ -6570,8 +6497,7 @@ var require_line_counter = /* @__PURE__ */ __commonJSMin(((exports) => {
 	};
 	exports.LineCounter = LineCounter;
 }));
-//#endregion
-//#region node_modules/yaml/dist/parse/parser.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/parser.js
 var require_parser = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var node_process = __require("process");
 	var cst = require_cst();
@@ -7436,8 +7362,7 @@ var require_parser = /* @__PURE__ */ __commonJSMin(((exports) => {
 	};
 	exports.Parser = Parser;
 }));
-//#endregion
-//#region node_modules/yaml/dist/public-api.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/public-api.js
 var require_public_api = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var composer = require_composer();
 	var Document = require_Document();
@@ -7525,8 +7450,7 @@ var require_public_api = /* @__PURE__ */ __commonJSMin(((exports) => {
 	exports.parseDocument = parseDocument;
 	exports.stringify = stringify;
 }));
-//#endregion
-//#region src/wecom-cli.ts
+// src/wecom-cli.ts
 /**
 * Locate the bundled wecom-cli binary, keep it on PATH, probe auth, and load
 * official wecomcli-* SKILL.md files from a managed directory.
@@ -8369,8 +8293,7 @@ function splitFrontmatter(text) {
 		body: text.slice(match[0].length)
 	};
 }
-//#endregion
-//#region src/wecom.ts
+// src/wecom.ts
 /** Default stream-animation copy; Config / cordis patch may override. */
 const DEFAULT_THINKING = {
 	phases: [
@@ -8561,8 +8484,111 @@ async function sendFinal(ws, frame, streamId, content) {
 		await ws.replyStream(frame, generateReqId("stream"), content, true);
 	}
 }
-//#endregion
-//#region src/index.ts
+/** PNG signature: `89 50 4E 47 0D 0A 1A 0A`. */
+const PNG_SIGNATURE = [
+	137,
+	80,
+	78,
+	71,
+	13,
+	10,
+	26,
+	10
+];
+/** JPEG signature: `FF D8 FF` (every JFIF/EXIF variant starts this way). */
+const JPEG_SIGNATURE = [
+	255,
+	216,
+	255
+];
+/** GIF signature: `GIF87a` / `GIF89a` share the first four bytes `GIF8`. */
+const GIF_SIGNATURE = [
+	71,
+	73,
+	70,
+	56
+];
+/** RIFF container prefix (`RIFF` + 4-byte little-endian size). */
+const RIFF_SIGNATURE = [
+	82,
+	73,
+	70,
+	70
+];
+/** WebP form type at offset 8. */
+const WEBP_FORM_TYPE = [
+	87,
+	69,
+	66,
+	80
+];
+/**
+* Whether `bytes` begins with `signature` at `offset`.
+* @param bytes - raw file bytes.
+* @param signature - expected byte values.
+* @param offset - first index to compare (default `0`).
+* @returns `true` when every signature byte matches.
+*/
+function matchesAt(bytes, signature, offset = 0) {
+	if (bytes.length < offset + signature.length) return false;
+	for (let index = 0; index < signature.length; index += 1) if (bytes[offset + index] !== signature[index]) return false;
+	return true;
+}
+/**
+* Type an image by its magic number, ignoring file names and extensions.
+*
+* WeCom hands the bridge raw decrypted bytes, so the declared extension is not
+* trustworthy (a `.bmp` name may carry PNG bytes, or nothing at all). Only the
+* four formats the Agent path accepts are recognised; anything else — including
+* truncated or empty input — yields `undefined` so the caller can reply with a
+* friendly "unsupported" message instead of forwarding garbage.
+* @param bytes - raw image bytes (first 12 bytes are enough, more is fine).
+* @returns the media type, or `undefined` when the signature is unknown.
+*/
+function detectImageMediaType(bytes) {
+	if (matchesAt(bytes, PNG_SIGNATURE)) return "image/png";
+	if (matchesAt(bytes, JPEG_SIGNATURE)) return "image/jpeg";
+	if (matchesAt(bytes, GIF_SIGNATURE)) return "image/gif";
+	if (matchesAt(bytes, RIFF_SIGNATURE) && matchesAt(bytes, WEBP_FORM_TYPE, 8)) return "image/webp";
+}
+/** Reply when an attachment error carries no code we recognise. */
+const GENERIC_IMAGE_ERROR_TEXT = "图片处理失败，请重发一次";
+/**
+* Chinese replies keyed by `dsh-attachment`'s `ATTACHMENT_ERROR_CODES`.
+*
+* Only the codes the bridge can actually receive are listed; the remaining
+* codes (`INVALID_IMAGE_BASE64`) and any future code fall through to
+* {@link GENERIC_IMAGE_ERROR_TEXT}. Keys must match the real enum — inventing
+* names here silently degrades every failure to the generic sentence.
+*/
+const IMAGE_ERROR_MESSAGES = {
+	IMAGE_TOO_LARGE: "单张图片太大（上限 20MB），请压缩后再发",
+	TOO_MANY_IMAGES: "图片数量超出上限，请减少后重发",
+	IMAGES_TOO_LARGE: "图片总体积超出上限，请减少数量或压缩后重发",
+	IMAGE_TOO_MANY_PIXELS: "图片像素总量过高（上限 6400 万像素），请缩小后再发",
+	IMAGE_DIMENSION_TOO_LARGE: "图片宽高超出上限，请缩小尺寸后再发",
+	UNSUPPORTED_IMAGE_TYPE: "不支持该图片格式，请转成 PNG/JPEG/GIF/WebP",
+	INVALID_IMAGE: "图片文件无法解析，请重发或换一张",
+	IMAGE_TYPE_MISMATCH: "图片内容与声明格式不一致，请重发或换一张"
+};
+/**
+* Map an `AttachmentError` (or any thrown value) onto a Chinese reply.
+*
+* Reads `error.code` defensively: unknown codes, non-string codes, `null` and
+* non-object throwables all fall back to a generic sentence, and nothing here
+* throws — the inbound handler can call this inside its own `catch` without a
+* second failure path.
+* @param error - anything caught from `ctx.attachments.saveImage()`.
+* @returns one Chinese sentence safe to send back to the chat.
+*/
+function imageLimitMessage(error) {
+	if (typeof error !== "object" || error === null) return GENERIC_IMAGE_ERROR_TEXT;
+	const code = error.code;
+	if (typeof code !== "string") return GENERIC_IMAGE_ERROR_TEXT;
+	if (!Object.hasOwn(IMAGE_ERROR_MESSAGES, code)) return GENERIC_IMAGE_ERROR_TEXT;
+	return IMAGE_ERROR_MESSAGES[code];
+}
+// src/index.ts
 /**
 * dsh-im-bridge — WeCom AI bot ⇄ DSH Agent host plugin.
 *
@@ -8634,6 +8660,7 @@ const Config = z.object({
 	personaFile: z.string().default(""),
 	maxReplyBytes: z.number().default(2e4),
 	thinking: ThinkingSchema.default(DEFAULT_THINKING),
+	imageEnabled: z.boolean().default(true),
 	deniedMessage: z.string().default("无权访问本服务"),
 	welcomeMessage: z.string().default("👋 办公助手已就绪。直接发消息即可，例如查文件、整理文档、查资料或处理日常事务。"),
 	wecomCli: WecomCliSchema.default({
@@ -9452,7 +9479,88 @@ function apply(ctx, config) {
 			}
 		});
 		const { default: AiBot, generateReqId } = await import("@wecom/aibot-node-sdk");
-		async function handle(frame, ref, content, binding, sessionKey) {
+		/**
+		* Gate image input on the configured model's declared input modalities.
+		* Absent metadata means "unknown", which stays allowed; an explicit list
+		* without `image` is negative capability and must not reach the model.
+		* @returns the Chinese reply, or undefined when the image may be forwarded.
+		*/
+		async function imageCapabilityBlocker() {
+			const llm = ctx.get("llm");
+			if (llm === void 0) {
+				console.warn("[im-bridge] llm 服务不可用，无法校验看图能力");
+				return "模型服务不可用，暂时无法接收图片";
+			}
+			const selection = resolveSelection(cfg(), defaultModel);
+			try {
+				const info = await llm.resolveModelInfo(selection.provider, selection.model);
+				if (info.inputModalities !== void 0 && !info.inputModalities.includes("image")) return `当前模型 ${selection.model} 不支持看图，请切换模型后重试`;
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.warn(`[im-bridge] 读取模型能力失败: ${message}`);
+				return "无法确认当前模型是否支持看图，请稍后重试";
+			}
+		}
+		/**
+		* Turn one already-started image download into a durable attachment:
+		* await → magic-number check → capability gate → `attachments.saveImage`.
+		* Never throws; every failure becomes a Chinese reply.
+		* @param image - download promise started by the event callback.
+		* @returns the durable reference or the reply to send instead.
+		*/
+		async function prepareInboundImage(image) {
+			let buffer;
+			let filename;
+			try {
+				({buffer, filename} = await image.download);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.warn(`[im-bridge] 图片下载失败: ${message}`);
+				return {
+					ok: false,
+					reply: "图片下载失败，请重发一次"
+				};
+			}
+			const mediaType = detectImageMediaType(buffer);
+			if (mediaType === void 0) {
+				console.warn("[im-bridge] 收到不支持的图片格式，已拒绝");
+				return {
+					ok: false,
+					reply: "不支持该图片格式，请转成 PNG/JPEG/GIF/WebP 后重发"
+				};
+			}
+			const blocker = await imageCapabilityBlocker();
+			if (blocker !== void 0) return {
+				ok: false,
+				reply: blocker
+			};
+			const attachments = ctx.get("attachments");
+			if (attachments === void 0) {
+				console.warn("[im-bridge] attachments 服务不可用，无法接收图片");
+				return {
+					ok: false,
+					reply: "附件服务不可用，暂时无法接收图片"
+				};
+			}
+			try {
+				return {
+					ok: true,
+					ref: await attachments.saveImage({
+						data: buffer,
+						mediaType,
+						name: filename
+					})
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.warn(`[im-bridge] 保存图片失败: ${message}`);
+				return {
+					ok: false,
+					reply: imageLimitMessage(error)
+				};
+			}
+		}
+		async function handle(frame, ref, content, binding, sessionKey, image) {
 			let st = chats.get(sessionKey);
 			if (st === void 0) {
 				st = emptyChatState();
@@ -9461,6 +9569,15 @@ function apply(ctx, config) {
 			st.office = senderHasOfficeAccess(cfg().wecomCli.allowFrom, ref.sender);
 			st.sender = ref.sender;
 			st.chatid = ref.chatid;
+			let imageRef;
+			if (image !== void 0) {
+				const prepared = await prepareInboundImage(image);
+				if (!prepared.ok) {
+					await replyCommand(frame, prepared.reply);
+					return;
+				}
+				imageRef = prepared.ref;
+			}
 			st = await ensureAgent(ref, binding, sessionKey);
 			const startedAt = Date.now();
 			const streamId = generateReqId("stream");
@@ -9492,11 +9609,16 @@ function apply(ctx, config) {
 				if (st.agent === void 0) throw new Error("im-bridge: chat agent missing");
 				await st.agent.whenIdle();
 				const firstSeq = st.agent.session.seq;
+				const blocks = [{
+					type: "text",
+					text: content || "（用户发送了图片，请结合图片回答）"
+				}];
+				if (imageRef !== void 0) blocks.push({
+					type: "image",
+					attachment: imageRef
+				});
 				st.agent.followup(createUserMessage({
-					content: [{
-						type: "text",
-						text: content
-					}],
+					content: blocks,
 					source: { kind: "user" }
 				}));
 				await st.agent.whenIdle();
@@ -9679,10 +9801,16 @@ function apply(ctx, config) {
 		ws.on("disconnected", ((reason) => console.log(`[im-bridge] 断开: ${reason}`)));
 		ws.on("reconnecting", ((n) => console.log(`[im-bridge] 第 ${n} 次重连...`)));
 		ws.on("error", ((error) => console.error(`[im-bridge] 错误: ${error.message}`)));
-		ws.on("message.text", ((frame) => {
-			const inbound = (frame.body?.text?.content || "").trim();
-			if (!inbound) return;
-			const content = stripBotMention(inbound);
+		/**
+		* Shared inbound route for text and image messages: resolve the window,
+		* apply `allowFrom`, pick the workspace binding, then enqueue on that
+		* session's queue. Text-only `/ws` commands are parsed before queueing;
+		* an image message never carries a command.
+		* @param frame - raw WeCom frame (used for routing and replies).
+		* @param content - stripped text; empty for an image message.
+		* @param image - image download already in flight, when this is a picture.
+		*/
+		function dispatchInbound(frame, content, image) {
 			let ref;
 			try {
 				ref = resolveWecomSession(frame);
@@ -9698,15 +9826,22 @@ function apply(ctx, config) {
 				ws.replyStream(frame, generateReqId("stream"), cfg().deniedMessage, true).catch(() => {});
 				return;
 			}
-			console.log(`[im-bridge] 收到 key=${ref.key} userid=${ref.sender} chattype=${String(frame.body?.chattype ?? "")} chatid=${ref.chatid ?? ""}: ${content.slice(0, 100)}`);
-			const command = parseWorkspaceCommand(content);
-			if (command !== void 0) {
-				handleWorkspaceCommand(frame, ref, command).catch((error) => {
-					const message = error instanceof Error ? error.message : String(error);
-					console.error(`[im-bridge] 工作区命令异常: ${message}`);
-					ws.replyStream(frame, generateReqId("stream"), `工作区命令执行失败：${truncate(message, 300)}`, true).catch(() => {});
-				});
+			if (image !== void 0 && !cfg().imageEnabled) {
+				ws.replyStream(frame, generateReqId("stream"), "本通道未开启图片", true).catch(() => {});
 				return;
+			}
+			const summary = image === void 0 ? content.slice(0, 100) : "[图片]";
+			console.log(`[im-bridge] 收到 key=${ref.key} userid=${ref.sender} chattype=${String(frame.body?.chattype ?? "")} chatid=${ref.chatid ?? ""}: ${summary}`);
+			if (image === void 0) {
+				const command = parseWorkspaceCommand(content);
+				if (command !== void 0) {
+					handleWorkspaceCommand(frame, ref, command).catch((error) => {
+						const message = error instanceof Error ? error.message : String(error);
+						console.error(`[im-bridge] 工作区命令异常: ${message}`);
+						ws.replyStream(frame, generateReqId("stream"), `工作区命令执行失败：${truncate(message, 300)}`, true).catch(() => {});
+					});
+					return;
+				}
 			}
 			const binding = activeBindingFor(ref.key);
 			const defaultBinding = currentDefaultBinding();
@@ -9715,10 +9850,25 @@ function apply(ctx, config) {
 			const st = chats.get(sessionKey) ?? emptyChatState();
 			st.kind = ref.kind;
 			chats.set(sessionKey, st);
-			st.queue = st.queue.then(() => handle(frame, ref, content, binding, sessionKey)).catch((error) => {
+			st.queue = st.queue.then(() => handle(frame, ref, content, binding, sessionKey, image)).catch((error) => {
 				const message = error instanceof Error ? error.message : String(error);
 				console.error(`[im-bridge] 任务异常: ${message}`);
 			});
+		}
+		ws.on("message.text", ((frame) => {
+			const inbound = (frame.body?.text?.content || "").trim();
+			if (!inbound) return;
+			dispatchInbound(frame, stripBotMention(inbound));
+		}));
+		ws.on("message.image", ((frame) => {
+			const source = frame.body?.image;
+			if (source?.url === void 0 || source.url === "") {
+				console.warn("[im-bridge] 图片消息缺少下载地址，已忽略");
+				return;
+			}
+			const download = ws.downloadFile(source.url, source.aeskey);
+			download.catch(() => {});
+			dispatchInbound(frame, "", { download });
 		}));
 		ws.on("event.enter_chat", ((frame) => {
 			const sender = frame.body?.from?.userid || "unknown";
@@ -9739,5 +9889,4 @@ function apply(ctx, config) {
 		}, "im-bridge: wecom websocket");
 	})();
 }
-//#endregion
 export { Config, IM_BRIDGE_NS, apply, inject, name };

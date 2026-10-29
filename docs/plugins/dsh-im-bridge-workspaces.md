@@ -4,7 +4,7 @@
 > 提炼（2026-10-17，仓库统一治理 issue #1）。使用者文档仍以该 README 为准。
 
 - 目录：`dsh-im-bridge-workspaces/`　包名：**`@mhfire/dsh-im-bridge`**（目录名 ≠ 包名）
-- 来源：**fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`，本地 fork 版本 `0.4.4-ws.2`；
+- 来源：**fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`，本地 fork 版本 `0.4.4-ws.3`；
   上游原版说明见 `README.upstream.md`。
 - 改动范围：只加**多工作区列表与 `/ws` 切换**；其余行为（按企微窗口建 Agent、单聊一人一条、
   群聊共用一条、Settings 配置卡片、wecom-cli 办公层）与上游一致。
@@ -110,3 +110,60 @@ node --check lib/index.js       # 产物语法检查
   `cordis.patch.yml` 的 `id` / `name` 都不用改）。
 - 回滚：把依赖改回 `"0.4.4"` → `pnpm install` → 重启 DSH。
   `~/.dsh/dsh-im-bridge/workspace-bindings.json` 可保留（上游不读它）。
+
+## 图片接收（v1，issue #76）
+
+**结论**：通道是智能机器人长连接，图片走 `message.image`（`{ image: { url, aeskey } }`，
+url 5 分钟有效），SDK 自带 `ws.downloadFile(url, aesKey)` 做 AES 解密并返回 `Buffer`。
+**不需要 corpsecret / wecom-cli 权限**。默认模型 `opencode-go/deepseek-v4.1-flash`
+已声明 `input: [text, image]`，看图能力现成。
+
+### 新增/改动
+
+| 文件 | 职责 |
+|---|---|
+| `src/wecom-image.ts`（新） | 纯函数：`detectImageMediaType(bytes)` 魔数判 png/jpeg/webp/gif；`imageLimitMessage(error)` 把 `AttachmentError.code` 映射成中文；`IMAGE_PLACEHOLDER_TEXT` 占位文本 |
+| `src/index.ts` | 注册 `ws.on('message.image')`；把 `message.text` 回调体抽成共享 `dispatchInbound`；`handle()` 增加图片参数；`attachments.saveImage()`；模型能力闸门 |
+| `test/wecom-image.test.ts`（新） | 上述纯函数单测 |
+| `cordis.patch.yml` + `README.md` | `imageEnabled` 默认值与用法/限制说明 |
+
+### 数据流
+
+```
+message.image → 立即 ws.downloadFile(url, aeskey)（守 5 分钟有效期）
+             → detectImageMediaType(buffer)（不支持则友好拒绝）
+             → ctx.attachments.saveImage({ data, mediaType, name })
+             → ImageAttachmentRef
+             → createUserMessage({ content: [{type:'text', text}, {type:'image', attachment: ref}] })
+             → st.agent.followup(...)
+```
+
+**顺序纪律**：回调里**立即启动**下载（拿到 promise），把 promise 交给该会话的 `st.queue`
+再 await —— 既守住 URL 有效期，又不打乱文本/图片的到达顺序。
+
+### 能力闸门
+
+`ctx.get('llm')?.resolveModelInfo(sel.provider, sel.model)` 的 `inputModalities` 若已定义且不含
+`image`，直接回「当前模型不支持看图」——与 GUI（`dsh-api-session-controller` 的 `prompt()`）
+一致。**不要**让 DSH 静默投影成文本句柄，那会让模型"看不见却照常作答"。
+
+### 错误矩阵（必须全部落到中文提示，不得静默）
+
+| 情况 | 回复 |
+|---|---|
+| 下载/解密失败、url 过期 | 「图片下载失败，请重发一次」 |
+| 魔数不在 png/jpeg/webp/gif | 「不支持该图片格式，请转成 PNG/JPEG」 |
+| `AttachmentError`（`IMAGE_TOO_LARGE` 等） | 按 code 映射中文（含 DSH 默认 20MB/张、64MP） |
+| `ctx.attachments` 不可用 | 「附件服务不可用」 |
+| `imageEnabled=false` | 「本通道未开启图片」 |
+
+### 配置
+
+`imageEnabled`（默认 `true`）——总开关。`Config` interface + schema + `cordis.patch.yml` 三处同步。
+
+### 验收
+
+- `pnpm test` 全绿（新增用例覆盖：四种格式、伪扩展名、超限 code 映射）。
+- `pnpm run build:host` → `node --check lib/index.js` 通过。
+- 手工（需真机）：单聊/群聊发图 → Agent 描述图片；切纯文本模型发图 → 明确提示；`/ws` 命令不回归。
+- 不在本次范围：`message.mixed`、`quote.image`、`message.file`、语音。
