@@ -1,6 +1,6 @@
 {
   "name": "@mhfire/dsh-im-bridge",
-  "version": "0.4.4-ws.1",
+  "version": "0.4.4-ws.2",
   "description": "企业微信智能机器人 ⇄ DeepSeek Harness Agent 桥接插件（本地 fork：新增 /ws 工作区列表与切换）：进程内按企微窗口创建 Agent（单聊一人一条、同一群共用一条），会话在 GUI 实时可见；含 Settings 插件配置卡片",
   "license": "MIT",
   "repository": {
@@ -48,22 +48,30 @@
         "@deepseek-ai/dsh-api-remotes"
       ],
       "platform": "web"
+    },
+    "compatibility": {
+      "dsh": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+      "dshReleases": {
+        "0.2.1-rc.2": "compatible",
+        "0.2.1-rc.4": "compatible",
+        "0.2.2-alpha.2": "incompatible"
+      }
     }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-client-locale": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-client-store": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-plugin-manager": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-primitives": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-settings": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-session-title": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-agent": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-client-locale": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-client-store": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-llm": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-session": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-session-title": "^0.2.1-rc.2 || ^0.2.1-rc.4",
+    "@deepseek-ai/dsh-settings": "^0.2.1-rc.2 || ^0.2.1-rc.4",
     "@deepseek-ai/schemastery": "*"
   },
   "peerDependenciesMeta": {
