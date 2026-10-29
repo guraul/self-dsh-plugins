@@ -71,34 +71,14 @@
    `scripts/pipeline/open-pr.sh` → **拿到用户对 review 的明确同意**后 `scripts/pipeline/merge-pr.sh`。
    **禁止直接改 main 并 push。** worktree 与分支命名契约、清理纪律见
    [`docs/pipeline/README.md`](./docs/pipeline/README.md)。
-4. **subagent 委派约定**（照 agent-mobile 规则 11/12/13 适配；2026-10-23 按用户要求扩写）：
-   - **职责二分**：**DSH 主模型 = 控制面**（编排 / 决策 / 审阅 / 验收）；**opencode 子代理 = 执行面**
-     （改代码 / 跑门禁 / 探查 / 实现）。
-   - **必须委派（执行类，不论仓库与任务大小）**：改代码、跑门禁（`node --test` / `scripts/lint.js`）、
-     建 worktree、提交、push、开 PR、`merge-pr.sh` 的执行、生产脚本执行、`gh` / `git` 远端操作。
-     **「小改动」不构成自做的理由**——「改个默认值 + 同步文档 + 改测试断言」这类多文件编辑同样属执行类。
-   - **主模型自己做（控制面）**：产品决策与拍板、审阅 diff、「用户 review 完成」的人在环确认、验收、
-     交底书 / 知识库 / **规则文件（含本 `AGENTS.md`）落档**、单条只读小探针（一条 `rg` / `cat` 能答的）。
-   - **人在环不可外包**：`merge-pr.sh` 的执行可以委派，但**合并前必须由控制面拿到用户的明确同意**再发。
-   - **模型逐次显式传**（角色库不 pin 模型；`product_roles` 四角色只有 `provider`，无 `model`）。
-     **opencode 回退链（按序尝试；仅限流 / 429 / 偶发不通时逐档下移）**：
-     1. `opencode/deepseek-v4.1-flash-free`
-     2. `opencode/glm-5.3-flash-free`
-     3. `opencode/mimo-v2.6-flash-free`
-   - **opencode 整链不可用 → 改委派 codebuddy**：`provider: codebuddy`，model 写 `codebuddy/<alias>`
-     （如 `codebuddy/deepseek-v4.1-flash`）。⚠️ 它消耗 **WorkBuddy 账号额度**，委派前先告知用户。
-   - **codebuddy 也不可用时**：**停下报告**（哪条链、哪一档、原始错误），**请求用户授权**；
-     **不得自行接手执行**。方向性要求见下一条「临时授权」。
-   - **非限流故障**（鉴权失败、模型不存在、报错、无响应）：**立即停下报告**，
-     不降级、不换 provider、不绕道（含「先用别的模型顶一下」）。**宁可失败并如实报告，不可静默降质。**
-   - **model id 必须写全 `provider/model` 形式**：写裸名会落到会话默认模型
-     （`opencode/mimo-v2.6-flash-free`），表现为「指定了但没生效」。
-   - **临时授权仅对当次任务有效**（用户 2026-10-23 明确）：「你自己做了吧」这类授权**不构成长期许可**；
-     下一次执行类工作仍按本条委派。确实需要自做时必须**逐次**取得授权，并在回复里**明示**
-     「本次自做，原因：…」。
-   - **并发纪律**：大任务只起一个子代理（不拆并行）；**验证可以自己做**。
-   - 委派一律用**任务书六段式**：背景 / 步骤（可直接复制的命令 + 期望输出）/ 红线 /
-     交付（原始输出 + 退出码，不许折叠成摘要）/ 材料与已知坑 / 模型不可用怎么办。
+4. **subagent 委派约定**（**通用规则以 `agent-mobile/AGENTS.md` 规则 11/12/13 为单一真源**；本条只写本仓特有部分，避免两处漂移）：
+   - **职责二分 / 必须委派 / 主模型自做边界 / 人在环**：照 agent-mobile 规则 11。
+   - **模型与 provider 策略**：照 agent-mobile 规则 12——唯一档 `opencode/deepseek-v4.1-flash-free`；**opencode 不可用才改 codebuddy（例外，不是备选）**：`provider=codebuddy` + `model=deepseek-v4.1-flash`，⚠️ 消耗 **WorkBuddy 账号额度** → **委派前必须告知用户**并写明原始错误；**不预探活**、**恢复即回默认**、**可审计**（回复里能看出 provider）、**自检信号**（用户反问"为什么又用 codebuddy"= 规则失效）；**两条都挂 → 停下报告 + 请求授权 + 不得自行接手**（自做须逐次授权并明示）。
+   - **任务体量 / 粒度 / 验收证据 / 失败判据 / `opencode run` 必须带 `--model`**：照 agent-mobile 规则 12 对应子条（≤300 字 + 指针；一个行为一个 PR ≤10 分钟；不写死基线；验收要可核验证据，不接受自述）。
+   - **本仓特有**：
+     - 门禁：`node --test` + `node scripts/lint.js`；CI 见 `.github/workflows/`。
+     - **执行面合规审计**：`node scripts/pipeline/audit-subagents.mjs --hours 24`（确定性、只读、不花模型调用）——检「preset 漂移」「子代理本地自执行」「未走产品路径」，异常 exit 1。模板 `.dsh-web/com.deepseek.dsh-audit.plist` **未自动加载**，需手动装 LaunchAgent。
+     - **打断语义**：`interrupt_agent` 会让远端**立刻停**（发 ACP `session/cancel`），但进程按 `idleTimeoutMs`（默认 10 分钟）回收——**别把 `opencode acp` 赖着当泄漏**；详见 `dsh-plugin-product-subagents/README.md` §Interrupting a delegation（issue #12 实测）。
 5. **禁止随意重启 dsh web**（重启会终止当前会话）；需要时用
    [`.dsh-web/restart-once.sh`](./.dsh-web/restart-once.sh)。同理：不要自作主张执行
    `dsh plugin add/remove`、`npm install -g`——都要先拿到用户明确同意。
