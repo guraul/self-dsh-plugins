@@ -27,6 +27,9 @@
 - `includePrerelease: true` 下 `^0.2.1-rc.2` 已经覆盖 `0.2.1-rc.4` 甚至 `0.2.2-alpha.2`；
   之所以之前升不上去，是因为那些 peer 写的是**精确版本** `0.2.1-rc.2`，不是 range。
   仍然按"每个验过的 patch 线单独锚点"写，是为了让**验过哪些版本**在声明里一眼可见。
+- ⚠️ 反过来说：**只要用 `^`，`0.2.2-alpha.2` 就会被门禁顺带放行**（即使声明里没写它）。
+  想真正挡住某个预发布线得显式写 `<0.2.2-0`。所以"声明没写"≠"装不上"——矩阵里的
+  `incompatible` 是**我们自己的 verdict**，不保证门禁会拦。
 
 ## 矩阵
 
@@ -34,7 +37,7 @@
 |---|---|---|---|---|---|
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.4.4-ws.2` | `0.2.1-rc.2` | ✅ 通过 | 2026-10-29 | 一次性 `DSH_HOME`：`plugin --profile headless add` + `--dump-config` grep + headless 启动看到插件自身日志 |
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.4.4-ws.2` | `0.2.1-rc.4` | ✅ 通过 | 2026-10-29 | 同上（headless 启动输出 `[im-bridge] workspaceRegistry 不可用…` / `[im-bridge] 跳过启动: 缺少 botId/secret…`） |
-| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.4.4-ws.2` | `0.2.2-alpha.2` | ✅ 通过（装配/加载）<br>⚠️ 降级：`reasoningEffort` | 2026-10-29 | 同上；语义差异见文末"已知差异" |
+| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.4.4-ws.2` | `0.2.2-alpha.2` | ❌ **不兼容（未放宽）**<br>装配/加载可过，但 `tsc` 报 `TS2554`，且 `reasoningEffort` 静默失效 | 2026-10-29 | 一次性 `DSH_HOME` 装配 + headless 启动均通过；**CI 解析到 alpha.2 类型后 `pnpm run typecheck` 失败** → 见文末「已知差异」 |
 
 **未验证的版本不要写进表**。验不过的版本按下面"失败时怎么记"处理。
 
@@ -72,10 +75,11 @@ DSH_HOME="$H" pnpm dlx @deepseek-ai/dsh@<V> --profile headless 2>&1 | head -20
 ## 失败时怎么记
 
 - 装配失败 → **该版本不加锚点**，本表对应行结果写"❌ 失败"并附原始报错摘要。
-- 装配通过但有语义降级 → 结果列写"✅ 通过（装配/加载）+ ⚠️ 降级：<具体项>"，并在文末"已知差异"写清影响面。
+- 装配通过但**编译/测试过不去**或**语义降级** → 同样**不加锚点**，结果写
+  "❌ 不兼容（未放宽）"，并在文末"已知差异"写清证据与影响面。
 - **任何情况下都不许用版本豁免把失败版本"变绿"**；也不许为了让门禁过而加 `engines.dsh`。
 
-## 已知差异（`@mhfire/dsh-im-bridge` vs `0.2.2-alpha.2`）
+## 已知差异（`@mhfire/dsh-im-bridge` vs `0.2.2-alpha.2`，因此未放宽）
 
 `@deepseek-ai/dsh-agent` 的 `installModelSelection` 在 `0.2.2-alpha.2` 改了签名：
 
@@ -84,11 +88,22 @@ DSH_HOME="$H" pnpm dlx @deepseek-ai/dsh@<V> --profile headless 2>&1 | head -20
 | `0.2.1-rc.2` / `0.2.1-rc.4` | `installModelSelection(agentCtx, selection: ModelSelectionRef)` | 第二个参数**驱动**每次请求的 `provider` / `model` / `reasoningEffort`（挂在 `agent/request` + `system-prompt/assemble` 上） |
 | `0.2.2-alpha.2` | `installModelSelection(agentCtx)` | 第二个参数被移除，只剩"切换模型时插一条 notice"；路由改由 Session projection（`AgentModel`）决定 |
 
-插件 `src/index.ts` 仍按旧签名调用 `installModelSelection(agentCtx, selected)`。在 `0.2.2-alpha.2` 上：
+插件 `src/index.ts:1285` 仍按旧签名调用 `installModelSelection(agentCtx, selected)`。
 
-- 多传的参数被 JS 忽略，**不会报错、不会崩溃**，插件照常加载（已实测）；
-- `provider` / `model` 仍然生效——插件同时把它们作为 `agentOptions` 传给了 `agents.create` / `resume`；
-- **`reasoningEffort` 配置项会静默失效**（它只在那个被忽略的 selection 里传递）。
-  只在用户显式填了非空 `reasoningEffort` 时才有影响；未填时行为不变。
+**实测结论（两类证据）**：
 
-要彻底对齐需要在插件侧按 dsh 版本分支（或改用 `AgentModel` 的投影路径），属独立任务，本次**只放宽声明不改编排逻辑**。
+1. **运行期**：一次性 `DSH_HOME` 装配 + headless 启动**都通过**，插件照常加载
+   （多传的参数被 JS 忽略，不报错、不崩溃）。`provider` / `model` 仍生效——插件同时把它们作为
+   `agentOptions` 传给了 `agents.create` / `resume`。
+2. **编译期**：把 alpha.2 写成锚点后，CI 的 `pnpm install` 会把 `@deepseek-ai/dsh-agent`
+   解析到 `0.2.2-alpha.2`（range 里显式点名它就等于给它最高优先级），于是 `pnpm run typecheck` 直接红：
+   ```
+   src/index.ts(1285,41): error TS2554: Expected 1 arguments, but got 2.
+   ```
+3. **语义**：`reasoningEffort` 配置项在 alpha.2 上会静默失效（它只在那个被忽略的 selection 里传递）。
+   只在用户显式填了非空 `reasoningEffort` 时才有影响。
+
+所以 `0.2.2-alpha.2` 记为 `incompatible`、**不加锚点**。要支持它需要真正改编排逻辑——
+`0.2.2-alpha.2` 的 `AgentOptions` 已支持 `reasoningEffort`，方向是把它随 `agentOptions` 传下去，
+并只调用单参数的 `installModelSelection(agentCtx)`；但这要按版本分支、且无法在当前环境做 GUI 端到端验证，
+属独立任务。
