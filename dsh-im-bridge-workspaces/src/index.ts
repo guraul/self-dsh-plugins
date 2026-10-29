@@ -94,6 +94,11 @@ import {
   truncate,
   type ThinkingConfig,
 } from './wecom.ts'
+import {
+  IMAGE_PLACEHOLDER_TEXT,
+  detectImageMediaType,
+  imageLimitMessage,
+} from './wecom-image.ts'
 
 /** Package root (persona files live beside package.json). */
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -175,6 +180,8 @@ export interface Config {
   personaFile: string
   maxReplyBytes: number
   thinking: ThinkingConfig
+  /** Accept inbound images from the bot's long connection. */
+  imageEnabled: boolean
   deniedMessage: string
   welcomeMessage: string
   wecomCli: WecomCliConfig
@@ -199,6 +206,7 @@ export const Config = z.object({
   personaFile: z.string().default(''),
   maxReplyBytes: z.number().default(20000),
   thinking: ThinkingSchema.default(DEFAULT_THINKING),
+  imageEnabled: z.boolean().default(true),
   deniedMessage: z.string().default('无权访问本服务'),
   welcomeMessage: z.string().default('👋 办公助手已就绪。直接发消息即可，例如查文件、整理文档、查资料或处理日常事务。'),
   wecomCli: WecomCliSchema.default({ enabled: false, skillsDir: '', configDir: '', allowFrom: [] }),
@@ -302,6 +310,41 @@ interface HostConnectionRpc {
 interface DefaultModel {
   currentSelection(): ModelSelection
 }
+
+/** Durable image reference returned by the attachment service. */
+interface ImageAttachmentRef {
+  attachmentId: string
+  mediaType: string
+  bytes: number
+  width: number
+  height: number
+  name?: string
+}
+
+/** The read/write face of `ctx.attachments` this bridge needs (optional service). */
+interface AttachmentStore {
+  saveImage(input: {
+    data: Uint8Array
+    mediaType: string
+    name?: string
+  }): Promise<ImageAttachmentRef>
+}
+
+/** The model-capability query this bridge needs (optional service). */
+interface LlmService {
+  resolveModelInfo(provider: string, model: string): Promise<{ inputModalities?: readonly string[] }>
+}
+
+/** One inbound image whose download already started in the event callback. */
+interface InboundImage {
+  /** `ws.downloadFile` promise; awaited inside the session queue, not before. */
+  download: Promise<{ buffer: Buffer; filename?: string }>
+}
+
+/** Prompt content the bridge builds for one inbound message. */
+type InboundContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; attachment: ImageAttachmentRef }
 
 interface AgentRegistry {
   get(id: ReturnType<typeof SessionId>): LiveAgent | undefined
@@ -435,6 +478,7 @@ interface LoaderTree {
 interface WecomFrame {
   body?: {
     text?: { content?: string }
+    image?: { url?: string; aeskey?: string }
     sender?: { userid?: string }
     from?: { userid?: string }
     userid?: string
@@ -446,6 +490,8 @@ interface WecomFrame {
 interface WecomClient {
   replyStream(frame: unknown, streamId: string, content: string, finish: boolean): Promise<unknown>
   replyWelcome(frame: unknown, payload: { msgtype: string; text: { content: string } }): Promise<unknown>
+  /** Download and AES-decrypt one inbound media file (the URL lives for five minutes). */
+  downloadFile(url: string, aesKey?: string): Promise<{ buffer: Buffer; filename?: string }>
   uploadMedia(
     fileBuffer: Buffer,
     options: { type: string; filename: string },
@@ -1387,12 +1433,80 @@ export function apply(ctx: Context, config: Config): void {
       generateReqId: (kind: string) => string
     }
 
+    /**
+     * Gate image input on the configured model's declared input modalities.
+     * Absent metadata means "unknown", which stays allowed; an explicit list
+     * without `image` is negative capability and must not reach the model.
+     * @returns the Chinese reply, or undefined when the image may be forwarded.
+     */
+    async function imageCapabilityBlocker(): Promise<string | undefined> {
+      const llm = ctx.get('llm') as LlmService | undefined
+      if (llm === undefined) {
+        console.warn('[im-bridge] llm 服务不可用，无法校验看图能力')
+        return '模型服务不可用，暂时无法接收图片'
+      }
+      const selection = resolveSelection(cfg(), defaultModel)
+      try {
+        const info = await llm.resolveModelInfo(selection.provider, selection.model)
+        if (info.inputModalities !== undefined && !info.inputModalities.includes('image')) {
+          return `当前模型 ${selection.model} 不支持看图，请切换模型后重试`
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[im-bridge] 读取模型能力失败: ${message}`)
+        return '无法确认当前模型是否支持看图，请稍后重试'
+      }
+      return undefined
+    }
+
+    /**
+     * Turn one already-started image download into a durable attachment:
+     * await → magic-number check → capability gate → `attachments.saveImage`.
+     * Never throws; every failure becomes a Chinese reply.
+     * @param image - download promise started by the event callback.
+     * @returns the durable reference or the reply to send instead.
+     */
+    async function prepareInboundImage(
+      image: InboundImage,
+    ): Promise<{ ok: true; ref: ImageAttachmentRef } | { ok: false; reply: string }> {
+      let buffer: Buffer
+      let filename: string | undefined
+      try {
+        ({ buffer, filename } = await image.download)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[im-bridge] 图片下载失败: ${message}`)
+        return { ok: false, reply: '图片下载失败，请重发一次' }
+      }
+      const mediaType = detectImageMediaType(buffer)
+      if (mediaType === undefined) {
+        console.warn('[im-bridge] 收到不支持的图片格式，已拒绝')
+        return { ok: false, reply: '不支持该图片格式，请转成 PNG/JPEG/GIF/WebP 后重发' }
+      }
+      const blocker = await imageCapabilityBlocker()
+      if (blocker !== undefined) return { ok: false, reply: blocker }
+      const attachments = ctx.get('attachments') as AttachmentStore | undefined
+      if (attachments === undefined) {
+        console.warn('[im-bridge] attachments 服务不可用，无法接收图片')
+        return { ok: false, reply: '附件服务不可用，暂时无法接收图片' }
+      }
+      try {
+        const ref = await attachments.saveImage({ data: buffer, mediaType, name: filename })
+        return { ok: true, ref }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[im-bridge] 保存图片失败: ${message}`)
+        return { ok: false, reply: imageLimitMessage(error) }
+      }
+    }
+
     async function handle(
       frame: WecomFrame,
       ref: WecomSessionRef,
       content: string,
       binding: WorkspaceBinding,
       sessionKey: string,
+      image?: InboundImage,
     ): Promise<void> {
       let st = chats.get(sessionKey)
       if (st === undefined) {
@@ -1402,6 +1516,17 @@ export function apply(ctx: Context, config: Config): void {
       st.office = senderHasOfficeAccess(cfg().wecomCli.allowFrom, ref.sender)
       st.sender = ref.sender
       st.chatid = ref.chatid
+      // Image work stays inside the queue: a failure answers the chat without
+      // creating a session or burning an agent turn.
+      let imageRef: ImageAttachmentRef | undefined
+      if (image !== undefined) {
+        const prepared = await prepareInboundImage(image)
+        if (!prepared.ok) {
+          await replyCommand(frame, prepared.reply)
+          return
+        }
+        imageRef = prepared.ref
+      }
       st = await ensureAgent(ref, binding, sessionKey)
       const startedAt = Date.now()
       const streamId = generateReqId('stream')
@@ -1450,8 +1575,14 @@ export function apply(ctx: Context, config: Config): void {
         if (st.agent === undefined) throw new Error('im-bridge: chat agent missing')
         await st.agent.whenIdle()
         const firstSeq = st.agent.session.seq
+        const blocks: InboundContent[] = [
+          { type: 'text', text: content || IMAGE_PLACEHOLDER_TEXT },
+        ]
+        if (imageRef !== undefined) blocks.push({ type: 'image', attachment: imageRef })
         st.agent.followup(createUserMessage({
-          content: [{ type: 'text', text: content }],
+          // The local image reference mirrors the attachment service's durable
+          // shape; the branded attachment id is not part of this package's deps.
+          content: blocks as Parameters<typeof createUserMessage>[0]['content'],
           source: { kind: 'user' },
         }))
         await st.agent.whenIdle()
@@ -1682,10 +1813,16 @@ export function apply(ctx: Context, config: Config): void {
     ws.on('reconnecting', ((n: number) => console.log(`[im-bridge] 第 ${n} 次重连...`)) as (...args: never[]) => void)
     ws.on('error', ((error: Error) => console.error(`[im-bridge] 错误: ${error.message}`)) as (...args: never[]) => void)
 
-    ws.on('message.text', ((frame: WecomFrame) => {
-      const inbound = (frame.body?.text?.content || '').trim()
-      if (!inbound) return
-      const content = stripBotMention(inbound)
+    /**
+     * Shared inbound route for text and image messages: resolve the window,
+     * apply `allowFrom`, pick the workspace binding, then enqueue on that
+     * session's queue. Text-only `/ws` commands are parsed before queueing;
+     * an image message never carries a command.
+     * @param frame - raw WeCom frame (used for routing and replies).
+     * @param content - stripped text; empty for an image message.
+     * @param image - image download already in flight, when this is a picture.
+     */
+    function dispatchInbound(frame: WecomFrame, content: string, image?: InboundImage): void {
       let ref: WecomSessionRef
       try {
         ref = resolveWecomSession(frame)
@@ -1701,24 +1838,33 @@ export function apply(ctx: Context, config: Config): void {
         void ws.replyStream(frame, generateReqId('stream'), cfg().deniedMessage, true).catch(() => {})
         return
       }
-      console.log(
-        `[im-bridge] 收到 key=${ref.key} userid=${ref.sender} chattype=${String(frame.body?.chattype ?? '')} chatid=${ref.chatid ?? ''}: ${content.slice(0, 100)}`,
-      )
-      // `/ws …` 由插件直接回复，永远不进入模型。
-      const command = parseWorkspaceCommand(content)
-      if (command !== undefined) {
-        handleWorkspaceCommand(frame, ref, command).catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error)
-          console.error(`[im-bridge] 工作区命令异常: ${message}`)
-          // 失败也要回话，否则 `/ws` 会静默无响应，看起来像插件挂了。
-          void ws.replyStream(
-            frame,
-            generateReqId('stream'),
-            `工作区命令执行失败：${truncate(message, 300)}`,
-            true,
-          ).catch(() => {})
-        })
+      // Authorization comes first: an unauthorized sender must be rejected even
+      // when images are off, so the switch is checked only after `allowFrom`.
+      if (image !== undefined && !cfg().imageEnabled) {
+        void ws.replyStream(frame, generateReqId('stream'), '本通道未开启图片', true).catch(() => {})
         return
+      }
+      const summary = image === undefined ? content.slice(0, 100) : '[图片]'
+      console.log(
+        `[im-bridge] 收到 key=${ref.key} userid=${ref.sender} chattype=${String(frame.body?.chattype ?? '')} chatid=${ref.chatid ?? ''}: ${summary}`,
+      )
+      if (image === undefined) {
+        // `/ws …` 由插件直接回复，永远不进入模型。
+        const command = parseWorkspaceCommand(content)
+        if (command !== undefined) {
+          handleWorkspaceCommand(frame, ref, command).catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error)
+            console.error(`[im-bridge] 工作区命令异常: ${message}`)
+            // 失败也要回话，否则 `/ws` 会静默无响应，看起来像插件挂了。
+            void ws.replyStream(
+              frame,
+              generateReqId('stream'),
+              `工作区命令执行失败：${truncate(message, 300)}`,
+              true,
+            ).catch(() => {})
+          })
+          return
+        }
       }
       const binding = activeBindingFor(ref.key)
       // “是否默认工作区”的判定要与 ensureAgent 一致（realpath）：两串拼写不同但
@@ -1730,11 +1876,32 @@ export function apply(ctx: Context, config: Config): void {
       st.kind = ref.kind
       chats.set(sessionKey, st)
       st.queue = st.queue
-        .then(() => handle(frame, ref, content, binding, sessionKey))
+        .then(() => handle(frame, ref, content, binding, sessionKey, image))
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error)
           console.error(`[im-bridge] 任务异常: ${message}`)
         })
+    }
+
+    ws.on('message.text', ((frame: WecomFrame) => {
+      const inbound = (frame.body?.text?.content || '').trim()
+      if (!inbound) return
+      dispatchInbound(frame, stripBotMention(inbound))
+    }) as (...args: never[]) => void)
+
+    ws.on('message.image', ((frame: WecomFrame) => {
+      const source = frame.body?.image
+      if (source?.url === undefined || source.url === '') {
+        console.warn('[im-bridge] 图片消息缺少下载地址，已忽略')
+        return
+      }
+      // Start the download here, not in the queue: the URL expires in five
+      // minutes and the session queue may still be busy with earlier turns.
+      const download = ws.downloadFile(source.url, source.aeskey)
+      // The route can return before the queue awaits this promise (denied
+      // sender, unsupported window), so its rejection must not go unhandled.
+      void download.catch(() => {})
+      dispatchInbound(frame, '', { download })
     }) as (...args: never[]) => void)
 
     ws.on('event.enter_chat', ((frame: WecomFrame) => {

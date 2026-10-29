@@ -11,6 +11,8 @@
         workspaceAllowFrom: []
         # true 才允许 /ws add <路径>
         workspaceAdd: false
+        # 接收企微发来的图片；false 时拒收图片
+        imageEnabled: true
         allowFrom: []
         startHint: '🧠 正在思考...'
         agentTimeoutSec: 600

@@ -99,7 +99,7 @@
 
 ## dsh-im-bridge-workspaces
 
-**来源：fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`（本地 fork 版本 `0.4.4-ws.2`），
+**来源：fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`（本地 fork 版本 `0.4.4-ws.3`），
 上游原版说明见 [README.upstream.md](./dsh-im-bridge-workspaces/README.upstream.md)。
 
 **改了什么：** 新增**工作区列表与 `/ws` 切换**（`/ws`、`/ws <序号|title|路径|id>`、`/ws reset`、
