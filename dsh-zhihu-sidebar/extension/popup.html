@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>知乎选题助手</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <h1>知乎选题助手</h1>
+      <span id="tab-state" class="tab-state">检查知乎页面…</span>
+    </header>
+
+    <div id="no-tab" class="banner hidden">
+      <span>请先打开一个知乎页面（并确保已登录）。</span>
+      <button id="open-zhihu" type="button">打开知乎</button>
+    </div>
+
+    <section class="panel">
+      <div class="row">
+        <button id="pull-recommend" type="button" class="primary">拉取推荐池</button>
+        <label class="inline">
+          <span>页数</span>
+          <input id="pull-pages" type="number" min="1" max="20" value="2" />
+        </label>
+        <span class="divider"></span>
+        <label class="inline grow">
+          <span>关键词</span>
+          <input id="search-keyword" type="text" placeholder="例如：大模型" />
+        </label>
+        <button id="run-search" type="button">按关键词搜索</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row">
+        <label class="inline">
+          <span>最小浏览</span>
+          <input id="min-visits" type="number" min="0" placeholder="不限" />
+        </label>
+        <label class="inline">
+          <span>最大回答</span>
+          <input id="max-answers" type="number" min="0" placeholder="不限" />
+        </label>
+        <label class="inline grow">
+          <span>标题过滤</span>
+          <input id="filter-keyword" type="text" placeholder="不限" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="preset-hot" type="button" class="chip">高流量低竞争</button>
+        <button id="preset-first" type="button" class="chip">抢首发</button>
+        <button id="preset-all" type="button" class="chip">全部</button>
+        <span class="divider"></span>
+        <label class="inline">
+          <span>排序</span>
+          <select id="sort-mode">
+            <option value="traffic_per_answer">每回答流量</option>
+            <option value="blue_ocean">蓝海指数</option>
+            <option value="visits">浏览量</option>
+            <option value="newest">最新</option>
+          </select>
+        </label>
+        <button id="clear-cache" type="button" class="ghost">清空</button>
+      </div>
+    </section>
+
+    <div id="notice" class="notice hidden"></div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="col-title">标题</th>
+            <th class="num">浏览</th>
+            <th class="num">回答</th>
+            <th class="num">关注</th>
+            <th class="num">每回答流量</th>
+            <th class="num">提问时间</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p id="empty" class="empty hidden">还没有数据，先拉取推荐池或搜索一个关键词。</p>
+    </div>
+
+    <footer class="foot">
+      <span id="status">已加载 0 条 · 显示 0 条</span>
+      <span class="hint">数据仅存本机浏览器，不上传任何地方</span>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
