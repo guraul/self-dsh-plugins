@@ -18,6 +18,7 @@
 | 能力 | 状态 |
 |---|---|
 | `GET /status`、`POST /check/auto`、`POST /check/run`、`GET /preflight`、`GET /plugins`、`GET|POST /policy`、`GET|POST /settings`、`GET /task`、`GET /restart/diagnostics` | ✅ 已实现并有单测 |
+| `POST /report-issue`（门禁拒绝时一键把阻塞插件与要求记录成 GitHub issue，幂等） | ✅ 已实现并有单测（只接受 `{target}`，标题/正文由宿主生成） |
 | `GET /notes`（release notes，确认卡折叠显示 + 在 GitHub 上看完整说明） | ✅ 已实现并有单测；拿不到时如实显示原因，不影响升级 |
 | 会话门禁（`ctx.agents.list()` → `status==='running'`，可强制） | ✅ |
 | 插件兼容性门禁（对**目标版本**判定，不兼容则**不升级**，不可绕过） | ✅ |
@@ -30,6 +31,8 @@
 | 客户端注入声明 `dsh.client.inject` 对齐 DSH 0.2.1（旧 `@deepseek-ai/dsh-client-ui-slots` 已不存在） | ✅ 有守卫测试（声明包必须真实存在）；改声明需重启 dsh web 才生效，重启后要确认浮层/设置页仍挂载 |
 | **设置页常驻升级入口**（浮层被「不再提示」关掉也有地方升级；与浮层同一份计划卡/流程） | ✅ |
 | **降级护栏出路**（`downgrade-guard` 时点名建议渠道 + 「切到 `<渠道>`」按钮） | ✅ |
+| **门禁拒绝点名**（列出阻塞插件与未满足要求，最多 3 条 + 等 N 项 + 修法；浮层/设置页共用一份渲染） | ✅ |
+| **设置页插件表按判定目标版本评估**（`GET /plugins?version=<target>`，表头写明评估版本） | ✅ |
 | `POST /plugins/action`（写豁免/禁用插件） | ⛔ 未接线，如实返回 `501`（写豁免按仓库约定必须先拿到用户对具体版本组合的同意） |
 | 静默自动升级 | ⛔ 按用户拍板暂不做（`policy.mode` 只接受 `notify`） |
 | Windows | ⛔ 不支持（helper 是 POSIX sh），能力位已关闭 |
@@ -37,6 +40,13 @@
 **真机安装、升级、重启已执行**：2026-10-17 两次走完全链（`0.2.0-rc.2 → 0.2.1-alpha.5`、
 `0.2.1-alpha.5 → 0.2.1-rc.2`），证据见 [`docs/acceptance/dsh-auto-upgrade-acceptance.md`](./docs/acceptance/dsh-auto-upgrade-acceptance.md) §3.1；
 其余「明确没有验证的部分」见同一文件 §3。
+
+## 一键开 issue 依赖本机 `gh`
+
+升级被插件门禁挡住时，浮层与设置页的「开 issue 记录这个不兼容」会调宿主
+`POST /api/dsh-auto-upgrade/report-issue`，由宿主用**本机已登录的 `gh`** 在
+`package.json` 的 `repository.url` 指向的仓库建一条 issue（标题/正文由宿主生成，幂等：同名 open issue
+存在时直接返回）。没装 `gh` 或未登录时接口 500 并给出原因；插件不会读取、也不会回显任何 token。
 
 ## 安装（**属于用户授权闸门，需用户自己执行**）
 
@@ -73,7 +83,7 @@ package.json）推出**宿主此刻真正执行的** `dsh-app-boot` 绝对路径
 
 ```sh
 node --check lib/index.js lib/client.js          # 语法
-node --test "test/*.test.mjs"                    # 58 用例，含真 http 服务与假 registry
+node --test "test/*.test.mjs"                    # 66 用例，含真 http 服务与假 registry
 node --test test/official-compat.test.mjs        # 需要本机装有 @deepseek-ai/dsh
 ```
 

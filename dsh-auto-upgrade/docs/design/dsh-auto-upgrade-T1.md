@@ -53,13 +53,14 @@ dsh-plugin-auto-upgrade/
 | P0 | POST | `/api/dsh-auto-upgrade/update` | `{version, acceptPluginRisk?, force?}` | `202 {taskId}` / `409 {code:'sessions-running', sessions[]}` / `409 {code:'plugin-incompatible', ...}` | **备份 `~/.dsh` → 停服 → `npm install -g` → 校验 → 重启** | 重副作用；单飞（进行中重复调用 → `409 busy`） |
 | P0 | GET | `/api/dsh-auto-upgrade/task` | `?taskId=&since=N` | `{phase, percent, logTail[], startedAt, finishedAt, ok, error, rollbackOf?}` | 无 | 轮询：`preflight → backup → stop → install → verify → restart` |
 | P1 | POST | `/api/dsh-auto-upgrade/rollback` | `{version}` | `202 {taskId}` | 重装旧版本（可选再恢复 `~/.dsh` 备份） | 失败路径的兜底 |
-| P0 | GET | `/api/dsh-auto-upgrade/plugins` | — | `{plugins:[{name, version, enabled, bundle, peers, compat:{target, ok, exempted, detail}}], exemptions}` | 无 | 需求 2 的第二半 |
+| P0 | GET | `/api/dsh-auto-upgrade/plugins` | `?version=`（缺省用已装版本） | `{target, plugins:[{name, version, enabled, bundle, peers, compat:{target, ok, exempted, detail}}], exemptions}` | 无 | 需求 2 的第二半 |
 | P1 | POST | `/api/dsh-auto-upgrade/plugins/action` | `{name, action:'disable'\|'enable'\|'exempt', packageVersion?, runtimeVersion?, acceptRisk?}` | `{ok, exemptions, plugins}` | 改 profile `package.json` 的 bundles / `compatibility.json` | 处置不兼容插件（§8.4） |
 | P1 | GET+POST | `/api/dsh-auto-upgrade/policy` | GET 无 / POST 部分对象 | 策略全文 | POST 写 `policy.json` | `{channel, mode, executionWindow, dailyCheck}`（§8.2、§8.6） |
 | P1 | GET+POST | `/api/dsh-auto-upgrade/settings` | GET 无 / POST 部分对象 | 面板偏好 | 写 `settings` | 悬浮窗开关、"不再提示" |
 | P1 | POST | `/api/dsh-auto-upgrade/restart` | `{}` | `202 {scheduled}` | **detached 助手：等旧 pid 退出 + 端口释放 → 原样 argv 拉起新进程** | §8.8 |
 | P2 | GET | `/api/dsh-auto-upgrade/restart/diagnostics` | — | `{logTail[], lastResult}` | 无 | 重启失败排障 |
 | P2 | GET | `/api/dsh-auto-upgrade/notes` | `?version=` | `{version, notes}` | 联网（GitHub release） | 确认卡上显示更新说明 |
+| P1 | POST | `/api/dsh-auto-upgrade/report-issue` | `{target}` | `{ok, number, url, created}` | 调 `gh issue create`（先按标题查重） | 门禁拒绝时把阻塞插件与要求记录成 issue |
 
 **统一错误码形状**：`{ ok:false, code:'E_…', error:'人话', detail? }`；"检测失败" 一律 `decision:'unknown'`，**绝不伪装成"已是最新"**。
 

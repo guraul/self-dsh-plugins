@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { API } from '../lib/host/protocol.js'
+import { issueTitle } from '../lib/host/report-issue.js'
 import { apply } from '../lib/index.js'
 
 /**
@@ -142,6 +143,7 @@ async function startHost(options) {
     githubApiBase: options.githubApiBase,
     stateDir: options.stateDir,
     exit: (code) => exits.push(code),
+    ...(options.runGh === undefined ? {} : { runGh: options.runGh }),
     scheduleHelper: async ({ stateDir, payload }) => {
       await mkdir(stateDir, { recursive: true })
       const payloadPath = join(stateDir, 'helper-payload.json')
@@ -195,6 +197,7 @@ async function makeEnvironment(options = {}) {
     agents: options.agents,
     home,
     stateDir,
+    runGh: options.runGh,
   })
   return {
     anchor,
@@ -486,5 +489,160 @@ test('参数校验：版本、渠道、方法', async (t) => {
     assert.equal((await fetch(`${env.host.base}/api/dsh-auto-upgrade/nope`)).status, 404)
   } finally {
     await env.close()
+  }
+})
+
+/**
+ * 造一个假的 `gh` 执行器（`apply(ctx, { runGh })` 测试缝）。
+ * @param {{existing?:object[], listError?:string, createError?:string, createUrl?:string}} [options] 输入。
+ * @returns {{calls:string[][], runGh:(args:string[])=>Promise<object>}} 执行器与调用记录。
+ */
+function makeGh(options = {}) {
+  const calls = []
+  async function runGh(args) {
+    calls.push(args)
+    if (args[0] === 'issue' && args[1] === 'list') {
+      if (options.listError !== undefined) return { ok: false, stdout: '', error: options.listError }
+      return { ok: true, stdout: JSON.stringify(options.existing ?? []) }
+    }
+    if (options.createError !== undefined) return { ok: false, stdout: '', error: options.createError }
+    return { ok: true, stdout: `${options.createUrl ?? 'https://github.com/guraul/self-dsh-plugins/issues/71'}\n` }
+  }
+  return { calls, runGh }
+}
+
+const BLOCKING_PLUGIN = {
+  name: 'fake-plugin',
+  version: '1.0.0',
+  peerDependencies: { '@deepseek-ai/dsh-tools': '^0.1.0-rc.2' },
+}
+
+test('POST /report-issue：宿主自己生成标题/正文并调 gh 创建，返回 number/url', async (t) => {
+  const gh = makeGh()
+  const env = await makeEnvironment({ plugins: [BLOCKING_PLUGIN], runGh: gh.runGh })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const response = await fetch(`${env.host.base}${API.reportIssue}`, {
+      method: 'POST',
+      body: JSON.stringify({ target: '9.9.9' }),
+    })
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.ok, true)
+    assert.equal(body.created, true)
+    assert.equal(body.number, 71)
+    assert.equal(body.url, 'https://github.com/guraul/self-dsh-plugins/issues/71')
+
+    assert.equal(gh.calls.length, 2, '必须先查重再创建')
+    const [list, create] = gh.calls
+    const title = issueTitle({ target: '9.9.9', plugins: [{ name: 'fake-plugin' }] })
+    assert.deepEqual(list.slice(0, 2), ['issue', 'list'])
+    assert.ok(list.includes('--repo') && list.includes('guraul/self-dsh-plugins'), 'repo 取自本插件 package.json')
+    assert.equal(list[list.indexOf('--search') + 1], title, '查重用的标题必须与创建时完全一致')
+    assert.equal(list[list.indexOf('--state') + 1], 'open')
+
+    assert.deepEqual(create.slice(0, 2), ['issue', 'create'])
+    assert.equal(create[create.indexOf('--title') + 1], title)
+    const text = create[create.indexOf('--body') + 1]
+    assert.match(text, /目标 dsh：`9\.9\.9`/)
+    assert.match(text, /fake-plugin@1\.0\.0/, '正文必须点名阻塞插件')
+    assert.match(text, /`@deepseek-ai\/dsh-tools` 要求 `\^0\.1\.0-rc\.2`/, '正文必须带 requirements')
+    assert.match(text, /curl -sS -X POST http:\/\/127\.0\.0\.1:\d+\/api\/dsh-auto-upgrade\/check\/run/)
+    assert.match(text, /plugins\?version=9\.9\.9/, '正文必须带复现命令')
+    assert.match(text, /install-check\.sh/, '正文必须带修法')
+    assert.doesNotMatch(text, /gho_|ghp_|token=/i, '不许回显任何 token')
+  } finally {
+    await env.close()
+  }
+})
+
+test('POST /report-issue：同名 open issue 已存在时不重复创建', async (t) => {
+  const title = issueTitle({ target: '9.9.9', plugins: [{ name: 'fake-plugin' }] })
+  const gh = makeGh({
+    existing: [{ number: 70, title, url: 'https://github.com/guraul/self-dsh-plugins/issues/70' }],
+  })
+  const env = await makeEnvironment({ plugins: [BLOCKING_PLUGIN], runGh: gh.runGh })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const body = await (await fetch(`${env.host.base}${API.reportIssue}`, {
+      method: 'POST',
+      body: JSON.stringify({ target: '9.9.9' }),
+    })).json()
+    assert.equal(body.ok, true)
+    assert.equal(body.created, false)
+    assert.equal(body.number, 70)
+    assert.equal(gh.calls.length, 1, '命中同名 issue 时不许再调 gh issue create')
+  } finally {
+    await env.close()
+  }
+})
+
+test('POST /report-issue：gh 不存在/未登录时 500 并给出原因', async (t) => {
+  const listFailure = await makeEnvironment({
+    plugins: [BLOCKING_PLUGIN],
+    runGh: makeGh({ listError: 'gh: command not found' }).runGh,
+  })
+  if (listFailure.skip !== undefined) return t.skip(listFailure.skip)
+  try {
+    const response = await fetch(`${listFailure.host.base}${API.reportIssue}`, {
+      method: 'POST',
+      body: JSON.stringify({ target: '9.9.9' }),
+    })
+    assert.equal(response.status, 500)
+    const body = await response.json()
+    assert.equal(body.code, 'E_INTERNAL')
+    assert.match(body.error, /gh issue list 失败/)
+    assert.match(body.error, /command not found/)
+  } finally {
+    await listFailure.close()
+  }
+
+  const createFailure = await makeEnvironment({
+    plugins: [BLOCKING_PLUGIN],
+    runGh: makeGh({ createError: 'HTTP 401: Bad credentials' }).runGh,
+  })
+  if (createFailure.skip !== undefined) return t.skip(createFailure.skip)
+  try {
+    const response = await fetch(`${createFailure.host.base}${API.reportIssue}`, {
+      method: 'POST',
+      body: JSON.stringify({ target: '9.9.9' }),
+    })
+    assert.equal(response.status, 500)
+    const body = await response.json()
+    assert.match(body.error, /gh issue create 失败/)
+    assert.match(body.error, /Bad credentials/)
+  } finally {
+    await createFailure.close()
+  }
+})
+
+test('POST /report-issue：只接受精确 target，GET 不被允许，没有阻塞插件时拒绝', async (t) => {
+  const gh = makeGh()
+  const env = await makeEnvironment({ plugins: [BLOCKING_PLUGIN], runGh: gh.runGh })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    assert.equal((await fetch(`${env.host.base}${API.reportIssue}`, { method: 'POST', body: '{}' })).status, 400)
+    assert.equal((await fetch(`${env.host.base}${API.reportIssue}`, {
+      method: 'POST',
+      body: JSON.stringify({ target: '^9.9.9' }),
+    })).status, 400)
+    assert.equal((await fetch(`${env.host.base}${API.reportIssue}`)).status, 405)
+    assert.equal(gh.calls.length, 0, '校验失败时绝不该调用 gh')
+  } finally {
+    await env.close()
+  }
+
+  const clean = await makeEnvironment({ runGh: gh.runGh })
+  if (clean.skip !== undefined) return t.skip(clean.skip)
+  try {
+    const response = await fetch(`${clean.host.base}${API.reportIssue}`, {
+      method: 'POST',
+      body: JSON.stringify({ target: '9.9.9' }),
+    })
+    assert.equal(response.status, 400)
+    assert.match((await response.json()).error, /没有被阻塞的插件/)
+    assert.equal(gh.calls.length, 0)
+  } finally {
+    await clean.close()
   }
 })

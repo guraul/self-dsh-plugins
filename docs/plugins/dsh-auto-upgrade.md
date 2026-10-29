@@ -15,7 +15,7 @@
 
 | 路径 | 作用 |
 |---|---|
-| `lib/index.js` | 宿主入口：14 条路由、两条门禁、交接调度 |
+| `lib/index.js` | 宿主入口：15 条路由、两条门禁、交接调度、一键开 issue |
 | `lib/client.js` | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页（含常驻升级入口与降级护栏出路）+ 重连 watchdog |
 | `lib/host/*.js` | 纯逻辑：协议常量 / loopback 围栏 / HTTP 管道 / SemVer / 工具链 / registry / 兼容性 / 会话 / 状态 / 任务 / 备份 / helper |
 | `docs/design/` | T1 设计：接口清单 + 数据流图 + 用户拍板结论 |
@@ -112,10 +112,29 @@ pnpm run check                                # node --check
 本插件对外的字段名**仍是 `peers`**（客户端契约不变）；改这里要同步 `test/official-compat.test.mjs`
 的「映射保真」守卫——官方将来再改字段名，那条用例会红。
 
+`?version=<精确版本>` 决定判定目标；缺省时宿主退回**已装版本**。设置页**必须**带 `version=<check.target>`，
+否则表里会按已装版本判成全「兼容」，与同屏的升级结论自相矛盾（0.2.3 就是这么修的）。
+
+## 门禁拒绝时点名 + 一键开 issue（0.2.3）
+
+- **只读数据源**：被点名的插件与要求都来自官方 `evaluatePluginCompatibility()` 的 `requirements`
+  （经 `compat.js` 映射成 `/plugins` 与 409 `detail.plugins` 里的 `peers`）。**不要在前端自己算范围**。
+- **共用一份渲染**：`lib/client.js` 的 `renderPluginBlock` 同时被浮层与设置页调用（`client-upgrade-entry`
+  有计数守卫）。每个插件最多列 3 条 `名字 精确 版本`，其余折叠成「等 N 项」，明细放在 `<details>` 里
+  （浮层卡片只有 280px）。
+- **开 issue**：`POST /api/dsh-auto-upgrade/report-issue`，body 只接受 `{target}`（精确版本号）。
+  标题与正文由宿主根据当前检测结果生成（**不接受任意文本**），repo 从本包 `package.json` 的
+  `repository.url` 经 `repositorySlug()` 解析；解析不到 → 400。先
+  `gh issue list --search <标题> --state open` 精确比对标题，命中同名 open issue 则 `created:false`。
+  `gh` 不存在/未登录 → 500 + 原始原因。**绝不调用 `gh auth token`，绝不回显 token。**
+- 前端两处按钮都在同一个块内；成功后同一块显示保持可见的 `#N` 链接。
+
 ## 测试缝（不是公开配置）
 
-`apply(ctx, { stateDir, registry, exit, scheduleHelper })` 里的 `exit` / `scheduleHelper` 只给单测用；
-真机行为是「正常退出进程」与「fork 一个脱离进程的 helper」。别把它们接进 UI 或文档的配置说明。
+`apply(ctx, { stateDir, registry, exit, scheduleHelper, runGh })` 里的 `exit` / `scheduleHelper` / `runGh`
+只给单测用；真机行为是「正常退出进程」「fork 一个脱离进程的 helper」「执行本机 `gh`」。
+别把它们接进 UI 或文档的配置说明。`runGh(args)` 返回 `{ok, stdout, error}`，单测用它断言
+「创建成功 / 同名已存在 / gh 报错」三条路径，**不需要真的在仓库里开 issue**。
 
 ## 状态目录
 

@@ -3,6 +3,37 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.3] — 2026-10-29
+
+### 新增
+
+- **门禁拒绝时点名不兼容插件 + 给出路。** 浮层与设置页改用同一份 `renderPluginBlock`：标题「不能升级到
+  `<target>`：」，逐条列出 `插件@版本 要求 <依赖>`（精确范围写成「精确 `<版本>`」），要求明细放在
+  `<details>` 里且每个插件**最多列 3 条**，其余折叠成「等 N 项」；下面固定给「→ 修法：放宽该插件的 peer
+  声明后重跑其装配验收（`scripts/pipeline/install-check.sh <插件目录>`）；或为该版本组合申请版本豁免」。
+  数据全部来自官方 `evaluatePluginCompatibility()` 返回的 `requirements`（经 `lib/host/compat.js` 映射到
+  `/plugins` 与 409 `detail.plugins` 的 `peers`），**不自算范围**。
+- **一键开 issue（`POST /api/dsh-auto-upgrade/report-issue`）。** 请求体只接受 `{target}`（精确版本号）；
+  标题与正文由宿主根据当前检测结果生成（不接受任意文本），用 `gh issue create` 在 `package.json`
+  `repository.url` 指向的仓库创建。创建前先 `gh issue list --search <标题> --state open`，同名 open issue
+  存在则直接返回 `created:false`。返回 `{ok, number, url, created}`；`gh` 不存在/未登录 → 500 + 原因；
+  仓库解析不到 → 400。**不调用 `gh auth token`，不回显任何 token。** 前端两处（浮层/设置页）都有
+  「开 issue 记录这个不兼容」，成功后在同一块内保持显示 `#N` 链接。
+
+### 修复
+
+- **设置页插件表按判定目标版本取数。** 原先调 `GET /plugins` 不带 `version`，宿主默认用**已装版本**判定，
+  于是表里全「兼容」，与同屏的「目标版本 X 被插件阻塞」自相矛盾。现在按 `lastCheck.target` 取
+  `GET /plugins?version=<target>`，表头写明「已装插件兼容性（按 `<target>` 评估）」；没有检测目标时
+  如实写「按本机已装版本评估」。
+
+### 内部
+
+- 新增 `lib/host/report-issue.js`：标题/正文生成、`gh issue list --json` 解析、issue URL 解析、
+  幂等创建；`apply(ctx, { runGh })` 新增测试缝（与 `exit` / `scheduleHelper` 同级，仅单测使用）。
+- 新增 7 条用例（总计 66）：浮层点名/折叠/修法、设置页按目标版本取数、点按钮开 issue 并显示 `#N`、
+  宿主创建成功 / 同名已存在 `created:false` / `gh` 报错 500 / 参数与空阻塞校验。
+
 ## [0.2.2] — 2026-10-18
 
 ### 修复

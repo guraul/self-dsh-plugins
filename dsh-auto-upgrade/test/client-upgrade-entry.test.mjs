@@ -91,6 +91,17 @@ function makeReact() {
       }
       return tree
     },
+    /** 跑完挂载后由事件处理函数触发的 setState，把最新元素树交回来。 */
+    async flush() {
+      for (let i = 0; i < 30; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        if (pending) {
+          pending = false
+          render()
+        }
+      }
+      return tree
+    },
   }
 }
 
@@ -126,15 +137,24 @@ function collect(node, predicate, out = []) {
 }
 
 /**
- * 装一个假 fetch；路由表按 URL 命中，未命中的一律 `ok:false`（方便暴露漏打的请求）。
- * @param {Record<string, object>} routes URL → JSON。
- * @returns {void}
+ * 装一个假 fetch；路由表按 URL 命中（先在完整 URL 上找，找不到再按去掉查询串的路径找），
+ * 未命中的一律 `ok:false`（方便暴露漏打的请求）。`calls` 记录每次请求，供断言「按哪个版本取数」。
+ * @param {Record<string, object>} routes URL 或路径 → JSON。
+ * @returns {{calls:{url:string, method:string, body:string|undefined}[]}} 调用记录。
  */
 function stubFetch(routes) {
-  globalThis.fetch = async (url) => ({
-    status: 200,
-    json: async () => (Object.hasOwn(routes, url) ? routes[url] : { ok: false, error: `unexpected request: ${url}` }),
-  })
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    const exact = String(url)
+    const path = exact.split('?')[0]
+    const key = Object.hasOwn(routes, exact) ? exact : path
+    calls.push({ url: exact, method: options.method ?? 'GET', body: options.body })
+    return {
+      status: 200,
+      json: async () => (Object.hasOwn(routes, key) ? routes[key] : { ok: false, error: `unexpected request: ${exact}` }),
+    }
+  }
+  return { calls }
 }
 
 const react = makeReact()
@@ -196,6 +216,35 @@ function statusWith(lastCheck, settings = { dismissed: false, overlay: true }) {
 }
 
 const TAGS = { latest: '0.2.0-rc.2', alpha: '0.2.1-alpha.5', next: '0.2.1-rc.2' }
+
+/**
+ * 真实世界的阻塞形态：一个插件把 12 个 `@deepseek-ai/*` 钉成精确版本。
+ * 这里取 5 条（>3，正好验证「最多 3 条 + 等 N 项」的折叠）。
+ */
+const BRIDGE = {
+  name: '@mhfire/dsh-im-bridge',
+  version: '0.4.4-ws.1',
+  compatible: false,
+  exempted: false,
+  known: true,
+  peers: {
+    '@deepseek-ai/dsh-agent': '0.2.1-rc.2',
+    '@deepseek-ai/dsh-tools': '0.2.1-rc.2',
+    '@deepseek-ai/dsh-cli': '0.2.1-rc.2',
+    '@deepseek-ai/dsh-app-boot': '0.2.1-rc.2',
+    '@deepseek-ai/dsh-web': '0.2.1-rc.2',
+  },
+}
+
+const RISK_CHECK = {
+  date: '2026-10-29',
+  decision: 'update-with-plugin-risk',
+  installed: '0.2.1-rc.2',
+  target: '0.2.1-rc.4',
+  channel: 'next',
+  tags: TAGS,
+  incompatible: [BRIDGE],
+}
 
 test('设置页：有更新时渲染升级入口，无更新时不渲染（且不受「不再提示」影响）', async () => {
   stubFetch({
@@ -322,8 +371,85 @@ test('浮层与设置页共用同一份计划卡 / 降级出路渲染（不许�
   assert.equal(countOf('renderPlanPanel('), 3, '计划卡必须由浮层与设置页共用（一份定义 + 两次调用）')
   assert.equal(countOf('function renderDowngradeExit('), 1, '降级出路只能有一份定义')
   assert.equal(countOf('renderDowngradeExit('), 3, '降级出路必须由浮层与设置页共用（一份定义 + 两次调用）')
+  assert.equal(countOf('function renderPluginBlock('), 1, '门禁拒绝块只能有一份定义')
+  assert.equal(countOf('renderPluginBlock('), 3, '门禁拒绝块必须由浮层与设置页共用（一份定义 + 两次调用）')
+  assert.equal(countOf('function makeIssueReporter('), 1, '开 issue 的提交器只能有一份定义')
+  assert.equal(countOf('makeIssueReporter('), 3, '开 issue 必须由浮层与设置页共用（一份定义 + 两次调用）')
   assert.equal(countOf('createUpgradeFlow('), 3, '升级流程必须由浮层与设置页共用（一份定义 + 两次调用）')
   assert.equal(countOf('plan.notes.available === true'), 1, '更新说明的渲染只留一份')
   assert.equal(countOf('E_SESSIONS_RUNNING'), 1, '会话门禁分支只留一份')
   assert.equal(countOf('E_PLUGIN_INCOMPATIBLE'), 1, '插件不兼容门禁分支只留一份')
+})
+
+test('浮层：门禁拒绝时点名插件，要求最多列 3 条、其余折叠，并给修法与开 issue 入口', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusWith(RISK_CHECK),
+  })
+  const tree = await react.mount(Overlay, {})
+  const text = textOf(tree)
+  assert.match(text, /不能升级到 0\.2\.1-rc\.4：/, '拒绝时必须点名目标版本')
+  assert.match(
+    text,
+    /@mhfire\/dsh-im-bridge@0\.4\.4-ws\.1 要求 @deepseek-ai\/dsh-agent 精确 0\.2\.1-rc\.2/,
+    '必须点名插件与精确要求',
+  )
+  assert.doesNotMatch(text, /个插件不兼容/, '不能再只说数量')
+
+  const details = collect(tree, (node) => node.type === 'details')
+  assert.equal(details.length, 1, '要求明细必须放在 details 里（卡片只有 280px）')
+  const detailText = textOf(details[0])
+  assert.match(detailText, /要求明细（5 项）/)
+  assert.match(detailText, /等 2 项/, '超过 3 条要折叠成「等 N 项」')
+  assert.doesNotMatch(detailText, /dsh-app-boot/, '第 4 条起不直接铺开')
+
+  assert.match(text, /修法：放宽该插件的 peer 声明后重跑其装配验收/)
+  assert.match(text, /开 issue 记录这个不兼容/)
+})
+
+test('设置页：插件表按判定目标版本取数，并在表头写明按哪个版本评估', async () => {
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusWith(RISK_CHECK, { dismissed: true, overlay: false }),
+    [`${API.plugins}?version=0.2.1-rc.4`]: { ok: true, target: '0.2.1-rc.4', plugins: [BRIDGE] },
+    // 未带 version 的那份是宿主按「已装版本」判的，全兼容——用它就会和同屏的升级结论自相矛盾。
+    [API.plugins]: {
+      ok: true,
+      target: '0.2.1-rc.2',
+      plugins: [{ ...BRIDGE, compatible: true, peers: {} }],
+    },
+  })
+  const text = textOf(await react.mount(Settings, {}))
+  assert.match(text, /已装插件兼容性（按 0\.2\.1-rc\.4 评估）/, '表头必须写明评估版本')
+  assert.match(text, /不兼容/, '必须采用按目标版本判定的那份')
+  assert.match(text, /开 issue 记录这个不兼容/, '设置页也要有开 issue 入口')
+  assert.ok(calls.some((call) => call.url === `${API.plugins}?version=0.2.1-rc.4`), '必须带 version 取数')
+  assert.ok(!calls.some((call) => call.url === API.plugins), '不该再打未带 version 的旧请求')
+})
+
+test('浮层：点「开 issue」走 report-issue，成功后同块显示 #N 链接', async () => {
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusWith(RISK_CHECK),
+    [API.reportIssue]: {
+      ok: true,
+      number: 71,
+      url: 'https://github.com/guraul/self-dsh-plugins/issues/71',
+      created: true,
+    },
+  })
+  const tree = await react.mount(Overlay, {})
+  const buttons = collect(tree, (node) => node.type === 'button' && textOf(node) === '开 issue 记录这个不兼容')
+  assert.equal(buttons.length, 1)
+  await buttons[0].props.onClick()
+
+  const after = await react.flush()
+  assert.match(textOf(after), /已记录为 issue/)
+  const links = collect(after, (node) => node.type === 'a' && textOf(node) === '#71')
+  assert.equal(links.length, 1, '成功后必须保持可见的 #N 链接')
+  assert.equal(links[0].props.href, 'https://github.com/guraul/self-dsh-plugins/issues/71')
+
+  const posted = calls.find((call) => call.url === API.reportIssue)
+  assert.equal(posted.method, 'POST')
+  assert.deepEqual(JSON.parse(posted.body), { target: '0.2.1-rc.4' }, '只允许传目标版本')
 })
