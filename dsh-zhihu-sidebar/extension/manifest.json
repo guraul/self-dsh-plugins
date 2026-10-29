@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "知乎选题助手",
+  "version": "0.1.0",
+  "description": "从知乎推荐池和搜索里挑出值得回答的问题：浏览量、回答数、关注数、提问时间，按流量潜力排序。",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.zhihu.com/*"],
+  "action": { "default_popup": "popup.html", "default_title": "知乎选题助手" },
+  "content_scripts": [
+    { "matches": ["https://www.zhihu.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ]
+}
