@@ -8,8 +8,9 @@
 # 因此 CI 检出后 6 个插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
 # （例如新插件目录还没加进白名单），命中它是预期行为，不是失败。
 #
-# dsh-im-bridge-workspaces：依赖已在 issue #3 修复，可正常 `pnpm install`（peer 已按
-# 实测 DSH 0.2.1-rc.2 收窄，见 package.json）。但它**不做构建产物新鲜度检查**
+# dsh-im-bridge-workspaces：依赖已在 issue #3 修复，可正常 `pnpm install`（peer 为
+# `^0.2.1-rc.2 || ^0.2.1-rc.4`，rc.2 / rc.4 均验过；`0.2.2-alpha.2` 未放宽，见
+# docs/COMPATIBILITY.md）。但它**不做构建产物新鲜度检查**
 # （`fresh: false`）：tsdown 打 client 包时把绝对路径与 CSS module 哈希写进产物，
 # 换机器必然产出不同字节，重建即脏。
 name: ci

@@ -99,7 +99,7 @@
 
 ## dsh-im-bridge-workspaces
 
-**来源：fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`（本地 fork 版本 `0.4.4-ws.1`），
+**来源：fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`（本地 fork 版本 `0.4.4-ws.2`），
 上游原版说明见 [README.upstream.md](./dsh-im-bridge-workspaces/README.upstream.md)。
 
 **改了什么：** 新增**工作区列表与 `/ws` 切换**（`/ws`、`/ws <序号|title|路径|id>`、`/ws reset`、
@@ -181,8 +181,10 @@ scripts/pipeline/install-check.sh dsh-plugin-product-subagents
 - **本仓库的「交付物」不是线上服务，而是「插件被本机 DSH profile 正确装配」**——对应 `install-check.sh`，
   它每个插件新建一个 `mktemp -d` 的 `DSH_HOME`，`pnpm dlx @deepseek-ai/dsh@<当前版本> plugin --profile headless add <插件>`
   后用 `--dump-config` 校验，装完即删。
-- `dsh-im-bridge-workspaces` 的依赖声明已按实测 DSH 版本收窄（`0.2.1-rc.2`，
-  [issue #3](https://github.com/guraul/self-dsh-plugins/issues/3) 已修），干净 checkout 可直接 `pnpm install`。
+- `dsh-im-bridge-workspaces` 的 peer 声明已按实测收窄为 `^0.2.1-rc.2 || ^0.2.1-rc.4`（rc.2 / rc.4 均验过，
+  [issue #3](https://github.com/guraul/self-dsh-plugins/issues/3) 已修），干净 checkout 可直接 `pnpm install`；
+  `0.2.2-alpha.2` **未放宽**（`dsh-agent` 的 `installModelSelection` 签名变更，见
+  [docs/COMPATIBILITY.md](./docs/COMPATIBILITY.md)）。
   它的构建产物**不可复现**（tsdown 把绝对路径与 CSS module 哈希写进产物），所以 CI 只跳过这一项的新鲜度检查，
   安装 / 测试 / typecheck / 语法门禁照跑；完整装配校验仍走 `scripts/pipeline/install-check.sh dsh-im-bridge-workspaces`。
 - 只读状态一览：`scripts/pipeline/status.sh`。
