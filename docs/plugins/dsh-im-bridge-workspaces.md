@@ -4,7 +4,7 @@
 > 提炼（2026-10-17，仓库统一治理 issue #1）。使用者文档仍以该 README 为准。
 
 - 目录：`dsh-im-bridge-workspaces/`　包名：**`@mhfire/dsh-im-bridge`**（目录名 ≠ 包名）
-- 来源：**fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`，本地 fork 版本 `0.4.4-ws.1`；
+- 来源：**fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`，本地 fork 版本 `0.4.4-ws.2`；
   上游原版说明见 `README.upstream.md`。
 - 改动范围：只加**多工作区列表与 `/ws` 切换**；其余行为（按企微窗口建 Agent、单聊一人一条、
   群聊共用一条、Settings 配置卡片、wecom-cli 办公层）与上游一致。
@@ -52,6 +52,8 @@
 - 修法：把 DSH 运行时 peer 与客户端 peer 一律收窄到**实测版本 `0.2.1-rc.2`**（该版本在公共 registry 上齐全，
   且不引用 `dsh-type-meta`）；`cordis` / `schemastery` 保持 `*`（其 latest 本来就是可用版本）。
   全部仍是 `optional: true`，profile 侧仍由 DSH 自身提供 peer。
+  > 精确 pin 的副作用（dsh 升不上去）已在 issue #72 解决：改成覆盖 `0.2.1-rc.2 / 0.2.1-rc.4 / 0.2.2-alpha.2`
+  > 的 range，**仍是逐个版本验过才加的**。见下面「DSH 版本兼容」。
 - 副作用：`pnpm test`（18 例）与 `pnpm run typecheck` 现在在干净环境都能跑通，CI 也因此不再跳过安装。
 - ⚠️ **构建产物仍不可复现**：tsdown 打 client 包会把绝对路径和 CSS module 哈希写进 `lib/client.js`，
   换机器重建必脏，所以 CI 对这项设 `fresh: false`（不跑新鲜度检查），**别手工重建后提交 client 产物**。
@@ -66,6 +68,17 @@ scripts/pipeline/install-check.sh dsh-im-bridge-workspaces
 
 它新建 `mktemp -d` 的 `DSH_HOME`，`pnpm dlx @deepseek-ai/dsh@<当前版本> plugin --profile headless add <插件绝对路径>`，
 再用 `--dump-config` grep 到包名 `@mhfire/dsh-im-bridge` 即「装配成功」，装完即删。
+
+### DSH 版本兼容（peer 声明怎么放宽）
+
+12 条 `@deepseek-ai/*` peer 曾是**精确** `0.2.1-rc.2`（issue #3 为修干净 checkout 装依赖所加），
+副作用是 dsh 只能停在 `0.2.1-rc.2`。issue #72 起改为
+`^0.2.1-rc.2 || ^0.2.1-rc.4 || ^0.2.2-alpha.2`——**每个锚点都是先跑一次性 `DSH_HOME` 验过才加的**。
+
+- 门禁口径、逐版本 verdict、验证命令、失败时怎么记：见 [`../COMPATIBILITY.md`](../COMPATIBILITY.md)。
+- ⚠️ 已知降级：`0.2.2-alpha.2` 上 `dsh-agent` 的 `installModelSelection` 删了第二个参数，
+  本插件的 `reasoningEffort` 配置项会静默失效（`provider` / `model` 不受影响）。细节同上文档。
+- 放宽前请重跑上面的 `install-check.sh`；**不要**用 `dsh plugin allow-version` 的版本豁免代替验证。
 
 ### 本机开发命令（依赖已装好时）
 

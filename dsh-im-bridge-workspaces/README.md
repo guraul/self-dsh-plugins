@@ -1,4 +1,4 @@
-# @mhfire/dsh-im-bridge（本地 fork：`0.4.4-ws.1`，多工作区 /ws 切换）
+# @mhfire/dsh-im-bridge（本地 fork：`0.4.4-ws.2`，多工作区 /ws 切换）
 
 基于已安装的 `@mhfire/dsh-im-bridge@0.4.4` fork，给企业微信通道加上**工作区列表与切换**。
 其余行为（按企微窗口建 Agent、单聊一人一条、群聊共用一条、Settings 配置卡片、wecom-cli 办公层）与上游一致。
