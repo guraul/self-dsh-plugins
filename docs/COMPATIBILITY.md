@@ -20,7 +20,7 @@
 2. 否则遍历 `peerDependencies`，**每一个** `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 都必须满足；
 3. 判定用 `semver.satisfies(runtimeVersion, range, { includePrerelease: true })`。
 
-由此得出两条实操结论：
+由此得出三条实操结论：
 
 - `dsh.compatibility.dsh` / `dshReleases` 是**纯记录**，门禁不读；真正起作用的是 `peerDependencies`。
   反之，**给插件加 `engines.dsh` 会让逐条 peer 检查整体失效**——别为了"让门禁过"而加。
