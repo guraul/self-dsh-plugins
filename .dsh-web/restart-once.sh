@@ -10,7 +10,7 @@ LOG="$(cd "$(dirname "$0")" && pwd)/restart-once.log"
 PATTERN='dsh --profile web --no-open --port 3080'
 
 {
-  echo "=== $(date '+%F %T') 排定重启（延迟 ${DELAY}s，label=$LABEL）"
+  echo "=== $(date '+%F %T') 排定重启（延迟 ${DELAY}s，label=${LABEL}）"
   sleep "$DELAY"
 
   echo "--- $(date '+%F %T') 重启前 PID: $(pgrep -f "$PATTERN" | tr '\n' ' ')"

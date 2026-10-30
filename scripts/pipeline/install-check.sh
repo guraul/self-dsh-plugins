@@ -2,7 +2,7 @@
 # install-check.sh — 在一次性 $DSH_HOME 里验证插件能被 profile 正常安装与组合
 #
 # 用法:
-#   scripts/pipeline/install-check.sh                          # 全部 4 个插件
+#   scripts/pipeline/install-check.sh                          # 全部插件（以 lib.sh 的 PLUGIN_DIRS 为准）
 #   scripts/pipeline/install-check.sh dsh-external-discuss      # 只验证指定插件（可多个）
 #
 # 效果（每个插件各跑一遍，全程只用临时目录）:

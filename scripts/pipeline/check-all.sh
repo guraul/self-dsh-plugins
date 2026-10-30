@@ -2,7 +2,7 @@
 # check-all.sh — 遍历插件跑各自的检查（测试 / check / typecheck）
 #
 # 用法:
-#   scripts/pipeline/check-all.sh                             # 全部 4 个插件
+#   scripts/pipeline/check-all.sh                             # 全部插件（以 lib.sh 的 PLUGIN_DIRS 为准）
 #   scripts/pipeline/check-all.sh dsh-external-discuss        # 只跑指定插件（可多个）
 #
 # 规则:
