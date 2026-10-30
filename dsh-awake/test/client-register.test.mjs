@@ -124,13 +124,13 @@ test('渲染：按钮带 aria-pressed / 标题，图标是纯描边、无蒸汽'
   assert.equal(button.props.className, 'dsh-awake-btn')
   assert.equal(typeof button.props.onClick, 'function')
 
-  // 图标：16×16 viewBox、纯描边（fill:none + currentColor + 1.5 圆头），只有杯身 + 把手。
+  // 图标：24 栅格 / 渲染 14px / 1.5 圆头圆角、纯描边，只有杯身 + 把手。
   const iconElement = button.children
   const svg = iconElement.type(iconElement.props)
   assert.equal(svg.type, 'svg')
-  assert.equal(svg.props.viewBox, '0 0 16 16')
-  assert.equal(svg.props.width, 16)
-  assert.equal(svg.props.height, 16)
+  assert.equal(svg.props.viewBox, '0 0 24 24')
+  assert.equal(svg.props.width, 14)
+  assert.equal(svg.props.height, 14)
   assert.equal(svg.props.fill, 'none')
   assert.equal(svg.props.stroke, 'currentColor')
   assert.equal(svg.props.strokeWidth, 1.5)
@@ -206,7 +206,10 @@ test('客户端不轮询、不订阅 SSE、不再有底部状态条（单按钮 
   assert.doesNotMatch(source, /shell\.bottom/, '不再注册 shell.bottom')
   assert.doesNotMatch(source, /dsh-awake-bar/, '状态条样式已删除')
   assert.doesNotMatch(source, /bar\.(label|stop)/, '状态条词条已删除')
-  // 开 / 关只靠颜色：关 = 次级灰，开 = 强调色。
-  assert.match(source, /--dsw-alias-label-secondary/)
+  // 开 / 关只靠颜色：关 = label-primary（与相邻 ✨ 同色），开 = 强调蓝；底色走 5% / hover 9%。
+  assert.match(source, /--dsw-alias-label-primary/)
+  assert.doesNotMatch(source, /--dsw-alias-label-secondary/, '不再用次级灰')
   assert.match(source, /\.dsh-awake-btn\[aria-pressed="true"\]\{color:var\(--dsw-alias-state-business-primary/)
+  assert.match(source, /color-mix\(in srgb, var\(--dsw-alias-label-primary[^)]*\) 5%/)
+  assert.match(source, /color-mix\(in srgb, var\(--dsw-alias-label-primary[^)]*\) 9%/)
 })
