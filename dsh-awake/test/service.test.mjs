@@ -62,9 +62,22 @@ function exitDuringWindow(child) {
   queueMicrotask(() => child.emit('exit', 1, null))
 }
 
+/**
+ * 造一个服务实例，并默认锁定 `platform: 'darwin'`。
+ *
+ * 单测要验的是 macOS 上的状态机，不能跟着跑测试的机器走 —— CI 跑在 Linux，
+ * 默认 `process.platform` 会让每个用例都撞上 501。需要验非 macOS 的用例
+ * 显式覆盖 `platform` 即可。
+ * @param {object} [overrides] 覆盖默认注入缝的选项。
+ * @returns {ReturnType<typeof createAwakeService>} 服务。
+ */
+function makeService(overrides = {}) {
+  return createAwakeService({ platform: 'darwin', ...overrides })
+}
+
 test('start 拉起 caffeinate -i（永不带 -t），并把状态切成 active', async () => {
   const fake = makeSpawn()
-  const service = createAwakeService({ spawn: fake.spawn, wait: async () => {}, now: () => 1700000000000 })
+  const service = makeService({ spawn: fake.spawn, wait: async () => {}, now: () => 1700000000000 })
 
   const status = await service.start()
 
@@ -78,7 +91,7 @@ test('start 拉起 caffeinate -i（永不带 -t），并把状态切成 active',
 
 test('已 active 时再 start 不叠加第二个 caffeinate', async () => {
   const fake = makeSpawn()
-  const service = createAwakeService({ spawn: fake.spawn, wait: async () => {} })
+  const service = makeService({ spawn: fake.spawn, wait: async () => {} })
 
   await service.start()
   const again = await service.start()
@@ -92,7 +105,7 @@ test('并发 start 合并成一次 spawn', async () => {
   const fake = makeSpawn()
   let release
   const gate = new Promise((resolve) => { release = resolve })
-  const service = createAwakeService({
+  const service = makeService({
     spawn: fake.spawn,
     wait: () => gate,
   })
@@ -108,7 +121,7 @@ test('并发 start 合并成一次 spawn', async () => {
 
 test('观察窗口内秒退 → 启动失败，状态不会假装 active', async () => {
   const fake = makeSpawn({ duringSpawn: exitDuringWindow })
-  const service = createAwakeService({ spawn: fake.spawn, wait: async () => {} })
+  const service = makeService({ spawn: fake.spawn, wait: async () => {} })
 
   await assert.rejects(service.start(), (error) => {
     assert.ok(error instanceof AwakeError)
@@ -123,7 +136,7 @@ test('观察窗口内秒退 → 启动失败，状态不会假装 active', async
 test('spawn 抛错（二进制不存在）→ E_SPAWN_FAILED', async () => {
   const boom = Object.assign(new Error('spawn caffeinate ENOENT'), { code: 'ENOENT' })
   const fake = makeSpawn({ throwOnSpawn: boom })
-  const service = createAwakeService({ spawn: fake.spawn, wait: async () => {} })
+  const service = makeService({ spawn: fake.spawn, wait: async () => {} })
 
   await assert.rejects(service.start(), (error) => {
     assert.equal(error.code, CODE.SPAWN_FAILED)
@@ -139,7 +152,7 @@ test('spawn 期间发 error 事件（ENOENT 的另一种形态）→ E_SPAWN_FAI
       queueMicrotask(() => child.emit('error', new Error('ENOENT')))
     },
   })
-  const service = createAwakeService({ spawn: fake.spawn, wait: async () => {} })
+  const service = makeService({ spawn: fake.spawn, wait: async () => {} })
 
   await assert.rejects(service.start(), (error) => {
     assert.equal(error.code, CODE.SPAWN_FAILED)
@@ -150,7 +163,7 @@ test('spawn 期间发 error 事件（ENOENT 的另一种形态）→ E_SPAWN_FAI
 
 test('子进程被外部 kill → exit 监听把状态自愈回 inactive', async () => {
   const fake = makeSpawn()
-  const service = createAwakeService({ spawn: fake.spawn, wait: async () => {} })
+  const service = makeService({ spawn: fake.spawn, wait: async () => {} })
 
   await service.start()
   fake.children[0].emit('exit', null, 'SIGKILL')
@@ -160,7 +173,7 @@ test('子进程被外部 kill → exit 监听把状态自愈回 inactive', async
 
 test('stop 用 SIGTERM 杀掉子进程并回到 inactive', async () => {
   const fake = makeSpawn()
-  const service = createAwakeService({ spawn: fake.spawn, wait: async () => {} })
+  const service = makeService({ spawn: fake.spawn, wait: async () => {} })
 
   await service.start()
   const status = await service.stop()
@@ -171,7 +184,7 @@ test('stop 用 SIGTERM 杀掉子进程并回到 inactive', async () => {
 
 test('inactive 时 stop 是幂等空操作', async () => {
   const fake = makeSpawn()
-  const service = createAwakeService({ spawn: fake.spawn, wait: async () => {} })
+  const service = makeService({ spawn: fake.spawn, wait: async () => {} })
 
   const status = await service.stop()
 
@@ -183,7 +196,7 @@ test('stop 撞上正在飞的 start：先等它落地再杀，不留孤儿', asy
   const fake = makeSpawn()
   let release
   const gate = new Promise((resolve) => { release = resolve })
-  const service = createAwakeService({ spawn: fake.spawn, wait: () => gate })
+  const service = makeService({ spawn: fake.spawn, wait: () => gate })
 
   const starting = service.start()
   const stopping = service.stop()
@@ -198,7 +211,7 @@ test('stop 撞上正在飞的 start：先等它落地再杀，不留孤儿', asy
 
 test('dispose（宿主卸载）一定杀掉子进程', async () => {
   const fake = makeSpawn()
-  const service = createAwakeService({ spawn: fake.spawn, wait: async () => {} })
+  const service = makeService({ spawn: fake.spawn, wait: async () => {} })
 
   await service.start()
   await service.dispose()
