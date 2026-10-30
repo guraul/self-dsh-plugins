@@ -47,7 +47,7 @@
 | 目录 | 包名 | 一句话作用 | 来源 |
 |---|---|---|---|
 | [`dsh-auto-upgrade/`](./dsh-auto-upgrade) | `dsh-plugin-auto-upgrade` | dsh Web UI 自升级：检测 → 兼容性预检 → 非阻塞浮层 → 备份/安装/校验/重启 | **原创** |
-| [`dsh-awake/`](./dsh-awake) | `dsh-plugin-awake` | 发送栏咖啡杯按钮：宿主侧 `caffeinate -i` 保持唤醒，纯开关 + 底部通栏状态条 | **原创** |
+| [`dsh-awake/`](./dsh-awake) | `dsh-plugin-awake` | 发送栏咖啡杯按钮：宿主侧 `caffeinate -i` 保持唤醒，纯开关，单按钮两色 | **原创** |
 | [`dsh-external-discuss/`](./dsh-external-discuss) | `dsh-plugin-external-discuss` | 把 DSH 会话一键送到外部模型（清言网页版）继续讨论 | **原创** |
 | [`dsh-im-bridge-workspaces/`](./dsh-im-bridge-workspaces) | `@mhfire/dsh-im-bridge` | 企业微信 ⇄ DSH Agent 桥接，本地 fork 加多工作区 `/ws` 切换 | **fork**（npm `@mhfire/dsh-im-bridge@0.4.4`） |
 | [`dsh-plugin-product-subagents/`](./dsh-plugin-product-subagents) | `dsh-plugin-product-subagents` | 把 Claude Code / Codex / 任意 ACP CLI 变成基于角色的可续接 subagent | **fork**（`shaokeyibb/dsh-plugin-product-subagents` v0.4.0） |
