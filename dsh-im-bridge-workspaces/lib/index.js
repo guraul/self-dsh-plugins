@@ -10412,8 +10412,21 @@ function apply(ctx, config) {
 			console.log("[im-bridge] 审批应答方已注册(agent)");
 		}
 		/** 卡片按钮点击。 */
+		/** 卡片结果态：点击后 5 秒内换掉，避免停在「待审批」的样子。 */
+		function approvalResultCard(id, title, desc, subTitle) {
+			return {
+				card_type: "text_notice",
+				task_id: id,
+				main_title: {
+					title,
+					desc
+				},
+				sub_title_text: subTitle
+			};
+		}
 		ws.on("event.template_card_event", ((frame) => {
-			const key = frame.body?.event?.event_key;
+			const payload = frame.body?.event;
+			const key = payload?.template_card_event?.event_key ?? payload?.event_key;
 			const userId = frame.body?.from?.userid ?? "";
 			if (typeof key !== "string" || key === "") return;
 			const parsed = parseButtonKey(key);
@@ -10428,7 +10441,10 @@ function apply(ctx, config) {
 				return;
 			}
 			if (!approvals.settle(parsed.id, parsed.decision)) return;
-			notifyChat(entry.chatTarget, parsed.decision === "allowed-once" ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`);
+			const approved = parsed.decision === "allowed-once";
+			ws.updateTemplateCard(frame, approvalResultCard(entry.id, approved ? "✅ 已同意" : "🚫 已拒绝", entry.toolName, approved ? "本次操作已放行（只生效这一次）" : "本次操作已拒绝")).catch(() => {
+				notifyChat(entry.chatTarget, approved ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`);
+			});
 		}));
 		ws.connect();
 		ctx.effect(() => () => {
