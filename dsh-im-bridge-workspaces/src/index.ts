@@ -520,7 +520,14 @@ interface WecomFrame {
     chatid?: string
     chattype?: string | number
     /** Template-card click payload (`event.template_card_event`). */
-    event?: { eventtype?: string; event_key?: string; task_id?: string }
+    event?: {
+      eventtype?: string
+      /** 兼容旧结构：有的通道把 key 直接放在 event 上。 */
+      event_key?: string
+      task_id?: string
+      /** 企微实际下发的结构：key/task_id 嵌在这一层里。 */
+      template_card_event?: { card_type?: string; event_key?: string; task_id?: string }
+    }
   }
 }
 
@@ -536,6 +543,8 @@ interface WecomClient {
   sendMediaMessage(chatid: string, mediaType: string, mediaId: string): Promise<unknown>
   /** Proactive push (approval cards); independent of the inbound frame. */
   sendMessage(chatid: string, body: { msgtype: string; [key: string]: unknown }): Promise<unknown>
+  /** 用点击事件的帧替换卡片内容（企微要求 5 秒内）。 */
+  updateTemplateCard(frame: unknown, templateCard: Record<string, unknown>): Promise<unknown>
   connect(): void
   close?(): void
   on(event: string, handler: (...args: never[]) => void): void
@@ -2318,8 +2327,25 @@ export function apply(ctx: Context, config: Config): void {
     }
 
     /** 卡片按钮点击。 */
+    /** 卡片结果态：点击后 5 秒内换掉，避免停在「待审批」的样子。 */
+    function approvalResultCard(
+      id: string,
+      title: string,
+      desc: string,
+      subTitle: string,
+    ): Record<string, unknown> {
+      return {
+        card_type: 'text_notice',
+        task_id: id,
+        main_title: { title, desc },
+        sub_title_text: subTitle,
+      }
+    }
+
     ws.on('event.template_card_event', ((frame: WecomFrame) => {
-      const key = frame.body?.event?.event_key
+      // 企微实际结构是 `body.event.template_card_event.event_key`；旧结构直接挂在 event 上。
+      const payload = frame.body?.event
+      const key = payload?.template_card_event?.event_key ?? payload?.event_key
       const userId = frame.body?.from?.userid ?? ''
       if (typeof key !== 'string' || key === '') return
       const parsed = parseButtonKey(key)
@@ -2334,12 +2360,25 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
       if (!approvals.settle(parsed.id, parsed.decision)) return
-      void notifyChat(
-        entry.chatTarget,
-        parsed.decision === 'allowed-once'
-          ? `✅ 已放行这一次操作：${entry.toolName}`
-          : `🚫 已拒绝：${entry.toolName}`,
-      )
+
+      const approved = parsed.decision === 'allowed-once'
+      // 先换卡片（5 秒窗口），失败再发文本回执。
+      void ws
+        .updateTemplateCard(
+          frame,
+          approvalResultCard(
+            entry.id,
+            approved ? '✅ 已同意' : '🚫 已拒绝',
+            entry.toolName,
+            approved ? '本次操作已放行（只生效这一次）' : '本次操作已拒绝',
+          ),
+        )
+        .catch(() => {
+          void notifyChat(
+            entry.chatTarget,
+            approved ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`,
+          )
+        })
     }) as (...args: never[]) => void)
 
     ws.connect()

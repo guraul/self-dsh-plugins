@@ -218,6 +218,18 @@ message.image → 立即 ws.downloadFile(url, aeskey)（守 5 分钟有效期）
 3. **失败即拒绝**：卡片与文本都发不出去、断线超过 30 秒、或超时 → 一律 `rejected`，
    绝不留下挂起的请求。
 
+### 卡片点击的真实结构（issue #96）
+
+企微推送的点击事件是：
+
+```json
+{ "event": { "eventtype": "template_card_event",
+             "template_card_event": { "event_key": "approve:1", "task_id": "1" } } }
+```
+
+`event_key` 在 `event.template_card_event` 里，**不在 `event` 上**——读错位置会让点击被静默忽略。
+点击处理后必须在 **5 秒内**调用 `updateTemplateCard` 把卡片换成结果态，否则卡片会一直停在「待审批」。
+
 ### 错误矩阵（全部落到中文提示）
 
 | 情况 | 处理 |
