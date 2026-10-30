@@ -23,6 +23,7 @@
 
 # —— 插件（每个子目录是一个独立插件，包名见各自 package.json）——
 !/dsh-auto-upgrade/
+!/dsh-awake/
 !/dsh-external-discuss/
 !/dsh-im-bridge-workspaces/
 !/dsh-plugin-memx/

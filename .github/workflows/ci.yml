@@ -37,6 +37,11 @@ jobs:
             entry: |
               lib/index.js
               lib/client.js
+          - dir: dsh-awake
+            install: true
+            entry: |
+              lib/index.js
+              lib/client.js
           - dir: dsh-external-discuss
             install: true
             entry: |
@@ -98,6 +103,7 @@ jobs:
         run: |
           # 各插件 lockfile 现状（决定 frozen-lockfile 成败）：
           #   * dsh-auto-upgrade            —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
+          #   * dsh-awake                   —— 有 pnpm-lock.yaml（无运行时依赖，只有 react peer）→ frozen 成功
           #   * dsh-external-discuss        —— 无任何 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
           #   * dsh-plugin-memx             —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           #   * dsh-plugin-product-subagents —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功

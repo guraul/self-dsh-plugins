@@ -1,0 +1,4 @@
+
+- insert:
+    - id: dsh-awake
+      name: 'dsh-plugin-awake'
