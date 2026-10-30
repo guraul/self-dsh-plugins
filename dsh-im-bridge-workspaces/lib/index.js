@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,257 @@ import { createRequire as createRequire$1 } from "module";
 // \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod, mod.exports), cb = null), mod.exports);
 var __require = /* #__PURE__ */ (() => createRequire(import.meta.url))();
+// src/approval.ts
+/** Button keys carry the request id after the colon. */
+const APPROVE_PREFIX = "approve:";
+const REJECT_PREFIX = "reject:";
+/** Keys whose values never reach a WeCom message. */
+const SECRET_KEY = /(pass(word|wd)?|secret|token|api[-_]?key|credential|cookie|authorization|bearer)/i;
+/** Inline assignments inside a command line or URL query (`--token x`, `key=v`). */
+const SECRET_ASSIGNMENT = /((?:--)?(?:token|secret|password|passwd|api[-_]?key|access[-_]?key)(?:\s*[=:]\s*|\s+))(\S+)/gi;
+/** Provider token shapes (GitHub, generic bearer, long hex). */
+const TOKEN_SHAPES = [
+	[/\b(gh[pousr]_[A-Za-z0-9]{4})[A-Za-z0-9]+/g, "$1***"],
+	[/\b(Bearer\s+)[A-Za-z0-9._-]{8,}/gi, "$1***"],
+	[/\b[A-Fa-f0-9]{32,}\b/g, "***"]
+];
+/** Field names worth showing first, in priority order. */
+const SUMMARY_FIELDS = [
+	"command",
+	"cmd",
+	"file_path",
+	"path",
+	"url",
+	"query",
+	"content"
+];
+/** Replace secret-looking substrings inside one string. */
+function redactString(value) {
+	let out = value.replace(SECRET_ASSIGNMENT, "$1***");
+	for (const [pattern, replacement] of TOKEN_SHAPES) out = out.replace(pattern, replacement);
+	return out;
+}
+/** Walk a parsed JSON value, blanking secret-named fields. */
+function redactValue(value) {
+	if (Array.isArray(value)) return value.map(redactValue);
+	if (value !== null && typeof value === "object") {
+		const out = {};
+		for (const [key, inner] of Object.entries(value)) out[key] = SECRET_KEY.test(key) ? "***" : redactValue(inner);
+		return out;
+	}
+	if (typeof value === "string") return redactString(value);
+	return value;
+}
+/** Collapse whitespace so a multi-line command stays on one line. */
+function oneLine(text) {
+	return text.replace(/\s+/g, " ").trim();
+}
+/**
+* Turn raw tool arguments into a short, redacted, single-line summary.
+*
+* Falls back to the raw string when the arguments are not JSON, and truncates
+* with an ellipsis so a card never carries an unbounded command.
+* @param raw - the tool call's `arguments` string (JSON in practice).
+* @param maxLength - hard cap before the ellipsis.
+* @returns one line safe to put in a WeCom message.
+*/
+function redactArguments(raw, maxLength = 160) {
+	if (raw === void 0 || raw.trim() === "") return "（无参数）";
+	let text = raw;
+	try {
+		const parsed = redactValue(JSON.parse(raw));
+		if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+			const record = parsed;
+			const field = SUMMARY_FIELDS.find((name) => typeof record[name] === "string");
+			text = field === void 0 ? JSON.stringify(record) : String(record[field]);
+		} else text = JSON.stringify(parsed);
+	} catch {
+		text = redactString(raw);
+	}
+	const flat = oneLine(text);
+	return flat.length <= maxLength ? flat : `${flat.slice(0, maxLength - 1)}…`;
+}
+/** Render the plain-text fallback prompt (used when cards fail). */
+function formatApprovalText(entry, position, timeoutMinutes) {
+	const lines = [`🔐 需要你批准一次操作（${String(position.index)}/${String(position.total)}）`, `工具：${entry.toolName}`];
+	if (entry.reason !== void 0 && entry.reason !== "") lines.push(`原因：${entry.reason}`);
+	lines.push(`内容：${entry.summary}`);
+	lines.push(`回复「同意 ${entry.id}」放行这一次，或「拒绝 ${entry.id}」拒绝（${String(timeoutMinutes)} 分钟内有效）`);
+	return lines.join("\n");
+}
+/**
+* Build the button card for one pending approval.
+* @param entry - the pending request.
+* @param timeoutMinutes - shown in the subtitle so the user knows the window.
+* @returns a `button_interaction` card.
+*/
+function buildApprovalCard(entry, timeoutMinutes) {
+	const subtitle = entry.reason === void 0 || entry.reason === "" ? entry.summary : `${entry.reason}｜${entry.summary}`;
+	return {
+		card_type: "button_interaction",
+		task_id: entry.id,
+		main_title: {
+			title: "需要你批准一次操作",
+			desc: entry.toolName
+		},
+		sub_title_text: `${subtitle.slice(0, 110)}（${String(timeoutMinutes)} 分钟内有效）`,
+		button_list: [{
+			text: "同意",
+			key: `${APPROVE_PREFIX}${entry.id}`,
+			style: 1
+		}, {
+			text: "拒绝",
+			key: `${REJECT_PREFIX}${entry.id}`,
+			style: 2
+		}]
+	};
+}
+/** Words a user may type to approve. */
+const APPROVE_WORDS = [
+	"同意",
+	"批准",
+	"允许",
+	"可以",
+	"approve",
+	"allow",
+	"yes",
+	"y"
+];
+/** Words a user may type to reject. */
+const REJECT_WORDS = [
+	"拒绝",
+	"不同意",
+	"不允许",
+	"不行",
+	"reject",
+	"deny",
+	"no",
+	"n"
+];
+/**
+* Parse a plain-text approval reply such as `同意 3` or `拒绝`.
+*
+* A bare word is only accepted when `solePendingId` is given, so an ambiguous
+* "同意" never decides the wrong request.
+* @param text - inbound message text (already trimmed of bot mentions).
+* @param solePendingId - id to use when the message names none.
+* @returns the decision plus the request id, or undefined when unrelated.
+*/
+function parseApprovalReply(text, solePendingId) {
+	const normalized = oneLine(text).toLowerCase();
+	if (normalized === "") return void 0;
+	const match = /^(同意|批准|允许|可以|approve|allow|yes|y|拒绝|不同意|不允许|不行|reject|deny|no|n)\s*#?\s*([A-Za-z0-9_-]{1,16})?$/i.exec(normalized);
+	if (match === null) return void 0;
+	const word = (match[1] ?? "").toLowerCase();
+	const explicitId = match[2];
+	const decision = APPROVE_WORDS.includes(word) ? "allowed-once" : "rejected";
+	if (!REJECT_WORDS.includes(word) && !APPROVE_WORDS.includes(word)) return void 0;
+	const id = explicitId ?? solePendingId;
+	if (id === void 0) return void 0;
+	return {
+		id,
+		decision
+	};
+}
+/** Parse a card button key into a decision plus request id. */
+function parseButtonKey(key) {
+	if (key.startsWith("approve:")) {
+		const id = key.slice(8);
+		return id === "" ? void 0 : {
+			id,
+			decision: "allowed-once"
+		};
+	}
+	if (key.startsWith("reject:")) {
+		const id = key.slice(7);
+		return id === "" ? void 0 : {
+			id,
+			decision: "rejected"
+		};
+	}
+}
+/**
+* Serial queue for pending approvals.
+*
+* Only one prompt is on the wire at a time: a row of cards in WeCom is easy to
+* mis-click, and a mis-click here grants one out-of-sandbox operation. The next
+* prompt is sent as soon as the active one settles.
+*/
+var ApprovalQueue = class {
+	waiting = [];
+	active;
+	hooks;
+	constructor(hooks) {
+		this.hooks = hooks;
+	}
+	/** Number of prompts not yet decided (including the active one). */
+	get size() {
+		return this.waiting.length + (this.active === void 0 ? 0 : 1);
+	}
+	/** The id of the prompt currently on the wire, if any. */
+	get activeId() {
+		return this.active?.id;
+	}
+	/** Look up a pending entry without removing it. */
+	get(id) {
+		if (this.active?.id === id) return this.active;
+		return this.waiting.find((entry) => entry.id === id);
+	}
+	/** Queue one approval and start it when the wire is free. */
+	add(entry) {
+		this.waiting.push(entry);
+		this.pump();
+	}
+	/**
+	* Decide one request.
+	* @param id - request id from a button key or text reply.
+	* @param decision - what the user chose.
+	* @param outcome - how it left the queue (defaults to the decision).
+	* @returns true when a pending request matched.
+	*/
+	settle(id, decision, outcome = decision) {
+		const index = this.waiting.findIndex((entry) => entry.id === id);
+		if (index >= 0) {
+			const [entry] = this.waiting.splice(index, 1);
+			if (entry === void 0) return false;
+			this.hooks.done(entry, outcome);
+			entry.settle(decision);
+			return true;
+		}
+		if (this.active?.id !== id) return false;
+		const entry = this.active;
+		this.active = void 0;
+		this.hooks.done(entry, outcome);
+		entry.settle(decision);
+		this.pump();
+		return true;
+	}
+	/** Drop every pending prompt (used on shutdown) without deciding them. */
+	clear() {
+		for (const entry of this.waiting.splice(0)) this.hooks.done(entry, "unavailable");
+		const active = this.active;
+		this.active = void 0;
+		if (active !== void 0) this.hooks.done(active, "unavailable");
+	}
+	/** Send the next prompt when nothing is on the wire. */
+	async pump() {
+		if (this.active !== void 0) return;
+		const next = this.waiting.shift();
+		if (next === void 0) return;
+		this.active = next;
+		try {
+			await this.hooks.send(next, {
+				index: 1,
+				total: this.waiting.length + 1
+			});
+		} catch (error) {
+			this.active = void 0;
+			this.hooks.done(next, "unavailable");
+			next.settle("rejected");
+			this.pump();
+		}
+	}
+};
 /** PNG signature (first 8 bytes). */
 const PNG_MAGIC = Buffer.from([
 	137,
@@ -8641,6 +8892,10 @@ const WecomCliSchema = z.object({
 	configDir: z.string().default(""),
 	allowFrom: z.array(String).default([])
 });
+const ApprovalSchema = z.object({
+	enabled: z.boolean().default(true),
+	timeoutSec: z.number().default(300)
+});
 /** Schemastery schema for the composition entry and settings form. */
 const Config = z.object({
 	botId: z.string().default("").role("secret"),
@@ -8668,6 +8923,10 @@ const Config = z.object({
 		skillsDir: "",
 		configDir: "",
 		allowFrom: []
+	}),
+	approval: ApprovalSchema.default({
+		enabled: true,
+		timeoutSec: 300
 	})
 }).volatile();
 /** Placeholder Map value so later messages on the same key share one queue. */
@@ -8681,6 +8940,7 @@ function emptyChatState() {
 		lastActivity: "",
 		activityClearAt: 0,
 		lastToolByCallId: /* @__PURE__ */ new Map(),
+		toolArgsByCallId: /* @__PURE__ */ new Map(),
 		modelStreamPhase: "idle",
 		streamStatusTick: 0
 	};
@@ -9459,9 +9719,13 @@ function apply(ctx, config) {
 					continue;
 				}
 				if (event.type === "tool/call") {
-					const toolName = event.data.name ?? "";
-					const callId = event.data.callId;
-					if (callId !== void 0) st.lastToolByCallId.set(callId, toolName);
+					const data = event.data;
+					const toolName = data.name ?? "";
+					const callId = data.callId;
+					if (callId !== void 0) {
+						st.lastToolByCallId.set(callId, toolName);
+						if (data.arguments !== void 0) st.toolArgsByCallId.set(callId, data.arguments);
+					}
 					st.activityClearAt = 0;
 					st.lastActivity = `${prefix}${labelTool(toolName, thinking)}`;
 					return;
@@ -9471,6 +9735,7 @@ function apply(ctx, config) {
 					const callId = data.message?.source?.callId;
 					const rawName = callId !== void 0 && st.lastToolByCallId.get(callId) || [...st.lastToolByCallId.values()].at(-1) || "";
 					if (callId !== void 0) st.lastToolByCallId.delete(callId);
+					if (callId !== void 0) st.toolArgsByCallId.delete(callId);
 					const label = labelTool(rawName || "工具", thinking);
 					st.lastActivity = data.error !== void 0 ? `❌ ${label} 失败` : `✅ ${label} 完成`;
 					st.activityClearAt = Date.now() + flashMs;
@@ -9810,6 +10075,20 @@ function apply(ctx, config) {
 		* @param content - stripped text; empty for an image message.
 		* @param image - image download already in flight, when this is a picture.
 		*/
+		/** 纯文本审批回复（卡片发送失败，或用户直接打字）。 */
+		function handleApprovalReply(ref, reply) {
+			const chatTarget = ref.chatid ?? ref.sender;
+			const entry = approvals.get(reply.id);
+			if (entry === void 0 || entry.initiator !== ref.sender) {
+				notifyChat(chatTarget, entry === void 0 ? "没有找到这条待审批记录（可能已超时或已处理）" : "只有发起这次操作的人可以批准");
+				return;
+			}
+			if (!approvals.settle(reply.id, reply.decision)) {
+				notifyChat(chatTarget, "没有找到这条待审批记录（可能已超时或已处理）");
+				return;
+			}
+			notifyChat(chatTarget, reply.decision === "allowed-once" ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`);
+		}
 		function dispatchInbound(frame, content, image) {
 			let ref;
 			try {
@@ -9833,6 +10112,11 @@ function apply(ctx, config) {
 			const summary = image === void 0 ? content.slice(0, 100) : "[图片]";
 			console.log(`[im-bridge] 收到 key=${ref.key} userid=${ref.sender} chattype=${String(frame.body?.chattype ?? "")} chatid=${ref.chatid ?? ""}: ${summary}`);
 			if (image === void 0) {
+				const approvalReply = parseApprovalReply(content, approvals.size === 1 ? approvals.activeId : void 0);
+				if (approvalReply !== void 0) {
+					handleApprovalReply(ref, approvalReply);
+					return;
+				}
 				const command = parseWorkspaceCommand(content);
 				if (command !== void 0) {
 					handleWorkspaceCommand(frame, ref, command).catch((error) => {
@@ -9880,6 +10164,213 @@ function apply(ctx, config) {
 				const message = error instanceof Error ? error.message : String(error);
 				console.error(`[im-bridge] 欢迎语失败: ${message}`);
 			});
+		}));
+		/** 连接可用标记：断线期间来的审批先等重连，最多等 30 秒。 */
+		let wsReady = false;
+		/** 等待连接恢复的唤醒函数集合。 */
+		const readyWaiters = /* @__PURE__ */ new Set();
+		/** 每个待批请求的超时计时器。 */
+		const approvalTimers = /* @__PURE__ */ new Map();
+		/** 请求编号：自增，短到能在手机上打出来。 */
+		let approvalSeq = 0;
+		/** 切换连接状态；恢复时唤醒所有等待者。 */
+		function markReady(ready) {
+			wsReady = ready;
+			if (!ready) return;
+			for (const wake of [...readyWaiters]) wake();
+			readyWaiters.clear();
+		}
+		ws.on("authenticated", (() => markReady(true)));
+		ws.on("connected", (() => markReady(true)));
+		ws.on("disconnected", (() => markReady(false)));
+		ws.on("reconnecting", (() => markReady(false)));
+		/** 等连接就绪；超时返回 false（调用方按不可用处理）。 */
+		function waitForReady(limitMs) {
+			if (wsReady) return Promise.resolve(true);
+			return new Promise((resolve) => {
+				const wake = () => {
+					clearTimeout(timer);
+					readyWaiters.delete(wake);
+					resolve(true);
+				};
+				const timer = setTimeout(() => {
+					readyWaiters.delete(wake);
+					resolve(false);
+				}, limitMs);
+				readyWaiters.add(wake);
+			});
+		}
+		/** 审批记录文件：按月切分，只记身份与时间，不记参数。 */
+		function approvalAuditFile() {
+			const home = process.env.DSH_HOME?.trim() || join(homedir(), ".dsh");
+			const now = /* @__PURE__ */ new Date();
+			const stamp = `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+			return join(home, "dsh-im-bridge", `approval-audit-${stamp}.jsonl`);
+		}
+		/** 追加一条审批记录；写失败只告警，不影响审批结果。 */
+		function recordApproval(entry, outcome) {
+			const file = approvalAuditFile();
+			const line = JSON.stringify({
+				at: (/* @__PURE__ */ new Date()).toISOString(),
+				id: entry.id,
+				chat: entry.chatTarget,
+				kind: entry.kind,
+				initiator: entry.initiator,
+				tool: entry.toolName,
+				outcome
+			});
+			try {
+				mkdirSync(dirname(file), { recursive: true });
+				appendFileSync(file, `${line}\n`, "utf8");
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.warn(`[im-bridge] 审批记录写入失败: ${message}`);
+			}
+		}
+		/** 主动推一条纯文本（卡片点击回执、超时告知）。 */
+		async function notifyChat(chatTarget, text) {
+			try {
+				await ws.sendMessage(chatTarget, {
+					msgtype: "text",
+					text: { content: text }
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.warn(`[im-bridge] 审批提示发送失败: ${message}`);
+			}
+		}
+		/** 超时分钟数，用于文案。 */
+		function approvalTimeoutMinutes() {
+			return Math.max(1, Math.round(cfg().approval.timeoutSec / 60));
+		}
+		/** 发一张审批卡片；卡片失败重试一次，再降级纯文本。 */
+		async function sendApprovalPrompt(entry, position) {
+			if (!await waitForReady(3e4)) throw new Error("企微连接未就绪");
+			const minutes = approvalTimeoutMinutes();
+			const payload = {
+				msgtype: "template_card",
+				template_card: buildApprovalCard(entry, minutes)
+			};
+			try {
+				await ws.sendMessage(entry.chatTarget, payload);
+			} catch {
+				try {
+					await ws.sendMessage(entry.chatTarget, payload);
+				} catch {
+					await ws.sendMessage(entry.chatTarget, {
+						msgtype: "text",
+						text: { content: formatApprovalText(entry, position, minutes) }
+					});
+				}
+			}
+			const timer = setTimeout(() => {
+				approvalTimers.delete(entry.id);
+				approvals.settle(entry.id, "rejected", "timeout");
+			}, Math.max(30, cfg().approval.timeoutSec) * 1e3);
+			approvalTimers.set(entry.id, timer);
+		}
+		const approvals = new ApprovalQueue({
+			send: (entry, position) => sendApprovalPrompt(entry, position),
+			done: (entry, outcome) => {
+				const timer = approvalTimers.get(entry.id);
+				if (timer !== void 0) {
+					clearTimeout(timer);
+					approvalTimers.delete(entry.id);
+				}
+				recordApproval(entry, outcome);
+				if (outcome === "timeout") notifyChat(entry.chatTarget, `⏰ 审批超时（${String(approvalTimeoutMinutes())} 分钟），已按拒绝处理：${entry.toolName}`);
+				else if (outcome === "unavailable") notifyChat(entry.chatTarget, `⚠️ 审批通道不可用，已按拒绝处理：${entry.toolName}`);
+			}
+		});
+		/** 按 Agent 反查它属于哪个企微窗口；不是本插件创建的返回 undefined。 */
+		function findChatByAgent(agent) {
+			for (const st of chats.values()) if (st.agent !== void 0 && st.agent === agent) return st;
+		}
+		/** 窗口的推送目标：群聊用 chatid，单聊用发送者 userid。 */
+		function chatTargetOf(st) {
+			if (st.kind === "group") return st.chatid;
+			return st.sender;
+		}
+		/** 卡片点击所在的会话：群聊用 chatid，单聊用点按者 userid。 */
+		function chatTargetFromFrame(frame, userId) {
+			const chatid = frame.body?.chatid;
+			const chattype = frame.body?.chattype;
+			if ((chattype === "group" || chattype === 2 || chattype === "2") && chatid) return chatid;
+			return chatid ?? userId;
+		}
+		/** 把审批请求映射成一条待批记录；不归本通道时返回 undefined。 */
+		function approvalDraft(request) {
+			const st = findChatByAgent(request.agent);
+			if (st === void 0) return void 0;
+			const chatTarget = chatTargetOf(st);
+			const initiator = st.sender;
+			if (chatTarget === void 0 || initiator === void 0 || initiator === "") return void 0;
+			const callId = request.callId;
+			const rawArgs = callId === void 0 ? void 0 : st.toolArgsByCallId.get(callId);
+			const reason = request.reason ?? request.displayReason?.zh ?? request.displayReason?.en;
+			approvalSeq += 1;
+			return {
+				id: String(approvalSeq),
+				chatTarget,
+				kind: st.kind ?? "single",
+				initiator,
+				toolName: request.toolName,
+				...reason === void 0 ? {} : { reason },
+				summary: redactArguments(rawArgs)
+			};
+		}
+		/** 审批应答方：与网页端赛跑，先到先得。 */
+		const approvalListener = (request, next) => {
+			if (!cfg().approval.enabled) return next();
+			const draft = approvalDraft(request);
+			if (draft === void 0) return next();
+			let resolveRelay = () => {};
+			const relay = new Promise((resolve) => {
+				resolveRelay = resolve;
+			});
+			approvals.add({
+				...draft,
+				settle: (decision) => {
+					resolveRelay(decision);
+				}
+			});
+			const downstream = next().then((outcome) => outcome, () => "unavailable");
+			const never = new Promise(() => {});
+			const winner = Promise.race([downstream.then((outcome) => outcome === "unavailable" ? never : outcome), relay]);
+			const onAbort = () => {
+				approvals.settle(draft.id, "rejected", "unavailable");
+				resolveRelay("rejected");
+			};
+			request.signal?.addEventListener("abort", onAbort, { once: true });
+			return winner.then((outcome) => {
+				request.signal?.removeEventListener("abort", onAbort);
+				if (approvals.get(draft.id) !== void 0) approvals.settle(draft.id, "rejected", "unavailable");
+				return outcome;
+			});
+		};
+		const disposeApproval = ctx.on("approval/request", approvalListener);
+		ctx.effect(() => () => {
+			disposeApproval();
+			approvals.clear();
+		}, "im-bridge: approval relay");
+		/** 卡片按钮点击。 */
+		ws.on("event.template_card_event", ((frame) => {
+			const key = frame.body?.event?.event_key;
+			const userId = frame.body?.from?.userid ?? "";
+			if (typeof key !== "string" || key === "") return;
+			const parsed = parseButtonKey(key);
+			if (parsed === void 0) return;
+			const entry = approvals.get(parsed.id);
+			if (entry === void 0) {
+				notifyChat(chatTargetFromFrame(frame, userId), "该审批已失效（可能已超时或已处理）");
+				return;
+			}
+			if (entry.initiator !== userId) {
+				notifyChat(entry.chatTarget, "只有发起这次操作的人可以批准");
+				return;
+			}
+			if (!approvals.settle(parsed.id, parsed.decision)) return;
+			notifyChat(entry.chatTarget, parsed.decision === "allowed-once" ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`);
 		}));
 		ws.connect();
 		ctx.effect(() => () => {

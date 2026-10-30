@@ -1,4 +1,4 @@
-# @mhfire/dsh-im-bridge（本地 fork：`0.4.4-ws.3`，多工作区 /ws 切换）
+# @mhfire/dsh-im-bridge（本地 fork：`0.5.0-ws.1`，多工作区 /ws 切换 + 审批转接）
 
 基于已安装的 `@mhfire/dsh-im-bridge@0.4.4` fork，给企业微信通道加上**工作区列表与切换**。
 其余行为（按企微窗口建 Agent、单聊一人一条、群聊共用一条、Settings 配置卡片、wecom-cli 办公层）与上游一致。
@@ -134,7 +134,9 @@ launchctl kickstart -k gui/$(id -u)/com.deepseek.dsh-web.self-dsh-plugins
 | --- | --- |
 | `src/workspace-router.ts` | 纯函数：命令解析 `parseWorkspaceCommand`、session key `sessionKeyForWorkspace`、选择器 `resolveWorkspaceSelector`（不 import DSH/Cordis，可单测） |
 | `src/index.ts` | 绑定状态与持久化、`initWorkspaceBindings()`、`handleWorkspaceCommand()`、`ensureAgent(ref, binding, sessionKey)` 按工作区分流 |
+| `src/approval.ts` | 纯函数与队列：参数脱敏 `redactArguments`、文本回复解析 `parseApprovalReply`、按钮 key `parseButtonKey`、卡片/文本渲染、串行队列 `ApprovalQueue`（不 import DSH/Cordis/企微 SDK，可单测） |
 | `test/workspace-router.test.ts` | 上述纯函数的单测（Node 24 type stripping） |
+| `test/approval.test.ts` | 审批转接纯函数与队列的单测 |
 | `tsdown.host.ts` / `tsdown.client.ts` | host 出 `lib/index.js`，client 出 `lib/client.js` |
 
 ## 8. 接收图片（v1）
@@ -191,3 +193,42 @@ launchctl kickstart -k gui/$(id -u)/com.deepseek.dsh-web.self-dsh-plugins
 - 图文混排（`mixed`）：桥接未订阅 `message.mixed`，整条消息不会进入模型。
 - 引用图片（`quote`）：引用内容不解析，只处理本条新发的文字或图片。
 - 文件（`file`）与语音（`voice`）：不下载、不转写，消息会被忽略。
+
+## 9. 审批转接（v1，issue #78）
+
+以前这个通道**没有审批应答方**：工具被沙盒拒绝后，DSH 发起的审批请求没有接收人，
+按「拿不到答复就拒绝」直接失败。现在审批会转成企微消息，你点一下就放行**这一次**操作。
+
+流程：
+
+1. 某个工具调用需要审批（例如要写工作区外的文件、或访问系统钥匙串）。
+2. 桥接把请求转成一张**按钮卡片**发到发起这次操作的聊天窗口。
+3. 你点「同意」→ 这条命令以完整权限执行一次；点「拒绝」→ 按拒绝处理。
+4. 卡片发不出去时，重试一次后降级成纯文本：回复「同意 3」/「拒绝 3」（数字是消息里的编号）。
+
+规则：
+
+| 规则 | 说明 |
+| --- | --- |
+| 只认发起者 | 只有触发这次工具调用的那个人能批准；别人点按钮会收到「只有发起这次操作的人可以批准」 |
+| 一次一放行 | 批准只对这一次调用生效，下次同样操作会重新问 |
+| 先到先得 | 如果网页端也弹了审批框，谁先点谁生效，另一边的回复直接作废 |
+| 超时拒绝 | 默认 5 分钟不操作按拒绝处理，并回一条说明 |
+| 串行发送 | 同时有多个待批时一次只发一张卡，避免点错 |
+| 断线等待 | 机器人断线时最多等 30 秒重连，超时按拒绝处理 |
+
+配置项（Settings 插件配置卡片 / `cordis.patch.yml` 均可设置）：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `approval.enabled` | `true` | 总开关；`false` 时不再发审批消息，恢复成「没有审批通道就直接拒绝」 |
+| `approval.timeoutSec` | `300` | 单条审批的有效秒数（最低按 30 秒执行） |
+
+审批记录写在 `$DSH_HOME/dsh-im-bridge/approval-audit-YYYY-MM.jsonl`，按月一个文件，
+每行记：时间、请求编号、聊天、发起者、工具名、结果。**不记命令参数**，避免把敏感内容落盘。
+
+已知限制：
+
+- 卡片被点后企微要求 5 秒内回执才能更新卡片；网络差时卡片会停留在「待审批」的样子，
+  但审批结果本身仍然生效（以随后的文字回执为准）。
+- 群聊里卡片所有成员可见；非发起者点击会被拒绝并收到提示。
