@@ -192,7 +192,10 @@ message.image → 立即 ws.downloadFile(url, aeskey)（守 5 分钟有效期）
         → settle → 返回 allowed-once | rejected
 ```
 
-### 三个必须守住的点
+### 四个必须守住的点
+
+0. **注册位置**：审批事件按 Agent 作用域分发，应答方必须挂在 Agent 自己的上下文（`installApprovalRelay(agent.ctx, st)`）。
+   挂在插件根上不报错、不警告，但永远收不到——issue #81 踩过。
 
 1. **队列绕过**：审批是在当前 turn 内等待的，用户回复必须像 `/ws` 命令一样在
    `st.queue` **之前**拦截，否则排在当前轮后面 → 死锁。

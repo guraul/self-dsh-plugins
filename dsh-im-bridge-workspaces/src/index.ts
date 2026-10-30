@@ -298,6 +298,8 @@ interface ChatState {
   officeSkillsRegistered: boolean
   /** The gated `wecom_cli` tool already registered on this Agent. */
   officeToolRegistered: boolean
+  /** Approval answerer already registered on this Agent's context. */
+  approvalRelayInstalled: boolean
   queue: Promise<unknown>
   lastActivity: string
   activityClearAt: number
@@ -315,6 +317,7 @@ function emptyChatState(): ChatState {
     wecomPromptInstalled: false,
     officeSkillsRegistered: false,
     officeToolRegistered: false,
+    approvalRelayInstalled: false,
     queue: Promise.resolve(),
     lastActivity: '',
     activityClearAt: 0,
@@ -1342,6 +1345,8 @@ export function apply(ctx: Context, config: Config): void {
         } else {
           installWecomChannel(agent.ctx, st, () => agent.session.header?.cwd ?? stored?.cwd ?? binding.path)
           installOfficeLayer(agent.ctx, st)
+          // 审批事件按 Agent 作用域分发：注册在插件根上收不到，必须挂 Agent 自己的上下文。
+          installApprovalRelay(agent.ctx, st)
         }
         void unpinLegacyWecomTitle(agent)
         const cwd = agent.session.header?.cwd ?? stored?.cwd
@@ -2139,14 +2144,6 @@ export function apply(ctx: Context, config: Config): void {
       },
     })
 
-    /** 按 Agent 反查它属于哪个企微窗口；不是本插件创建的返回 undefined。 */
-    function findChatByAgent(agent: unknown): ChatState | undefined {
-      for (const st of chats.values()) {
-        if (st.agent !== undefined && (st.agent as unknown) === agent) return st
-      }
-      return undefined
-    }
-
     /** 窗口的推送目标：群聊用 chatid，单聊用发送者 userid。 */
     function chatTargetOf(st: ChatState): string | undefined {
       if (st.kind === 'group') return st.chatid
@@ -2161,10 +2158,11 @@ export function apply(ctx: Context, config: Config): void {
       return chatid ?? userId
     }
 
-    /** 把审批请求映射成一条待批记录；不归本通道时返回 undefined。 */
-    function approvalDraft(request: ApprovalRequestLike): Omit<PendingApproval, 'settle'> | undefined {
-      const st = findChatByAgent(request.agent)
-      if (st === undefined) return undefined
+    /** 一个审批请求 → 一条待批记录；信息不全时返回 undefined（交回下游）。 */
+    function approvalDraft(
+      request: ApprovalRequestLike,
+      st: ChatState,
+    ): Omit<PendingApproval, 'settle'> | undefined {
       const chatTarget = chatTargetOf(st)
       const initiator = st.sender
       if (chatTarget === undefined || initiator === undefined || initiator === '') return undefined
@@ -2184,9 +2182,13 @@ export function apply(ctx: Context, config: Config): void {
     }
 
     /** 审批应答方：与网页端赛跑，先到先得。 */
-    const approvalListener = (request: ApprovalRequestLike, next: () => Promise<string>): Promise<string> => {
+    function handleApprovalRequest(
+      request: ApprovalRequestLike,
+      next: () => Promise<string>,
+      st: ChatState,
+    ): Promise<string> {
       if (!cfg().approval.enabled) return next()
-      const draft = approvalDraft(request)
+      const draft = approvalDraft(request, st)
       if (draft === undefined) return next()
 
       let resolveRelay: (decision: ApprovalDecision) => void = () => {}
@@ -2220,20 +2222,28 @@ export function apply(ctx: Context, config: Config): void {
       })
     }
 
-    // Cordis 的审批事件由宿主服务声明；这里用鸭子类型注册，避免把
-    // `@deepseek-ai/dsh-user-approval` 变成插件的 peer 依赖。
-    const approvalEvents = ctx as unknown as {
-      on(
-        name: 'approval/request',
-        listener: (request: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>,
-      ): () => void
+    /**
+     * 在 Agent 自己的上下文里注册审批应答方。
+     *
+     * 审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`），注册在插件根上
+     * 收不到——2026-10-30 实测：只弹了浏览器、企微静默。所以必须挂在 Agent 上下文。
+     */
+    function installApprovalRelay(agentCtx: Context, st: ChatState): void {
+      if (st.approvalRelayInstalled) return
+      st.approvalRelayInstalled = true
+      const events = agentCtx as unknown as {
+        on(
+          name: 'approval/request',
+          listener: (request: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>,
+        ): () => void
+      }
+      const dispose = events.on('approval/request', (request, next) =>
+        handleApprovalRequest(request, next, st))
+      agentCtx.effect(() => () => {
+        dispose()
+        st.approvalRelayInstalled = false
+      }, 'im-bridge: approval relay')
     }
-    // 热重载会重跑 apply：不注销就会叠加多个应答方，同一请求被弹多次。
-    const disposeApproval = approvalEvents.on('approval/request', approvalListener)
-    ctx.effect(() => () => {
-      disposeApproval()
-      approvals.clear()
-    }, 'im-bridge: approval relay')
 
     /** 卡片按钮点击。 */
     ws.on('event.template_card_event', ((frame: WecomFrame) => {

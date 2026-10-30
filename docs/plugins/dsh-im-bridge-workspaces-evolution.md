@@ -4,6 +4,32 @@
 > [`dsh-im-bridge-workspaces.md`](./dsh-im-bridge-workspaces.md) 与插件内 `README.md`。
 > 条目按时间倒序；每次改动合并时追加一条。
 
+## 2026-10-30 · 修复：审批监听挂错上下文（issue #81）
+
+**为什么改**
+#78 上线后真机验证失败：触发提权时**只有浏览器弹框，企微收不到卡片**。
+代码在跑、测试全绿，但功能完全没生效。
+
+**改了什么**
+把审批应答方从插件根上下文挪到每个 Agent 自己的上下文（`installApprovalRelay(agentCtx, st)`），
+并在 Agent 上下文卸载时注销。
+
+**当时的选项**
+- 注册在插件根（#78 的做法） / 注册在 Agent 上下文 → 只能选后者
+- 在 `installWecomChannel` 里注册 / 在 `attach()` 里用 `agent.ctx` 注册 → 选后者：
+  create 路径的 setup 上下文不一定是 Agent 自己的上下文
+
+**为什么这么选**
+审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`），只有挂在该 Agent 上下文链上的监听能收到。
+注册在插件根上不会报错、不会警告，**静默地永远收不到**——这是本次最贵的教训。
+
+**怎么验证**
+`pnpm test` 44 条全绿；`pnpm run build` 后 `node --check lib/index.js` 通过；
+真机：提权触发后企微与浏览器同时收到审批，谁先点谁生效。
+
+**留下的限制**
+作用域问题没有编译期保护，只能靠真机验证；单测覆盖不到，属于「必须手测」的改动。
+
 ## 2026-10-30 · 审批转接（issue #78）
 
 **为什么改**
