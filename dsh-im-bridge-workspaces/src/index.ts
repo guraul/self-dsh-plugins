@@ -2189,35 +2189,24 @@ export function apply(ctx: Context, config: Config): void {
     ): Promise<string> {
       if (!cfg().approval.enabled) return next()
       const draft = approvalDraft(request, st)
+      // 归属判定失败的请求不归本通道管：交回下游（网页端）。
       if (draft === undefined) return next()
 
+      // 按发起方路由：这个请求来自企微会话，就由企微独占，**不调用 next()**，
+      // 网页端不会弹框。反过来，非企微会话在 relayApproval 里已经 next() 掉了。
       let resolveRelay: (decision: ApprovalDecision) => void = () => {}
       const relay = new Promise<ApprovalDecision>((resolve) => {
         resolveRelay = resolve
       })
       approvals.add({ ...draft, settle: (decision) => { resolveRelay(decision) } })
 
-      // 下游（网页端审批）先到先得；它返回「无应答」说明没人接，继续等企微。
-      const downstream = next().then(
-        (outcome) => outcome,
-        () => 'unavailable',
-      )
-      const never = new Promise<string>(() => {})
-      const winner = Promise.race([
-        downstream.then((outcome) => (outcome === 'unavailable' ? never : outcome)),
-        relay,
-      ])
       const onAbort = (): void => {
         approvals.settle(draft.id, 'rejected', 'unavailable')
         resolveRelay('rejected')
       }
       request.signal?.addEventListener('abort', onAbort, { once: true })
-      return winner.then((outcome) => {
+      return relay.then((outcome) => {
         request.signal?.removeEventListener('abort', onAbort)
-        // 下游赢了：撤掉企微侧那条，避免重复点击。
-        if (approvals.get(draft.id) !== undefined) {
-          approvals.settle(draft.id, 'rejected', 'unavailable')
-        }
         return outcome
       })
     }
@@ -2250,7 +2239,7 @@ export function apply(ctx: Context, config: Config): void {
      * 两个注册位置共用的入口：先记诊断日志，再决定是否接管。
      *
      * 同一个请求可能同时到达根与 Agent 两个位置，`relayedApprovals` 保证只有一个位置
-     * 接管，避免重复发审批卡片。
+     * 接管，避免重复发审批卡片。不是企微会话的请求一律 `next()`，交回网页端。
      */
     const relayedApprovals = new WeakSet<object>()
 
@@ -2286,10 +2275,14 @@ export function apply(ctx: Context, config: Config): void {
         on(
           name: 'approval/request',
           listener: (request: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>,
+          prepend?: boolean,
         ): () => void
       }
+      // `true` = prepend：`dsh-api-remotes` 启动时注册的转发监听会接管所有请求并
+      // 一直等浏览器，排在它后面就永远轮不到我们（issue #85 实测）。抢到发言权后，
+      // 只接管企微会话的请求，其余仍交回下游。
       const dispose = events.on('approval/request', (request, next) =>
-        relayApproval('root', request, next, chatBySessionId(approvalSessionId(request))))
+        relayApproval('root', request, next, chatBySessionId(approvalSessionId(request))), true)
       ctx.effect(() => () => {
         dispose()
         rootApprovalRelayInstalled = false
@@ -2311,10 +2304,11 @@ export function apply(ctx: Context, config: Config): void {
         on(
           name: 'approval/request',
           listener: (request: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>,
+          prepend?: boolean,
         ): () => void
       }
       const dispose = events.on('approval/request', (request, next) =>
-        relayApproval('agent', request, next, st))
+        relayApproval('agent', request, next, st), true)
       agentCtx.effect(() => () => {
         dispose()
         st.approvalRelayInstalled = false

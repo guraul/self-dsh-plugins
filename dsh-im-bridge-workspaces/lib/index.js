@@ -10330,17 +10330,13 @@ function apply(ctx, config) {
 					resolveRelay(decision);
 				}
 			});
-			const downstream = next().then((outcome) => outcome, () => "unavailable");
-			const never = new Promise(() => {});
-			const winner = Promise.race([downstream.then((outcome) => outcome === "unavailable" ? never : outcome), relay]);
 			const onAbort = () => {
 				approvals.settle(draft.id, "rejected", "unavailable");
 				resolveRelay("rejected");
 			};
 			request.signal?.addEventListener("abort", onAbort, { once: true });
-			return winner.then((outcome) => {
+			return relay.then((outcome) => {
 				request.signal?.removeEventListener("abort", onAbort);
-				if (approvals.get(draft.id) !== void 0) approvals.settle(draft.id, "rejected", "unavailable");
 				return outcome;
 			});
 		}
@@ -10363,7 +10359,7 @@ function apply(ctx, config) {
 		* 两个注册位置共用的入口：先记诊断日志，再决定是否接管。
 		*
 		* 同一个请求可能同时到达根与 Agent 两个位置，`relayedApprovals` 保证只有一个位置
-		* 接管，避免重复发审批卡片。
+		* 接管，避免重复发审批卡片。不是企微会话的请求一律 `next()`，交回网页端。
 		*/
 		const relayedApprovals = /* @__PURE__ */ new WeakSet();
 		function relayApproval(position, request, next, st) {
@@ -10385,7 +10381,7 @@ function apply(ctx, config) {
 		function installRootApprovalRelay() {
 			if (rootApprovalRelayInstalled) return;
 			rootApprovalRelayInstalled = true;
-			const dispose = ctx.on("approval/request", (request, next) => relayApproval("root", request, next, chatBySessionId(approvalSessionId(request))));
+			const dispose = ctx.on("approval/request", (request, next) => relayApproval("root", request, next, chatBySessionId(approvalSessionId(request))), true);
 			ctx.effect(() => () => {
 				dispose();
 				rootApprovalRelayInstalled = false;
@@ -10402,7 +10398,7 @@ function apply(ctx, config) {
 			installRootApprovalRelay();
 			if (st.approvalRelayInstalled) return;
 			st.approvalRelayInstalled = true;
-			const dispose = agentCtx.on("approval/request", (request, next) => relayApproval("agent", request, next, st));
+			const dispose = agentCtx.on("approval/request", (request, next) => relayApproval("agent", request, next, st), true);
 			agentCtx.effect(() => () => {
 				dispose();
 				st.approvalRelayInstalled = false;
