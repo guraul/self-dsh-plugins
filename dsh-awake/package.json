@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-awake",
   "version": "0.1.0",
-  "description": "Keep-awake toggle for the DeepSeek Harness Web UI: one coffee-cup button in the composer starts a host-side `caffeinate -i` assertion, a second click stops it, and a full-width bar reports the active state.",
+  "description": "Keep-awake toggle for the DeepSeek Harness Web UI: one coffee-cup button in the composer starts a host-side `caffeinate -i` assertion, a second click stops it; the icon colour reports the active state.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -46,7 +46,6 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-ui-renderer",
-        "@deepseek-ai/dsh-client-ui-layout",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-locale"
       ],

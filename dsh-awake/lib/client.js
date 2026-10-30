@@ -1,5 +1,5 @@
 /**
- * 浏览器半边：发送栏的咖啡杯按钮 + 屏幕底部通栏状态条。
+ * 浏览器半边：发送栏的咖啡杯按钮（唯一 UI）。
  *
  * 无构建步骤，手写并包在 `window.__ModuleLoader__.load({id, factory})` 里。
  * 与宿主共享的路由常量在本文件复制一份，由 `test/client-register.test.mjs`
@@ -31,15 +31,11 @@ window.__ModuleLoader__.load({
     const ZH = {
       'button.off': '保持唤醒（点一下开启）',
       'button.on': '保持唤醒中（点一下关闭）',
-      'bar.label': '保持唤醒中',
-      'bar.stop': '关闭',
     }
 
     const EN = {
       'button.off': 'Keep awake (click to enable)',
       'button.on': 'Keeping awake (click to disable)',
-      'bar.label': 'Keeping awake',
-      'bar.stop': 'Stop',
     }
 
     /**
@@ -63,27 +59,14 @@ window.__ModuleLoader__.load({
       tag.dataset.pluginCss = 'dsh-awake'
       tag.textContent = [
         // 发送栏按钮：纯图标、正方形内边距、全圆角，与 dsh-prompt-optimizer 的可点击区域同规。
+        // 开 / 关只靠颜色区分：关 = 次级灰，开 = 强调色（图标自身始终 currentColor）。
         '.dsh-awake-btn{display:inline-flex;align-items:center;justify-content:center;padding:4px;',
         'border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,inherit);',
         'line-height:0;cursor:pointer;}',
-        '.dsh-awake-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12));',
-        'color:var(--dsw-alias-label-primary,inherit);}',
+        '.dsh-awake-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12));}',
         '.dsh-awake-btn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4f7cf7);outline-offset:2px;}',
-        // 已开启：accent 色（图标本身在同一命中区里改实心，见图标组件）。
-        '.dsh-awake-btn[aria-pressed="true"]{color:var(--dsw-alias-brand-primary,#4f7cf7);}',
+        '.dsh-awake-btn[aria-pressed="true"]{color:var(--dsw-alias-state-business-primary,#4f7cf7);}',
         '.dsh-awake-btn:disabled{opacity:.45;cursor:default;}',
-        // 底部通栏：横跨三列的一行，高度自持；inactive 时组件返回 null，布局不预留空间。
-        '.dsh-awake-bar{display:flex;align-items:center;justify-content:center;gap:8px;height:28px;',
-        'padding:0 12px;box-sizing:border-box;',
-        'font:var(--dsw-font-xxs-12,12px/18px var(--dsw-font-family,system-ui));',
-        'color:var(--dsw-alias-label-secondary,inherit);background:var(--dsw-alias-bg-layer-1,transparent);',
-        'border-top:.5px solid var(--dsw-alias-border-l3,rgba(128,128,128,.2));}',
-        '.dsh-awake-bar-stop{height:20px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l3,rgba(128,128,128,.2));',
-        'border-radius:6px;background:transparent;color:inherit;font:inherit;cursor:pointer;}',
-        '.dsh-awake-bar-stop:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12));',
-        'color:var(--dsw-alias-label-primary,inherit);}',
-        '.dsh-awake-bar-stop:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4f7cf7);outline-offset:2px;}',
-        '.dsh-awake-bar-stop:disabled{opacity:.45;cursor:default;}',
       ].join('')
       document.head.appendChild(tag)
     }
@@ -110,7 +93,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 一个极小的外部 store：两个槽位（按钮、状态条）共享同一份状态，
+     * 一个极小的外部 store：只服务于发送栏那一个按钮，
      * 只保留宿主返回的字段，不做乐观更新。
      * @returns {object} store。
      */
@@ -167,45 +150,31 @@ window.__ModuleLoader__.load({
     const store = createStore()
 
     /**
-     * 咖啡杯图标。inactive 是线性描边，active 是实心杯身 + 描边把手/热气。
-     * @param {{active: boolean}} props 属性。
+     * 咖啡杯图标：与 DSH 发送栏其它图标同规的纯描边（无填充、无蒸汽）。
+     * 颜色一律 `currentColor`，开 / 关由按钮的 `color` 决定。
      * @returns {any} svg 元素。
      */
-    function CoffeeIcon({ active }) {
-      const stroke = {
-        fill: 'none',
-        stroke: 'currentColor',
-        strokeWidth: 1.3,
-        strokeLinecap: 'round',
-        strokeLinejoin: 'round',
-      }
+    function CoffeeIcon() {
       return h(
         'svg',
         {
           width: 16,
           height: 16,
           viewBox: '0 0 16 16',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.5,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
           'aria-hidden': 'true',
           focusable: 'false',
-          style: { pointerEvents: 'none' },
+          style: { display: 'block', pointerEvents: 'none' },
         },
         [
           // 杯身
-          h('path', {
-            key: 'cup',
-            d: 'M3.4 6.4h7.2v3.3a3.6 3.6 0 0 1-3.6 3.6 3.6 3.6 0 0 1-3.6-3.6V6.4z',
-            ...stroke,
-            ...(active ? { fill: 'currentColor' } : {}),
-          }),
+          h('path', { key: 'cup', d: 'M2.75 5.75h7.5v3.9a3.75 3.75 0 0 1-7.5 0z' }),
           // 把手
-          h('path', {
-            key: 'handle',
-            d: 'M10.6 7.2h.9a1.8 1.8 0 0 1 0 3.6h-.9',
-            ...stroke,
-          }),
-          // 热气
-          h('path', { key: 'steam1', d: 'M5.4 2.6c-.5.6.5 1.1 0 1.8', ...stroke }),
-          h('path', { key: 'steam2', d: 'M8.0 2.6c-.5.6.5 1.1 0 1.8', ...stroke }),
+          h('path', { key: 'handle', d: 'M10.25 7h1.25a1.6 1.6 0 0 1 0 3.2h-1.25' }),
         ],
       )
     }
@@ -231,34 +200,8 @@ window.__ModuleLoader__.load({
           disabled: state.busy,
           onClick: () => { void store.toggle() },
         },
-        h(CoffeeIcon, { active: state.active }),
+        h(CoffeeIcon, {}),
       )
-    }
-
-    /**
-     * 底部通栏状态条（`shell.bottom`，root 作用域，横跨三列）。
-     * 只在 active 时渲染 —— 空内容布局不预留空间，所以关闭时返回 null 就够。
-     * @param {{t: (key: string) => string}} props 翻译函数（由 `withT` 注入）。
-     * @returns {any} 状态条元素或 null。
-     */
-    function AwakeBar({ t }) {
-      const state = react.useSyncExternalStore(store.subscribe, store.getSnapshot)
-      react.useEffect(() => { void store.refresh() }, [])
-      if (!state.active) return null
-      return h('div', { className: 'dsh-awake-bar', role: 'status' }, [
-        h('span', { key: 'label' }, `☕ ${t('bar.label')}`),
-        h(
-          'button',
-          {
-            key: 'stop',
-            type: 'button',
-            className: 'dsh-awake-bar-stop',
-            disabled: state.busy,
-            onClick: () => { void store.toggle() },
-          },
-          t('bar.stop'),
-        ),
-      ])
     }
 
     /**
@@ -275,18 +218,12 @@ window.__ModuleLoader__.load({
         }
         const bind = locale !== undefined && typeof locale.bind === 'function' ? locale.bind(NS) : makeT(ZH)
 
-        // 两个座位各自独立 inject：任一槽位在该宿主版本里没声明时，
-        // 只跳过它，不会把另一次注册一起拖垮（SlotCore 对未声明槽位是同步抛错）。
+        // 只占发送栏右侧一个座位。`SlotCore` 对未声明槽位是同步抛错，
+        // 而发送栏在目标宿主版本里一定存在；不再注册底部通栏。
         scope.slots.inject('conversation.input.right', () =>
           scope.slots.register(
             { name: 'conversation.input.right', id: 'dsh-awake', order: 40, inject: () => ({}), locale: NS },
             withT(AwakeButton, bind),
-          ),
-        )
-        scope.slots.inject('shell.bottom', () =>
-          scope.slots.register(
-            { name: 'shell.bottom', id: 'dsh-awake', order: 40, locale: NS },
-            withT(AwakeBar, bind),
           ),
         )
       })
