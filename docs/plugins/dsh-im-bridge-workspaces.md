@@ -178,7 +178,7 @@ message.image → 立即 ws.downloadFile(url, aeskey)（守 5 分钟有效期）
 | 文件 | 职责 |
 |---|---|
 | `src/approval.ts`（新） | 纯函数 + 队列：`redactArguments`（参数脱敏）、`parseApprovalReply`（文本回复）、`parseButtonKey`（按钮 key）、`buildApprovalCard` / `formatApprovalText`（渲染）、`ApprovalQueue`（串行、一次一条） |
-| `src/index.ts` | 注册 `approval/request` 应答方（与网页端赛跑）；按 Agent 反查窗口；发卡/降级文本；`event.template_card_event` 处理点击；入站文本在**入队前**拦截审批回复；超时与审计 |
+| `src/index.ts` | 注册 `approval/request` 应答方（`prepend` 前置，按发起方路由）；按会话 id 反查窗口；发卡/降级文本；`event.template_card_event` 处理点击；入站文本在**入队前**拦截审批回复；超时与审计 |
 | `test/approval.test.ts`（新） | 上述纯函数与队列的单测 |
 | `README.md` + 本文档 | 用法、规则、配置、限制 |
 
@@ -186,24 +186,29 @@ message.image → 立即 ws.downloadFile(url, aeskey)（守 5 分钟有效期）
 
 ```
 工具被沙盒拒绝 → 提权重试 → DSH approval.request()
-   ├─ 下游（网页端审批）：next()，先到先得
-   └─ 企微侧：ApprovalQueue → 卡片（失败重试一次 → 纯文本）
-        → 用户点按钮 / 回复「同意 3」
-        → settle → 返回 allowed-once | rejected
+   ├─ 属于企微会话（chats 里按 session id 对得上）
+   │     → 独占：ApprovalQueue → 卡片（失败重试一次 → 纯文本）
+   │       → 用户点按钮 / 回复「同意 3」
+   │       → settle → 返回 allowed-once | rejected
+   │       （**不调用 next()**，网页端不弹框）
+   └─ 不属于企微会话 → next()，交给网页端，企微完全不打扰
 ```
+
+**按发起方路由**：谁的会话发起，就只在那个渠道审批。取代了 issue #78 定的「两个渠道同时弹、先点先算」。
 
 ### 四个必须守住的点
 
-0. **注册位置**：审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`），issue #81 的结论是必须挂在
-   Agent 自己的上下文（`installApprovalRelay(agent.ctx, st)`）。但企微侧仍然收不到审批（只有浏览器弹），
-   根因未知——issue #85 起**两处同时注册**：
+0. **注册位置与优先级**：审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`）；
+   同时 `dsh-api-remotes` 在启动时注册了一个转发监听，它会**接管所有请求并一直等浏览器**，
+   排在它后面就永远轮不到我们（issue #85 实测：企微无卡片、请求挂到浏览器才结束）。
+   所以注册必须带 `prepend`（第三个参数 `true`），抢到发言权后再按归属决定接不接。
+   issue #89 起**两处同时注册**：
    - 根 ctx 那条用 `request.agent.session.id` 反查 `chats` 里的 `st.sessionId`（**只比 id，不比较 Agent 对象**）；
      匹配不到就 `next()` 交回下游。
    - 同一个请求只由一个位置接管（`WeakSet` 去重），避免重复发卡片。
    - 诊断日志：注册时 `[im-bridge] 审批应答方已注册(root|agent)`；收到请求时
      `[im-bridge] 审批请求 <root|agent> session=<id|none> tool=<工具名> 窗口=<chats key|none>`。
-     日志落在 `.dsh-web/web.out.log`，据此判断事件实际到达哪一层、窗口是否匹配成功；
-     **确认位置后再删掉多余的那条注册与日志**。
+     日志落在 `.dsh-web/web.out.log`；`窗口=none` 说明会话 id 没对上，需要改匹配方式。
 
 1. **队列绕过**：审批是在当前 turn 内等待的，用户回复必须像 `/ws` 命令一样在
    `st.queue` **之前**拦截，否则排在当前轮后面 → 死锁。
