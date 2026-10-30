@@ -59,11 +59,15 @@ window.__ModuleLoader__.load({
       tag.dataset.pluginCss = 'dsh-awake'
       tag.textContent = [
         // 发送栏按钮：纯图标、正方形内边距、全圆角，与 dsh-prompt-optimizer 的可点击区域同规。
-        // 开 / 关只靠颜色区分：关 = 次级灰，开 = 强调色（图标自身始终 currentColor）。
+        // 底色也照抄 ✨ 的 `color-mix(label-primary 5%)`，hover 提到 9%。
+        // 开 / 关只靠颜色区分：关 = label-primary（与 ✨ 同色），开 = 强调蓝（底色不变）。
         '.dsh-awake-btn{display:inline-flex;align-items:center;justify-content:center;padding:4px;',
-        'border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,inherit);',
+        'border:0;border-radius:999px;',
+        'background:color-mix(in srgb, var(--dsw-alias-label-primary,#0f1115) 5%, transparent);',
+        'color:var(--dsw-alias-label-primary,inherit);',
         'line-height:0;cursor:pointer;}',
-        '.dsh-awake-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12));}',
+        '.dsh-awake-btn:hover:not(:disabled){',
+        'background:color-mix(in srgb, var(--dsw-alias-label-primary,#0f1115) 9%, transparent);}',
         '.dsh-awake-btn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4f7cf7);outline-offset:2px;}',
         '.dsh-awake-btn[aria-pressed="true"]{color:var(--dsw-alias-state-business-primary,#4f7cf7);}',
         '.dsh-awake-btn:disabled{opacity:.45;cursor:default;}',
@@ -150,7 +154,10 @@ window.__ModuleLoader__.load({
     const store = createStore()
 
     /**
-     * 咖啡杯图标：与 DSH 发送栏其它图标同规的纯描边（无填充、无蒸汽）。
+     * 咖啡杯图标：对齐 `dsh-prompt-optimizer/src/client/SparkleIcon.tsx` 的视觉语言 ——
+     * 24 栅格里画、渲染 14px、`strokeWidth 1.5`（缩放后约 0.88px）、圆头圆角、无填充无蒸汽。
+     * 杯形在 24 栅格内重画：上宽下窄、圆底、内容占 x∈[3.5,20.8]、y∈[4.9,19.4]（含描边），
+     * 与 ✨ 的 18.5 单位视觉体量相当。
      * 颜色一律 `currentColor`，开 / 关由按钮的 `color` 决定。
      * @returns {any} svg 元素。
      */
@@ -158,9 +165,9 @@ window.__ModuleLoader__.load({
       return h(
         'svg',
         {
-          width: 16,
-          height: 16,
-          viewBox: '0 0 16 16',
+          width: 14,
+          height: 14,
+          viewBox: '0 0 24 24',
           fill: 'none',
           stroke: 'currentColor',
           strokeWidth: 1.5,
@@ -168,13 +175,13 @@ window.__ModuleLoader__.load({
           strokeLinejoin: 'round',
           'aria-hidden': 'true',
           focusable: 'false',
-          style: { display: 'block', pointerEvents: 'none' },
+          style: { display: 'block', flexShrink: 0, pointerEvents: 'none' },
         },
         [
-          // 杯身
-          h('path', { key: 'cup', d: 'M2.75 5.75h7.5v3.9a3.75 3.75 0 0 1-7.5 0z' }),
-          // 把手
-          h('path', { key: 'handle', d: 'M10.25 7h1.25a1.6 1.6 0 0 1 0 3.2h-1.25' }),
+          // 杯身：上宽下窄 + 收底圆弧（6.4 半径跨 10.4 弦）。
+          h('path', { key: 'cup', d: 'M4.2 5.6H16.2L15.4 16A6.4 6.4 0 0 1 5 16Z' }),
+          // 把手：一笔半圆，两端压进杯身描边内。
+          h('path', { key: 'handle', d: 'M15.75 7H16.6A3.4 3.4 0 0 1 16.6 13.8H15.5' }),
         ],
       )
     }
