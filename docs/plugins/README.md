@@ -7,6 +7,7 @@
 | 插件 | 文档 | 包名 | 来源 |
 |---|---|---|---|
 | `dsh-auto-upgrade/` | [`dsh-auto-upgrade.md`](./dsh-auto-upgrade.md) | `dsh-plugin-auto-upgrade` | 原创 |
+| `dsh-awake/` | [`dsh-plugin-awake.md`](./dsh-plugin-awake.md) | `dsh-plugin-awake` | 原创 |
 | `dsh-external-discuss/` | [`dsh-external-discuss.md`](./dsh-external-discuss.md) | `dsh-plugin-external-discuss` | 原创 |
 | `dsh-im-bridge-workspaces/` | [`dsh-im-bridge-workspaces.md`](./dsh-im-bridge-workspaces.md) · [演进记录](./dsh-im-bridge-workspaces-evolution.md) | `@mhfire/dsh-im-bridge` | fork（npm `@mhfire/dsh-im-bridge@0.4.4`） |
 | `dsh-plugin-product-subagents/` | [`dsh-plugin-product-subagents.md`](./dsh-plugin-product-subagents.md) | `dsh-plugin-product-subagents` | fork（`shaokeyibb/dsh-plugin-product-subagents` v0.4.0） |
