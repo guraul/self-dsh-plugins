@@ -9,6 +9,7 @@
  */
 
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -29,6 +30,17 @@ import { installModelSelection, type ModelSelection } from '@deepseek-ai/dsh-age
 import type {} from '@deepseek-ai/dsh-settings'
 // Type-only: the 'session/title' SessionEventMap merge this bridge reads and appends.
 import type {} from '@deepseek-ai/dsh-session-title'
+import {
+  ApprovalQueue,
+  buildApprovalCard,
+  formatApprovalText,
+  parseApprovalReply,
+  parseButtonKey,
+  redactArguments,
+  type ApprovalDecision,
+  type ApprovalOutcome,
+  type PendingApproval,
+} from './approval.ts'
 import {
   collectReplyPngs,
   resolveChatId,
@@ -146,6 +158,19 @@ const WecomCliSchema = z.object({
   allowFrom: z.array(String).default([]),
 })
 
+const ApprovalSchema = z.object({
+  enabled: z.boolean().default(true),
+  timeoutSec: z.number().default(300),
+})
+
+/** Approval relay settings: forward DSH approval requests to WeCom. */
+export interface ApprovalConfig {
+  /** Master switch; off restores the fail-closed "no approval channel" behaviour. */
+  enabled: boolean
+  /** How long one prompt stays pending before it is rejected automatically. */
+  timeoutSec: number
+}
+
 /** Optional wecom-cli office skills (mail, calendar, docs, …). */
 export interface WecomCliConfig {
   /** Explicit opt-in; off by default because it shares the authorized identity. */
@@ -185,6 +210,7 @@ export interface Config {
   deniedMessage: string
   welcomeMessage: string
   wecomCli: WecomCliConfig
+  approval: ApprovalConfig
 }
 
 /** Schemastery schema for the composition entry and settings form. */
@@ -210,6 +236,7 @@ export const Config = z.object({
   deniedMessage: z.string().default('无权访问本服务'),
   welcomeMessage: z.string().default('👋 办公助手已就绪。直接发消息即可，例如查文件、整理文档、查资料或处理日常事务。'),
   wecomCli: WecomCliSchema.default({ enabled: false, skillsDir: '', configDir: '', allowFrom: [] }),
+  approval: ApprovalSchema.default({ enabled: true, timeoutSec: 300 }),
 }).volatile()
 
 interface LoggedEvent {
@@ -231,6 +258,8 @@ interface AssistantMessageData {
 interface ToolCallData {
   name?: string
   callId?: string
+  /** Raw JSON arguments, captured so an approval prompt can show the command. */
+  arguments?: string
 }
 
 interface ToolResultData {
@@ -273,6 +302,8 @@ interface ChatState {
   lastActivity: string
   activityClearAt: number
   lastToolByCallId: Map<string, string>
+  /** Raw tool arguments by call id, kept only until the approval prompt shows them. */
+  toolArgsByCallId: Map<string, string>
   modelStreamPhase: 'idle' | 'reasoning' | 'outputting'
   streamStatusTick: number
 }
@@ -288,6 +319,7 @@ function emptyChatState(): ChatState {
     lastActivity: '',
     activityClearAt: 0,
     lastToolByCallId: new Map(),
+    toolArgsByCallId: new Map(),
     modelStreamPhase: 'idle',
     streamStatusTick: 0,
   }
@@ -484,6 +516,8 @@ interface WecomFrame {
     userid?: string
     chatid?: string
     chattype?: string | number
+    /** Template-card click payload (`event.template_card_event`). */
+    event?: { eventtype?: string; event_key?: string; task_id?: string }
   }
 }
 
@@ -497,9 +531,21 @@ interface WecomClient {
     options: { type: string; filename: string },
   ): Promise<{ media_id?: string; mediaId?: string }>
   sendMediaMessage(chatid: string, mediaType: string, mediaId: string): Promise<unknown>
+  /** Proactive push (approval cards); independent of the inbound frame. */
+  sendMessage(chatid: string, body: { msgtype: string; [key: string]: unknown }): Promise<unknown>
   connect(): void
   close?(): void
   on(event: string, handler: (...args: never[]) => void): void
+}
+
+/** Duck-typed approval request (the host service owns the real type). */
+interface ApprovalRequestLike {
+  agent: unknown
+  toolName: string
+  callId?: string
+  reason?: string
+  displayReason?: Record<string, string>
+  signal?: AbortSignal
 }
 
 /** Join assistant text from one turn starting at `firstSeq`. */
@@ -1402,9 +1448,14 @@ export function apply(ctx: Context, config: Config): void {
           continue
         }
         if (event.type === 'tool/call') {
-          const toolName = (event.data as ToolCallData).name ?? ''
-          const callId = (event.data as ToolCallData).callId
-          if (callId !== undefined) st.lastToolByCallId.set(callId, toolName)
+          const data = event.data as ToolCallData
+          const toolName = data.name ?? ''
+          const callId = data.callId
+          if (callId !== undefined) {
+            st.lastToolByCallId.set(callId, toolName)
+            // Kept until the approval prompt (or the result) consumes it.
+            if (data.arguments !== undefined) st.toolArgsByCallId.set(callId, data.arguments)
+          }
           st.activityClearAt = 0
           st.lastActivity = `${prefix}${labelTool(toolName, thinking)}`
           return
@@ -1416,6 +1467,7 @@ export function apply(ctx: Context, config: Config): void {
             || [...st.lastToolByCallId.values()].at(-1)
             || ''
           if (callId !== undefined) st.lastToolByCallId.delete(callId)
+          if (callId !== undefined) st.toolArgsByCallId.delete(callId)
           const label = labelTool(rawName || '工具', thinking)
           const failed = data.error !== undefined
           st.lastActivity = failed ? `❌ ${label} 失败` : `✅ ${label} 完成`
@@ -1822,6 +1874,34 @@ export function apply(ctx: Context, config: Config): void {
      * @param content - stripped text; empty for an image message.
      * @param image - image download already in flight, when this is a picture.
      */
+    /** 纯文本审批回复（卡片发送失败，或用户直接打字）。 */
+    function handleApprovalReply(
+      ref: WecomSessionRef,
+      reply: { id: string; decision: ApprovalDecision },
+    ): void {
+      const chatTarget = ref.chatid ?? ref.sender
+      const entry = approvals.get(reply.id)
+      if (entry === undefined || entry.initiator !== ref.sender) {
+        void notifyChat(
+          chatTarget,
+          entry === undefined
+            ? '没有找到这条待审批记录（可能已超时或已处理）'
+            : '只有发起这次操作的人可以批准',
+        )
+        return
+      }
+      if (!approvals.settle(reply.id, reply.decision)) {
+        void notifyChat(chatTarget, '没有找到这条待审批记录（可能已超时或已处理）')
+        return
+      }
+      void notifyChat(
+        chatTarget,
+        reply.decision === 'allowed-once'
+          ? `✅ 已放行这一次操作：${entry.toolName}`
+          : `🚫 已拒绝：${entry.toolName}`,
+      )
+    }
+
     function dispatchInbound(frame: WecomFrame, content: string, image?: InboundImage): void {
       let ref: WecomSessionRef
       try {
@@ -1849,6 +1929,14 @@ export function apply(ctx: Context, config: Config): void {
         `[im-bridge] 收到 key=${ref.key} userid=${ref.sender} chattype=${String(frame.body?.chattype ?? '')} chatid=${ref.chatid ?? ''}: ${summary}`,
       )
       if (image === undefined) {
+        // 审批回复必须在入队前拦截：审批是在当前 turn 内等待的，
+        // 排进队列会等到这一轮结束，形成死锁。
+        const solePendingId = approvals.size === 1 ? approvals.activeId : undefined
+        const approvalReply = parseApprovalReply(content, solePendingId)
+        if (approvalReply !== undefined) {
+          handleApprovalReply(ref, approvalReply)
+          return
+        }
         // `/ws …` 由插件直接回复，永远不进入模型。
         const command = parseWorkspaceCommand(content)
         if (command !== undefined) {
@@ -1914,6 +2002,262 @@ export function apply(ctx: Context, config: Config): void {
         const message = error instanceof Error ? error.message : String(error)
         console.error(`[im-bridge] 欢迎语失败: ${message}`)
       })
+    }) as (...args: never[]) => void)
+
+    // ---- 审批转接（approval relay）---------------------------------------
+    // DSH 的审批请求在这里转成企微消息：卡片为主、纯文本兜底；
+    // 只认发起者；超时或通道不可用时按拒绝处理（fail closed）。
+    /** 连接可用标记：断线期间来的审批先等重连，最多等 30 秒。 */
+    let wsReady = false
+    /** 等待连接恢复的唤醒函数集合。 */
+    const readyWaiters = new Set<() => void>()
+    /** 每个待批请求的超时计时器。 */
+    const approvalTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    /** 请求编号：自增，短到能在手机上打出来。 */
+    let approvalSeq = 0
+
+    /** 切换连接状态；恢复时唤醒所有等待者。 */
+    function markReady(ready: boolean): void {
+      wsReady = ready
+      if (!ready) return
+      for (const wake of [...readyWaiters]) wake()
+      readyWaiters.clear()
+    }
+
+    ws.on('authenticated', (() => markReady(true)) as (...args: never[]) => void)
+    ws.on('connected', (() => markReady(true)) as (...args: never[]) => void)
+    ws.on('disconnected', (() => markReady(false)) as (...args: never[]) => void)
+    ws.on('reconnecting', (() => markReady(false)) as (...args: never[]) => void)
+
+    /** 等连接就绪；超时返回 false（调用方按不可用处理）。 */
+    function waitForReady(limitMs: number): Promise<boolean> {
+      if (wsReady) return Promise.resolve(true)
+      return new Promise<boolean>((resolve) => {
+        const wake = (): void => {
+          clearTimeout(timer)
+          readyWaiters.delete(wake)
+          resolve(true)
+        }
+        const timer = setTimeout(() => {
+          readyWaiters.delete(wake)
+          resolve(false)
+        }, limitMs)
+        readyWaiters.add(wake)
+      })
+    }
+
+    /** 审批记录文件：按月切分，只记身份与时间，不记参数。 */
+    function approvalAuditFile(): string {
+      const home = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')
+      const now = new Date()
+      const stamp = `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}`
+      return join(home, 'dsh-im-bridge', `approval-audit-${stamp}.jsonl`)
+    }
+
+    /** 追加一条审批记录；写失败只告警，不影响审批结果。 */
+    function recordApproval(entry: PendingApproval, outcome: ApprovalOutcome): void {
+      const file = approvalAuditFile()
+      const line = JSON.stringify({
+        at: new Date().toISOString(),
+        id: entry.id,
+        chat: entry.chatTarget,
+        kind: entry.kind,
+        initiator: entry.initiator,
+        tool: entry.toolName,
+        outcome,
+      })
+      try {
+        mkdirSync(dirname(file), { recursive: true })
+        appendFileSync(file, `${line}\n`, 'utf8')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[im-bridge] 审批记录写入失败: ${message}`)
+      }
+    }
+
+    /** 主动推一条纯文本（卡片点击回执、超时告知）。 */
+    async function notifyChat(chatTarget: string, text: string): Promise<void> {
+      try {
+        await ws.sendMessage(chatTarget, { msgtype: 'text', text: { content: text } })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[im-bridge] 审批提示发送失败: ${message}`)
+      }
+    }
+
+    /** 超时分钟数，用于文案。 */
+    function approvalTimeoutMinutes(): number {
+      return Math.max(1, Math.round(cfg().approval.timeoutSec / 60))
+    }
+
+    /** 发一张审批卡片；卡片失败重试一次，再降级纯文本。 */
+    async function sendApprovalPrompt(
+      entry: PendingApproval,
+      position: { index: number; total: number },
+    ): Promise<void> {
+      const ready = await waitForReady(30_000)
+      if (!ready) throw new Error('企微连接未就绪')
+      const minutes = approvalTimeoutMinutes()
+      const card = buildApprovalCard(entry, minutes)
+      const payload = { msgtype: 'template_card', template_card: card }
+      try {
+        await ws.sendMessage(entry.chatTarget, payload)
+      } catch {
+        try {
+          await ws.sendMessage(entry.chatTarget, payload)
+        } catch {
+          await ws.sendMessage(entry.chatTarget, {
+            msgtype: 'text',
+            text: { content: formatApprovalText(entry, position, minutes) },
+          })
+        }
+      }
+      const timer = setTimeout(() => {
+        approvalTimers.delete(entry.id)
+        approvals.settle(entry.id, 'rejected', 'timeout')
+      }, Math.max(30, cfg().approval.timeoutSec) * 1000)
+      approvalTimers.set(entry.id, timer)
+    }
+
+    const approvals = new ApprovalQueue({
+      send: (entry, position) => sendApprovalPrompt(entry, position),
+      done: (entry, outcome) => {
+        const timer = approvalTimers.get(entry.id)
+        if (timer !== undefined) {
+          clearTimeout(timer)
+          approvalTimers.delete(entry.id)
+        }
+        recordApproval(entry, outcome)
+        if (outcome === 'timeout') {
+          void notifyChat(
+            entry.chatTarget,
+            `⏰ 审批超时（${String(approvalTimeoutMinutes())} 分钟），已按拒绝处理：${entry.toolName}`,
+          )
+        } else if (outcome === 'unavailable') {
+          void notifyChat(entry.chatTarget, `⚠️ 审批通道不可用，已按拒绝处理：${entry.toolName}`)
+        }
+      },
+    })
+
+    /** 按 Agent 反查它属于哪个企微窗口；不是本插件创建的返回 undefined。 */
+    function findChatByAgent(agent: unknown): ChatState | undefined {
+      for (const st of chats.values()) {
+        if (st.agent !== undefined && (st.agent as unknown) === agent) return st
+      }
+      return undefined
+    }
+
+    /** 窗口的推送目标：群聊用 chatid，单聊用发送者 userid。 */
+    function chatTargetOf(st: ChatState): string | undefined {
+      if (st.kind === 'group') return st.chatid
+      return st.sender
+    }
+
+    /** 卡片点击所在的会话：群聊用 chatid，单聊用点按者 userid。 */
+    function chatTargetFromFrame(frame: WecomFrame, userId: string): string {
+      const chatid = frame.body?.chatid
+      const chattype = frame.body?.chattype
+      if ((chattype === 'group' || chattype === 2 || chattype === '2') && chatid) return chatid
+      return chatid ?? userId
+    }
+
+    /** 把审批请求映射成一条待批记录；不归本通道时返回 undefined。 */
+    function approvalDraft(request: ApprovalRequestLike): Omit<PendingApproval, 'settle'> | undefined {
+      const st = findChatByAgent(request.agent)
+      if (st === undefined) return undefined
+      const chatTarget = chatTargetOf(st)
+      const initiator = st.sender
+      if (chatTarget === undefined || initiator === undefined || initiator === '') return undefined
+      const callId = request.callId
+      const rawArgs = callId === undefined ? undefined : st.toolArgsByCallId.get(callId)
+      const reason = request.reason ?? request.displayReason?.zh ?? request.displayReason?.en
+      approvalSeq += 1
+      return {
+        id: String(approvalSeq),
+        chatTarget,
+        kind: st.kind ?? 'single',
+        initiator,
+        toolName: request.toolName,
+        ...(reason === undefined ? {} : { reason }),
+        summary: redactArguments(rawArgs),
+      }
+    }
+
+    /** 审批应答方：与网页端赛跑，先到先得。 */
+    const approvalListener = (request: ApprovalRequestLike, next: () => Promise<string>): Promise<string> => {
+      if (!cfg().approval.enabled) return next()
+      const draft = approvalDraft(request)
+      if (draft === undefined) return next()
+
+      let resolveRelay: (decision: ApprovalDecision) => void = () => {}
+      const relay = new Promise<ApprovalDecision>((resolve) => {
+        resolveRelay = resolve
+      })
+      approvals.add({ ...draft, settle: (decision) => { resolveRelay(decision) } })
+
+      // 下游（网页端审批）先到先得；它返回「无应答」说明没人接，继续等企微。
+      const downstream = next().then(
+        (outcome) => outcome,
+        () => 'unavailable',
+      )
+      const never = new Promise<string>(() => {})
+      const winner = Promise.race([
+        downstream.then((outcome) => (outcome === 'unavailable' ? never : outcome)),
+        relay,
+      ])
+      const onAbort = (): void => {
+        approvals.settle(draft.id, 'rejected', 'unavailable')
+        resolveRelay('rejected')
+      }
+      request.signal?.addEventListener('abort', onAbort, { once: true })
+      return winner.then((outcome) => {
+        request.signal?.removeEventListener('abort', onAbort)
+        // 下游赢了：撤掉企微侧那条，避免重复点击。
+        if (approvals.get(draft.id) !== undefined) {
+          approvals.settle(draft.id, 'rejected', 'unavailable')
+        }
+        return outcome
+      })
+    }
+
+    // Cordis 的审批事件由宿主服务声明；这里用鸭子类型注册，避免把
+    // `@deepseek-ai/dsh-user-approval` 变成插件的 peer 依赖。
+    const approvalEvents = ctx as unknown as {
+      on(
+        name: 'approval/request',
+        listener: (request: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>,
+      ): () => void
+    }
+    // 热重载会重跑 apply：不注销就会叠加多个应答方，同一请求被弹多次。
+    const disposeApproval = approvalEvents.on('approval/request', approvalListener)
+    ctx.effect(() => () => {
+      disposeApproval()
+      approvals.clear()
+    }, 'im-bridge: approval relay')
+
+    /** 卡片按钮点击。 */
+    ws.on('event.template_card_event', ((frame: WecomFrame) => {
+      const key = frame.body?.event?.event_key
+      const userId = frame.body?.from?.userid ?? ''
+      if (typeof key !== 'string' || key === '') return
+      const parsed = parseButtonKey(key)
+      if (parsed === undefined) return
+      const entry = approvals.get(parsed.id)
+      if (entry === undefined) {
+        void notifyChat(chatTargetFromFrame(frame, userId), '该审批已失效（可能已超时或已处理）')
+        return
+      }
+      if (entry.initiator !== userId) {
+        void notifyChat(entry.chatTarget, '只有发起这次操作的人可以批准')
+        return
+      }
+      if (!approvals.settle(parsed.id, parsed.decision)) return
+      void notifyChat(
+        entry.chatTarget,
+        parsed.decision === 'allowed-once'
+          ? `✅ 已放行这一次操作：${entry.toolName}`
+          : `🚫 已拒绝：${entry.toolName}`,
+      )
     }) as (...args: never[]) => void)
 
     ws.connect()

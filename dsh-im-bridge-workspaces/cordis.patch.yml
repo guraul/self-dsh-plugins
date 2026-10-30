@@ -13,6 +13,12 @@
         workspaceAdd: false
         # 接收企微发来的图片；false 时拒收图片
         imageEnabled: true
+        # 审批转接：把 DSH 的审批请求转成企微卡片（点按放行一次）
+        approval:
+          # false = 恢复「没有审批通道就直接拒绝」
+          enabled: true
+          # 单条审批的有效秒数
+          timeoutSec: 300
         allowFrom: []
         startHint: '🧠 正在思考...'
         agentTimeoutSec: 600

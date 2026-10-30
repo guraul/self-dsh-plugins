@@ -167,3 +167,59 @@ message.image → 立即 ws.downloadFile(url, aeskey)（守 5 分钟有效期）
 - `pnpm run build:host` → `node --check lib/index.js` 通过。
 - 手工（需真机）：单聊/群聊发图 → Agent 描述图片；切纯文本模型发图 → 明确提示；`/ws` 命令不回归。
 - 不在本次范围：`message.mixed`、`quote.image`、`message.file`、语音。
+
+## 审批转接（v1，issue #78）
+
+**结论**：通道原来没有任何审批应答方，工具被沙盒拒绝后 DSH 的审批请求按「拿不到答复就拒绝」
+直接失败。现在桥接注册一个应答方，把请求转成企微按钮卡片，点按后放行**这一次**。
+
+### 新增/改动
+
+| 文件 | 职责 |
+|---|---|
+| `src/approval.ts`（新） | 纯函数 + 队列：`redactArguments`（参数脱敏）、`parseApprovalReply`（文本回复）、`parseButtonKey`（按钮 key）、`buildApprovalCard` / `formatApprovalText`（渲染）、`ApprovalQueue`（串行、一次一条） |
+| `src/index.ts` | 注册 `approval/request` 应答方（与网页端赛跑）；按 Agent 反查窗口；发卡/降级文本；`event.template_card_event` 处理点击；入站文本在**入队前**拦截审批回复；超时与审计 |
+| `test/approval.test.ts`（新） | 上述纯函数与队列的单测 |
+| `README.md` + 本文档 | 用法、规则、配置、限制 |
+
+### 数据流
+
+```
+工具被沙盒拒绝 → 提权重试 → DSH approval.request()
+   ├─ 下游（网页端审批）：next()，先到先得
+   └─ 企微侧：ApprovalQueue → 卡片（失败重试一次 → 纯文本）
+        → 用户点按钮 / 回复「同意 3」
+        → settle → 返回 allowed-once | rejected
+```
+
+### 三个必须守住的点
+
+1. **队列绕过**：审批是在当前 turn 内等待的，用户回复必须像 `/ws` 命令一样在
+   `st.queue` **之前**拦截，否则排在当前轮后面 → 死锁。
+2. **身份绑定**：只认发起者（`st.sender`），卡片点击用 `body.from.userid` 校验；
+   非发起者点按只回提示，不结算。
+3. **失败即拒绝**：卡片与文本都发不出去、断线超过 30 秒、或超时 → 一律 `rejected`，
+   绝不留下挂起的请求。
+
+### 错误矩阵（全部落到中文提示）
+
+| 情况 | 处理 |
+|---|---|
+| 卡片发送失败 | 重试一次，再降级纯文本 |
+| 文本也发不出去 | 按不可用拒绝，回「审批通道不可用」 |
+| 断线 | 最多等 30 秒重连，超时拒绝 |
+| 超时 | 默认 5 分钟，回「审批超时，已按拒绝处理」 |
+| 编号不存在 / 已处理 | 回「没有找到这条待审批记录」 |
+| 非发起者点按 | 回「只有发起这次操作的人可以批准」 |
+
+### 配置
+
+`approval.enabled`（默认 `true`）、`approval.timeoutSec`（默认 `300`）。
+`Config` interface + schema + `cordis.patch.yml` + README 四处同步。
+
+### 验收
+
+- `pnpm test` 全绿（新增 14 条：脱敏、文本解析、按钮 key、卡片渲染、队列串行/排队结算/发送失败/清空）。
+- `pnpm run build:host` → `lib/index.js` 更新；`node --check lib/index.js` 通过。
+- 手工（需真机）：越界写文件 → 收到卡片 → 点同意放行一次；再触发同样操作 → 重新询问；
+  非发起者在群里点 → 被拒；不操作 5 分钟 → 超时拒绝。
