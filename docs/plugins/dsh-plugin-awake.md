@@ -9,7 +9,7 @@
 
 | 术语 | 含义 | 在本插件里的对应物 |
 |---|---|---|
-| **保持唤醒** | 让机器「正在被使用」这件事对系统成立，从而不进入空闲睡眠。**不是**不休眠的万能开关。 | 咖啡杯按钮 / 底部状态条的 active 态 |
+| **保持唤醒** | 让机器「正在被使用」这件事对系统成立，从而不进入空闲睡眠。**不是**不休眠的万能开关。 | 咖啡杯按钮的强调色态 |
 | **唤醒断言** | macOS 里的一个「有人在用」的声明（assertion）。持有断言期间，对应种类的睡眠被抑制。种类由参数决定：`-i` 抑制空闲系统睡眠、`-d` 抑制显示器睡眠、`-s` 抑制系统睡眠。 | `caffeinate -i` 进程本身持有的 `PreventUserIdleSystemSleep` |
 | **空闲睡眠** | 一段时间没有任何 **HID**（键盘 / 鼠标 / 触控板）输入后，系统主动 `Sleep`。判据只有 HID，**不看进程、不看网络**。 | 本插件唯一要压的东西 |
 | **合盖休眠** | 合上屏幕触发的休眠。硬件层事件，软件断言挡不住。 | **本插件不处理**（README 明写） |
@@ -38,15 +38,15 @@
 | `lib/host/cross-site.js` | 跨站防护：自定义头 + `Origin` 同源判定 |
 | `lib/host/loopback.js` | loopback 围栏（与 `dsh-auto-upgrade` 同构的复制件） |
 | `lib/host/http.js` | JSON 信封、`RequestError`、有界 body、方法分发（同上，复制件） |
-| `lib/client.js` | 浏览器半边：`conversation.input.right` 按钮 + `shell.bottom` 状态条 + 中英字典 + 内联样式 |
+| `lib/client.js` | 浏览器半边：`conversation.input.right` 单按钮（纯描边图标 + 两色状态）+ 中英字典 + 内联样式 |
 | `scripts/lint.js` | 门禁之一：对 `lib/**`、`test/**` 逐个 `node --check` |
 | `test/*.test.mjs` | 状态机、路由、跨站/loopback 围栏、客户端注册与 store |
 
 ## 架构与数据流
 
 ```
-浏览器（lib/client.js，同一份 store 供两个槽位）
-   │  GET /status            ← 挂载时各读一次（并发合并）
+浏览器（lib/client.js，单按钮，无其它槽位）
+   │  GET /status            ← 挂载时读一次（并发合并）
    │  POST /start|/stop      ← 带 X-DSH-Plugin: awake
    ▼
 宿主路由（lib/index.js）
@@ -65,11 +65,12 @@ caffeinate ──持有──► PreventUserIdleSystemSleep
    单测 `test/service.test.mjs` 有一条断言专门守这个。
 2. **状态只在宿主。** 客户端不写 `localStorage`、不轮询、不接 SSE。要在页面上「记住」什么，
    想清楚它是不是该由宿主回答——本插件的答案是：宿主答，页面读。
-3. **`shell.bottom` 是 root 作用域的单槽位**，`conversation.input.right` 是 **session 作用域**。
-   两者必须各自 `slots.inject(...)` 注册：`SlotCore` 对**未声明**槽位是同步抛错，
-   共用一次注册会让「某个宿主版本缺一个槽位」把另一个也拖垮。
-   `shell.bottom` 空内容不预留空间（layout README 明写），所以 inactive 时组件直接返回 `null` 就够，
-   **不要**用 `shell.overlay`（会盖住正文）或侧栏角标（过重）。
+3. **界面只保留发送栏一个座位。** `conversation.input.right` 是 session 作用域；`SlotCore` 对
+   **未声明**槽位是同步抛错，所以不要顺手加别的 `slots.inject`（尤其不要再加 `shell.bottom`
+   通栏：按钮本身已用颜色表达开关）。图标按 DSH 发送栏约定：16×16 viewBox、`fill:none`、
+   `stroke:currentColor`、`stroke-width:1.5`、圆头圆角，只有杯身 + 把手两笔，不画蒸汽。
+   开 / 关的差异只由按钮 `color` 承担（`--dsw-alias-state-business-primary` / `--dsw-alias-label-secondary`），
+   SVG 里不写死颜色、也不做填充切换。
 4. **跨站防护是新增的那一层，不要删。** loopback 只回答「是不是本机发来的」，
    回答不了「是本机哪个页面发来的」——本机浏览器里任何网页都能往 `127.0.0.1:3080` 发简单 POST。
    判据：`X-DSH-Plugin: awake` **且** `Origin` 为空或与 `Host` 同 authority。两条任一不满足 → 403。
@@ -81,7 +82,7 @@ caffeinate ──持有──► PreventUserIdleSystemSleep
 
 ```sh
 cd dsh-awake
-node --test "test/*.test.mjs"   # 34 条：状态机 / 路由 / 围栏 / 客户端注册与 store
+node --test "test/*.test.mjs"   # 35 条：状态机 / 路由 / 围栏 / 客户端注册与 store
 node scripts/lint.js            # 11 个文件的 node --check
 ```
 
@@ -93,8 +94,8 @@ node scripts/lint.js            # 11 个文件的 node --check
 ```sh
 # 1) 点按钮 → 断言出现、单实例
 pgrep -x caffeinate; pmset -g assertions | grep -i caffeinate
-# 2) 刷新页面 / 切会话 → 按钮仍 active、状态条仍在
-# 3) 再点（或点状态条「关闭」）→ 断言消失、无本插件进程
+# 2) 刷新页面 / 切会话 → 按钮仍为强调色（底部没有任何通栏、也没有残留占位）
+# 3) 再点 → 图标变回次级灰、断言消失、无本插件进程
 # 4) 禁用插件 / 重启 dsh → pgrep -x caffeinate 为空
 # 5) 不带 X-DSH-Plugin 头的 POST → 403
 curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3080/plugins/awake/start

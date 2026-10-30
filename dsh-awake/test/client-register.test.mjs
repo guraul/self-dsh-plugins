@@ -44,13 +44,14 @@ function json(payload, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => payload }
 }
 
-test('浏览器半边注册两个座位：发送栏按钮 + 底部状态条', async () => {
+test('浏览器半边只注册一个座位：发送栏按钮', async () => {
   const exported = await loadClient()
   assert.equal(typeof exported.apply, 'function')
   assert.deepEqual(exported.inject, ['slots'])
 
   const registrations = []
   const dictionaries = []
+  const injectedSlots = []
   const fakeCtx = {
     get: (name) => (name === 'locale'
       ? { register: (ns, dict) => dictionaries.push({ ns, dict }), bind: () => (key) => key }
@@ -58,7 +59,10 @@ test('浏览器半边注册两个座位：发送栏按钮 + 底部状态条', as
     effect: (fn) => fn(),
     inject: (_deps, callback) => callback({
       slots: {
-        inject: (_slot, mount) => mount(),
+        inject: (slot, mount) => {
+          injectedSlots.push(slot)
+          mount()
+        },
         register: (options, component) => {
           registrations.push({ options, component })
           return () => {}
@@ -68,9 +72,10 @@ test('浏览器半边注册两个座位：发送栏按钮 + 底部状态条', as
   }
   exported.apply(fakeCtx)
 
+  assert.deepEqual(injectedSlots, ['conversation.input.right'], '不再注册 shell.bottom 状态条')
   assert.deepEqual(
     registrations.map((entry) => entry.options.name),
-    ['conversation.input.right', 'shell.bottom'],
+    ['conversation.input.right'],
   )
   for (const entry of registrations) {
     assert.equal(entry.options.id, 'dsh-awake')
@@ -83,8 +88,7 @@ test('浏览器半边注册两个座位：发送栏按钮 + 底部状态条', as
   assert.equal(dictionaries.length, 1)
   assert.equal(dictionaries[0].ns, 'dsh-awake')
   assert.deepEqual(Object.keys(dictionaries[0].dict.zh).sort(), Object.keys(dictionaries[0].dict.en).sort())
-  assert.match(dictionaries[0].dict.zh['bar.label'], /保持唤醒/)
-  assert.match(dictionaries[0].dict.zh['bar.stop'], /关闭/)
+  assert.deepEqual(Object.keys(dictionaries[0].dict.zh).sort(), ['button.off', 'button.on'], '状态条词条已删除')
 })
 
 test('客户端路由常量与宿主协议一致（两份真相靠这条测试绑住）', async () => {
@@ -92,7 +96,7 @@ test('客户端路由常量与宿主协议一致（两份真相靠这条测试�
   assert.deepEqual(exported.API, HOST_API)
 })
 
-test('渲染：按钮带 aria-pressed / 标题，状态条 inactive 时返回 null（不占位）', async () => {
+test('渲染：按钮带 aria-pressed / 标题，图标是纯描边、无蒸汽', async () => {
   const exported = await loadClient()
   const registrations = []
   const fakeCtx = {
@@ -110,7 +114,7 @@ test('渲染：按钮带 aria-pressed / 标题，状态条 inactive 时返回 nu
   }
   exported.apply(fakeCtx)
 
-  const [buttonSeat, barSeat] = registrations
+  const [buttonSeat] = registrations
   // 注册的是 withT 包了一层的外壳，先剥掉再渲染（外壳只做 t 注入）。
   const bound = buttonSeat.component({})
   const button = bound.type(bound.props)
@@ -120,9 +124,20 @@ test('渲染：按钮带 aria-pressed / 标题，状态条 inactive 时返回 nu
   assert.equal(button.props.className, 'dsh-awake-btn')
   assert.equal(typeof button.props.onClick, 'function')
 
-  // inactive 时状态条必须渲染成 null：shell.bottom 空内容不预留空间。
-  const barBound = barSeat.component({})
-  assert.equal(barBound.type(barBound.props), null)
+  // 图标：16×16 viewBox、纯描边（fill:none + currentColor + 1.5 圆头），只有杯身 + 把手。
+  const iconElement = button.children
+  const svg = iconElement.type(iconElement.props)
+  assert.equal(svg.type, 'svg')
+  assert.equal(svg.props.viewBox, '0 0 16 16')
+  assert.equal(svg.props.width, 16)
+  assert.equal(svg.props.height, 16)
+  assert.equal(svg.props.fill, 'none')
+  assert.equal(svg.props.stroke, 'currentColor')
+  assert.equal(svg.props.strokeWidth, 1.5)
+  assert.equal(svg.props.strokeLinecap, 'round')
+  assert.equal(svg.props.strokeLinejoin, 'round')
+  assert.deepEqual(svg.children.map((child) => child.props.key), ['cup', 'handle'], '不画蒸汽，也不填充杯身')
+  for (const path of svg.children) assert.equal(path.props.fill, undefined, '颜色只走 currentColor')
 })
 
 test('store：挂载读一次 status，开关走 POST 且带 x-dsh-plugin: awake', async () => {
@@ -143,7 +158,7 @@ test('store：挂载读一次 status，开关走 POST 且带 x-dsh-plugin: awake
     await store.refresh()
     assert.deepEqual(store.getSnapshot(), { active: false, pid: null, startedAt: null, ready: true, busy: false, error: null })
 
-    // 并发挂载（按钮 + 状态条同时挂）只发一次 GET。
+    // 并发刷新合并成一次 GET。
     calls.length = 0
     await Promise.all([store.refresh(), store.refresh()])
     assert.equal(calls.filter((entry) => entry.method === 'GET').length, 1)
@@ -182,11 +197,16 @@ test('store：403 时保持原状态并记下错误，不乐观更新', async ()
   }
 })
 
-test('客户端不轮询、不订阅 SSE（状态只靠挂载读 + 动作返回值）', async () => {
+test('客户端不轮询、不订阅 SSE、不再有底部状态条（单按钮 + 两色）', async () => {
   const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /setInterval/)
   assert.doesNotMatch(source, /EventSource/)
   assert.match(source, /x-dsh-plugin/)
-  assert.match(source, /shell\.bottom/)
   assert.match(source, /conversation\.input\.right/)
+  assert.doesNotMatch(source, /shell\.bottom/, '不再注册 shell.bottom')
+  assert.doesNotMatch(source, /dsh-awake-bar/, '状态条样式已删除')
+  assert.doesNotMatch(source, /bar\.(label|stop)/, '状态条词条已删除')
+  // 开 / 关只靠颜色：关 = 次级灰，开 = 强调色。
+  assert.match(source, /--dsw-alias-label-secondary/)
+  assert.match(source, /\.dsh-awake-btn\[aria-pressed="true"\]\{color:var\(--dsw-alias-state-business-primary/)
 })
