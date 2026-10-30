@@ -198,10 +198,11 @@ message.image → 立即 ws.downloadFile(url, aeskey)（守 5 分钟有效期）
 
 ### 四个必须守住的点
 
-0. **注册位置与优先级**：审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`）；
-   同时 `dsh-api-remotes` 在启动时注册了一个转发监听，它会**接管所有请求并一直等浏览器**，
-   排在它后面就永远轮不到我们（issue #85 实测：企微无卡片、请求挂到浏览器才结束）。
-   所以注册必须带 `prepend`（第三个参数 `true`），抢到发言权后再按归属决定接不接。
+0. **注册方式（两个开关缺一不可）**：审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`），
+   Cordis 派发时用 `hook.global || !filter || filter(...)` 过滤监听，**插件上下文过不了这个过滤，
+   监听会被静默丢弃**（issue #91 实测：连一条日志都没有）。所以必须带 `{ global: true }` 跳过过滤。
+   同时 `dsh-api-remotes` 启动时注册了转发监听，它会**接管所有请求并一直等浏览器**，
+   排在它后面同样轮不到我们（issue #85 实测），所以还要带 `{ prepend: true }`。
    issue #89 起**两处同时注册**：
    - 根 ctx 那条用 `request.agent.session.id` 反查 `chats` 里的 `st.sessionId`（**只比 id，不比较 Agent 对象**）；
      匹配不到就 `next()` 交回下游。

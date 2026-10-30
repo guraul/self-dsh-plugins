@@ -2275,14 +2275,15 @@ export function apply(ctx: Context, config: Config): void {
         on(
           name: 'approval/request',
           listener: (request: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>,
-          prepend?: boolean,
+          options?: { global?: boolean; prepend?: boolean },
         ): () => void
       }
-      // `true` = prepend：`dsh-api-remotes` 启动时注册的转发监听会接管所有请求并
-      // 一直等浏览器，排在它后面就永远轮不到我们（issue #85 实测）。抢到发言权后，
-      // 只接管企微会话的请求，其余仍交回下游。
+      // `global` 跳过作用域过滤：审批事件带的是 Agent 过滤器，插件上下文过不了，
+      // 监听会被静默丢弃（issue #91 实测：连日志都没有）。
+      // `prepend` 排在 `dsh-api-remotes` 的转发监听之前，否则会被它接管并等浏览器（issue #85）。
       const dispose = events.on('approval/request', (request, next) =>
-        relayApproval('root', request, next, chatBySessionId(approvalSessionId(request))), true)
+        relayApproval('root', request, next, chatBySessionId(approvalSessionId(request))),
+      { global: true, prepend: true })
       ctx.effect(() => () => {
         dispose()
         rootApprovalRelayInstalled = false
@@ -2304,11 +2305,11 @@ export function apply(ctx: Context, config: Config): void {
         on(
           name: 'approval/request',
           listener: (request: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>,
-          prepend?: boolean,
+          options?: { global?: boolean; prepend?: boolean },
         ): () => void
       }
       const dispose = events.on('approval/request', (request, next) =>
-        relayApproval('agent', request, next, st), true)
+        relayApproval('agent', request, next, st), { global: true, prepend: true })
       agentCtx.effect(() => () => {
         dispose()
         st.approvalRelayInstalled = false

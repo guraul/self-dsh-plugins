@@ -10381,7 +10381,10 @@ function apply(ctx, config) {
 		function installRootApprovalRelay() {
 			if (rootApprovalRelayInstalled) return;
 			rootApprovalRelayInstalled = true;
-			const dispose = ctx.on("approval/request", (request, next) => relayApproval("root", request, next, chatBySessionId(approvalSessionId(request))), true);
+			const dispose = ctx.on("approval/request", (request, next) => relayApproval("root", request, next, chatBySessionId(approvalSessionId(request))), {
+				global: true,
+				prepend: true
+			});
 			ctx.effect(() => () => {
 				dispose();
 				rootApprovalRelayInstalled = false;
@@ -10398,7 +10401,10 @@ function apply(ctx, config) {
 			installRootApprovalRelay();
 			if (st.approvalRelayInstalled) return;
 			st.approvalRelayInstalled = true;
-			const dispose = agentCtx.on("approval/request", (request, next) => relayApproval("agent", request, next, st), true);
+			const dispose = agentCtx.on("approval/request", (request, next) => relayApproval("agent", request, next, st), {
+				global: true,
+				prepend: true
+			});
 			agentCtx.effect(() => () => {
 				dispose();
 				st.approvalRelayInstalled = false;
