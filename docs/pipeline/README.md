@@ -27,7 +27,7 @@
 
 **合并后没有部署**：本仓库没有服务器、没有 rsync / ssh / systemd、没有线上 curl 验证。合并的唯一后果是 main 前进一格、CI 重跑一遍。
 
-规则：pipeline 只服务本仓库自己的 4 个插件；插件是 `link:` 到本机 DSH profile 的，不走发布流程。
+规则：pipeline 只服务本仓库自己的插件（清单以 `lib.sh` 的 `PLUGIN_DIRS` 为准）；插件是 `link:` 到本机 DSH profile 的，不走发布流程。
 
 ## 二、脚本用法
 
@@ -39,7 +39,21 @@
 # 不直接执行；被其他脚本 source
 source scripts/pipeline/lib.sh
 ```
-公共常量（`REPO_ROOT` / `GH_REPO` / `FETCH_RETRY` / `PLUGIN_DIRS` / `PLUGIN_NAMES`）、日志函数（`die` / `info` / `ok` / `mark`）、工具函数（`slugify` / `is_issue_number` / `pkg_script` / `pkg_name` / `worktree_for_branch` / `main_worktree` / `require_gh`）。
+公共常量（`REPO_ROOT` / `GH_REPO` / `FETCH_RETRY` / `PLUGIN_DIRS`）、日志函数（`die` / `info` / `ok` / `mark`）、工具函数（`slugify` / `is_issue_number` / `pkg_script` / `pkg_name` / `worktree_for_branch` / `main_worktree` / `require_gh`）。
+
+`PLUGIN_DIRS` 是**插件目录名白名单**，`status.sh` / `check-all.sh` / `install-check.sh` 全部只从这里取插件。包名不另存副本——需要时用 `pkg_name()` 从各插件 `package.json` 现读。
+
+### 新增插件检查清单
+
+按顺序全部做完，缺一项就会出现「脚本看不见这个插件」「CI 不跑它」「profile 装不上」之类的静默失败：
+
+| # | 动作 | 不做会怎样 |
+|---|---|---|
+| 1 | 把目录名加进 `lib.sh` 的 `PLUGIN_DIRS` | `install-check.sh` / `check-all.sh` 显式传参报「未知插件目录」；不传参的「跑全部」静默漏掉它；`status.sh` 插件段看不到它 |
+| 2 | 在 CI 矩阵（`.github/workflows/ci.yml`）里加该插件条目 | 该插件的 `node --test` / `node scripts/lint.js` 永远不跑 |
+| 3 | 根 `README.md` 与 `AGENTS.md` 的插件索引表各加一行 | 新人 / agent 不知道它存在 |
+| 4 | 写 `docs/plugins/<插件>.md`（并在 `docs/plugins/README.md` 索引里挂上） | 改之前没有「改哪里、注意什么、怎么验证」可查 |
+| 5 | 在 profile（`~/.dsh/profiles/web/package.json`）加 `link:` 依赖，并把包名加进 `dsh.profile.bundles` | 插件不装配；改过已有 `link:` 路径还要在 profile 目录跑一次 `pnpm install`，否则软链悬空 |
 
 ### new-task.sh
 
@@ -87,12 +101,12 @@ scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎
 ```bash
 scripts/pipeline/status.sh
 ```
-**纯只读**，无参数。四段输出：(a) 本仓库分支/HEAD/工作区/全部 worktree；(b) 4 个插件的 `test`/`check`/`typecheck` 脚本是否存在 + `node_modules` 是否已安装；(c) `dsh plugin --profile web version-exemptions`；(d) profile `link:` 依赖悬空检测 + `gh pr list` / `gh issue list`。任何一段失败都不中断整体输出。
+**纯只读**，无参数。四段输出：(a) 本仓库分支/HEAD/工作区/全部 worktree；(b) 各插件（以 `lib.sh` 的 `PLUGIN_DIRS` 为准）的 `test`/`check`/`typecheck` 脚本是否存在 + `node_modules` 是否已安装；(c) `dsh plugin --profile web version-exemptions`；(d) profile `link:` 依赖悬空检测 + `gh pr list` / `gh issue list`。任何一段失败都不中断整体输出。
 
 ### check-all.sh
 
 ```bash
-scripts/pipeline/check-all.sh                        # 全部 4 个插件
+scripts/pipeline/check-all.sh                        # 全部插件（以 lib.sh 的 PLUGIN_DIRS 为准）
 scripts/pipeline/check-all.sh dsh-external-discuss   # 只跑指定插件（可多个）
 ```
 | 项 | 说明 |
@@ -105,7 +119,7 @@ scripts/pipeline/check-all.sh dsh-external-discuss   # 只跑指定插件（可�
 ### install-check.sh
 
 ```bash
-scripts/pipeline/install-check.sh                    # 全部 4 个插件
+scripts/pipeline/install-check.sh                    # 全部插件（以 lib.sh 的 PLUGIN_DIRS 为准）
 scripts/pipeline/install-check.sh dsh-external-discuss
 ```
 | 项 | 说明 |

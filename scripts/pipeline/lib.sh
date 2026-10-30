@@ -16,9 +16,10 @@ GH_REPO="guraul/self-dsh-plugins"
 # 第一层 git fetch 失败后的重试次数（macOS 自带没有 timeout，用重试代替）
 FETCH_RETRY=2
 
-# 七个插件：目录名 + 包名（SUMMARY 与 install-check 用；注意二者不一致是常态）
-PLUGIN_DIRS="dsh-auto-upgrade dsh-external-discuss dsh-im-bridge-workspaces dsh-plugin-product-subagents dsh-prompt-optimizer dsh-zhihu-sidebar dsh-plugin-memx"
-PLUGIN_NAMES="dsh-plugin-auto-upgrade dsh-plugin-external-discuss @mhfire/dsh-im-bridge dsh-plugin-product-subagents @y1x1n/dsh-prompt-optimizer dsh-plugin-zhihu-sidebar dsh-plugin-memx"
+# 八个插件：本仓库插件目录名白名单（SUMMARY 与 install-check 用）
+# 包名不在这里维护——用 pkg_name() 从各插件 package.json 读，避免注定漂移的副本。
+# 新增插件时第一个动作就是往这里加目录名，见 docs/pipeline/README.md「新增插件检查清单」。
+PLUGIN_DIRS="dsh-auto-upgrade dsh-external-discuss dsh-im-bridge-workspaces dsh-plugin-product-subagents dsh-prompt-optimizer dsh-zhihu-sidebar dsh-plugin-memx dsh-awake"
 
 die()  { echo "✗ $*" >&2; exit 1; }
 info() { echo "→ $*"; }

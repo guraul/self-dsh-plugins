@@ -170,7 +170,7 @@ dsh plugin --profile web remove <包名>
 ## 验证
 
 ```sh
-# 跑 4 个插件的测试 / check / typecheck（缺 node_modules 的插件会明确跳过，不算失败）
+# 跑各插件的测试 / check / typecheck（清单见 scripts/pipeline/lib.sh 的 PLUGIN_DIRS；缺 node_modules 的插件会明确跳过，不算失败）
 scripts/pipeline/check-all.sh
 scripts/pipeline/check-all.sh dsh-auto-upgrade dsh-plugin-product-subagents   # 只跑指定插件
 

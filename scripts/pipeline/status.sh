@@ -3,9 +3,9 @@
 #
 # 用法: scripts/pipeline/status.sh
 # 检查项:
-#   (a) 4 个插件各自的 test/check 脚本是否存在、node_modules 是否已安装
+#   (a) 各插件（以 lib.sh 的 PLUGIN_DIRS 为准）的 test/check 脚本是否存在、node_modules 是否已安装
 #   (b) dsh plugin --profile web version-exemptions（正常应为 {}）
-#   (c) ~/.dsh/profiles/web/package.json 里 4 个 link: 依赖的目标路径是否存在（悬空检测）
+#   (c) ~/.dsh/profiles/web/package.json 里各插件 link: 依赖的目标路径是否存在（悬空检测）
 #   (d) gh pr list / gh issue list 开放项
 # 任何一段失败都不中断整体输出（全部软失败）。
 source "$(dirname "$0")/lib.sh"
