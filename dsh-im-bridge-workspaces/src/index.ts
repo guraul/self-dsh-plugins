@@ -2222,13 +2222,89 @@ export function apply(ctx: Context, config: Config): void {
       })
     }
 
+    /** 审批请求里的 Agent 会话 id（`request.agent.session.id`），拿不到返回 undefined。 */
+    function approvalSessionId(request: ApprovalRequestLike): string | undefined {
+      const agent = request.agent as { session?: { id?: unknown } } | null | undefined
+      const id = agent?.session?.id
+      return typeof id === 'string' ? id : undefined
+    }
+
+    /** 按会话 id 反查窗口 —— 只比 id，不比较 Agent 对象引用。 */
+    function chatBySessionId(sessionId: string | undefined): ChatState | undefined {
+      if (sessionId === undefined) return undefined
+      for (const st of chats.values()) {
+        if (st.sessionId === sessionId) return st
+      }
+      return undefined
+    }
+
+    /** `chats` 里的窗口 key（`single:<userid>` / `group:<chatid>` …），仅用于诊断日志。 */
+    function chatKeyOf(st: ChatState): string {
+      for (const [key, candidate] of chats) {
+        if (candidate === st) return key
+      }
+      return 'none'
+    }
+
     /**
-     * 在 Agent 自己的上下文里注册审批应答方。
+     * 两个注册位置共用的入口：先记诊断日志，再决定是否接管。
      *
-     * 审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`），注册在插件根上
-     * 收不到——2026-10-30 实测：只弹了浏览器、企微静默。所以必须挂在 Agent 上下文。
+     * 同一个请求可能同时到达根与 Agent 两个位置，`relayedApprovals` 保证只有一个位置
+     * 接管，避免重复发审批卡片。
+     */
+    const relayedApprovals = new WeakSet<object>()
+
+    function relayApproval(
+      position: 'root' | 'agent',
+      request: ApprovalRequestLike,
+      next: () => Promise<string>,
+      st: ChatState | undefined,
+    ): Promise<string> {
+      const sessionId = approvalSessionId(request)
+      const window = st === undefined ? 'none' : chatKeyOf(st)
+      console.log(
+        `[im-bridge] 审批请求 ${position} session=${sessionId ?? 'none'} tool=${request.toolName} 窗口=${window}`,
+      )
+      if (st === undefined || relayedApprovals.has(request)) return next()
+      relayedApprovals.add(request)
+      return handleApprovalRequest(request, next, st)
+    }
+
+    /** 插件根上下文里的应答方是否已注册（全局一次）。 */
+    let rootApprovalRelayInstalled = false
+
+    /**
+     * 在插件根上下文里也注册一个应答方（诊断用）。
+     *
+     * 审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`），根上下文未必收得到；
+     * 收到了就按 `request.agent.session.id` 反查窗口。两处日志共同回答「事件落在哪一层」。
+     */
+    function installRootApprovalRelay(): void {
+      if (rootApprovalRelayInstalled) return
+      rootApprovalRelayInstalled = true
+      const events = ctx as unknown as {
+        on(
+          name: 'approval/request',
+          listener: (request: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>,
+        ): () => void
+      }
+      const dispose = events.on('approval/request', (request, next) =>
+        relayApproval('root', request, next, chatBySessionId(approvalSessionId(request))))
+      ctx.effect(() => () => {
+        dispose()
+        rootApprovalRelayInstalled = false
+      }, 'im-bridge: root approval relay')
+      console.log('[im-bridge] 审批应答方已注册(root)')
+    }
+
+    /**
+     * 注册审批应答方：插件根 ctx 与 Agent 自己的 ctx 同时注册。
+     *
+     * issue #81 的结论是「只挂 Agent 上下文」，但企微侧仍然收不到审批，所以两处都挂，
+     * 用日志判断事件实际落在哪一层。Agent 那条直接用自己持有的 `st`，不需要反查。
      */
     function installApprovalRelay(agentCtx: Context, st: ChatState): void {
+      installRootApprovalRelay()
       if (st.approvalRelayInstalled) return
       st.approvalRelayInstalled = true
       const events = agentCtx as unknown as {
@@ -2238,11 +2314,12 @@ export function apply(ctx: Context, config: Config): void {
         ): () => void
       }
       const dispose = events.on('approval/request', (request, next) =>
-        handleApprovalRequest(request, next, st))
+        relayApproval('agent', request, next, st))
       agentCtx.effect(() => () => {
         dispose()
         st.approvalRelayInstalled = false
       }, 'im-bridge: approval relay')
+      console.log('[im-bridge] 审批应答方已注册(agent)')
     }
 
     /** 卡片按钮点击。 */

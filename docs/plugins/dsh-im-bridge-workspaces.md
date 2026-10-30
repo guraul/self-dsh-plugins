@@ -194,8 +194,16 @@ message.image → 立即 ws.downloadFile(url, aeskey)（守 5 分钟有效期）
 
 ### 四个必须守住的点
 
-0. **注册位置**：审批事件按 Agent 作用域分发，应答方必须挂在 Agent 自己的上下文（`installApprovalRelay(agent.ctx, st)`）。
-   挂在插件根上不报错、不警告，但永远收不到——issue #81 踩过。
+0. **注册位置**：审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`），issue #81 的结论是必须挂在
+   Agent 自己的上下文（`installApprovalRelay(agent.ctx, st)`）。但企微侧仍然收不到审批（只有浏览器弹），
+   根因未知——issue #85 起**两处同时注册**：
+   - 根 ctx 那条用 `request.agent.session.id` 反查 `chats` 里的 `st.sessionId`（**只比 id，不比较 Agent 对象**）；
+     匹配不到就 `next()` 交回下游。
+   - 同一个请求只由一个位置接管（`WeakSet` 去重），避免重复发卡片。
+   - 诊断日志：注册时 `[im-bridge] 审批应答方已注册(root|agent)`；收到请求时
+     `[im-bridge] 审批请求 <root|agent> session=<id|none> tool=<工具名> 窗口=<chats key|none>`。
+     日志落在 `.dsh-web/web.out.log`，据此判断事件实际到达哪一层、窗口是否匹配成功；
+     **确认位置后再删掉多余的那条注册与日志**。
 
 1. **队列绕过**：审批是在当前 turn 内等待的，用户回复必须像 `/ws` 命令一样在
    `st.queue` **之前**拦截，否则排在当前轮后面 → 死锁。
@@ -226,3 +234,6 @@ message.image → 立即 ws.downloadFile(url, aeskey)（守 5 分钟有效期）
 - `pnpm run build:host` → `lib/index.js` 更新；`node --check lib/index.js` 通过。
 - 手工（需真机）：越界写文件 → 收到卡片 → 点同意放行一次；再触发同样操作 → 重新询问；
   非发起者在群里点 → 被拒；不操作 5 分钟 → 超时拒绝。
+- 诊断（issue #85）：真机触发一次越界操作后，`.dsh-web/web.out.log` 应能看到
+  `已注册(root)`、`已注册(agent)` 以及「审批请求 …」行；`窗口=` 打出 chats key 说明 session id 匹配成功，
+  打出 `none` 说明 `request.agent.session.id` 与 `st.sessionId` 对不上。
