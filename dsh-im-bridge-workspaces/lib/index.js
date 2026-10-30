@@ -8936,6 +8936,7 @@ function emptyChatState() {
 		wecomPromptInstalled: false,
 		officeSkillsRegistered: false,
 		officeToolRegistered: false,
+		approvalRelayInstalled: false,
 		queue: Promise.resolve(),
 		lastActivity: "",
 		activityClearAt: 0,
@@ -9630,6 +9631,7 @@ function apply(ctx, config) {
 				else {
 					installWecomChannel(agent.ctx, st, () => agent.session.header?.cwd ?? stored?.cwd ?? binding.path);
 					installOfficeLayer(agent.ctx, st);
+					installApprovalRelay(agent.ctx, st);
 				}
 				unpinLegacyWecomTitle(agent);
 				const cwd = agent.session.header?.cwd ?? stored?.cwd;
@@ -10282,10 +10284,6 @@ function apply(ctx, config) {
 				else if (outcome === "unavailable") notifyChat(entry.chatTarget, `⚠️ 审批通道不可用，已按拒绝处理：${entry.toolName}`);
 			}
 		});
-		/** 按 Agent 反查它属于哪个企微窗口；不是本插件创建的返回 undefined。 */
-		function findChatByAgent(agent) {
-			for (const st of chats.values()) if (st.agent !== void 0 && st.agent === agent) return st;
-		}
 		/** 窗口的推送目标：群聊用 chatid，单聊用发送者 userid。 */
 		function chatTargetOf(st) {
 			if (st.kind === "group") return st.chatid;
@@ -10298,10 +10296,8 @@ function apply(ctx, config) {
 			if ((chattype === "group" || chattype === 2 || chattype === "2") && chatid) return chatid;
 			return chatid ?? userId;
 		}
-		/** 把审批请求映射成一条待批记录；不归本通道时返回 undefined。 */
-		function approvalDraft(request) {
-			const st = findChatByAgent(request.agent);
-			if (st === void 0) return void 0;
+		/** 一个审批请求 → 一条待批记录；信息不全时返回 undefined（交回下游）。 */
+		function approvalDraft(request, st) {
 			const chatTarget = chatTargetOf(st);
 			const initiator = st.sender;
 			if (chatTarget === void 0 || initiator === void 0 || initiator === "") return void 0;
@@ -10320,9 +10316,9 @@ function apply(ctx, config) {
 			};
 		}
 		/** 审批应答方：与网页端赛跑，先到先得。 */
-		const approvalListener = (request, next) => {
+		function handleApprovalRequest(request, next, st) {
 			if (!cfg().approval.enabled) return next();
-			const draft = approvalDraft(request);
+			const draft = approvalDraft(request, st);
 			if (draft === void 0) return next();
 			let resolveRelay = () => {};
 			const relay = new Promise((resolve) => {
@@ -10347,12 +10343,22 @@ function apply(ctx, config) {
 				if (approvals.get(draft.id) !== void 0) approvals.settle(draft.id, "rejected", "unavailable");
 				return outcome;
 			});
-		};
-		const disposeApproval = ctx.on("approval/request", approvalListener);
-		ctx.effect(() => () => {
-			disposeApproval();
-			approvals.clear();
-		}, "im-bridge: approval relay");
+		}
+		/**
+		* 在 Agent 自己的上下文里注册审批应答方。
+		*
+		* 审批事件按 Agent 作用域分发（`scopeTarget(agent, agent)`），注册在插件根上
+		* 收不到——2026-10-30 实测：只弹了浏览器、企微静默。所以必须挂在 Agent 上下文。
+		*/
+		function installApprovalRelay(agentCtx, st) {
+			if (st.approvalRelayInstalled) return;
+			st.approvalRelayInstalled = true;
+			const dispose = agentCtx.on("approval/request", (request, next) => handleApprovalRequest(request, next, st));
+			agentCtx.effect(() => () => {
+				dispose();
+				st.approvalRelayInstalled = false;
+			}, "im-bridge: approval relay");
+		}
 		/** 卡片按钮点击。 */
 		ws.on("event.template_card_event", ((frame) => {
 			const key = frame.body?.event?.event_key;
