@@ -197,7 +197,7 @@ fi
 # 「拿不到记录就拒绝」和「显式跳过要留痕」两件事。
 review_skip_audit() {
   local reason="$1"
-  DSH_ROOT="${REPO_ROOT}" SKIP_PR="${PR_NUM}" SKIP_REASON="${reason}" \
+  DSH_ROOT="${MAIN_WT}" SKIP_PR="${PR_NUM}" SKIP_REASON="${reason}" \
     node --input-type=module -e '
       const root = process.env.DSH_ROOT
       try {
@@ -229,7 +229,7 @@ else
   REVIEW_CLI="${REPO_ROOT}/dsh-subagents/lib/cli.js"
   [[ -f "${REVIEW_CLI}" ]] || die "审核闸门: 找不到校验器 ${REVIEW_CLI}"
   set +e
-  REVIEW_OUT=$(node "${REVIEW_CLI}" check --pr "${PR_NUM}" --record "${REVIEW_RECORD}" --root "${REPO_ROOT}" 2>&1)
+  REVIEW_OUT=$(node "${REVIEW_CLI}" check --pr "${PR_NUM}" --record "${REVIEW_RECORD}" --root "${MAIN_WT}" 2>&1)
   REVIEW_RC=$?
   set -e
   printf '%s\n' "${REVIEW_OUT}" | sed 's/^/    │ /'

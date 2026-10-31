@@ -1,13 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import {
   bumpCircuit,
   findByTrace,
   isExpired,
   localDate,
+  mainWorktreeRoot,
   readCircuit,
   readRecord,
   recordFile,
@@ -86,4 +88,23 @@ test('findByTrace 扫目录命中且跳过坏文件', () => {
   assert.equal(findByTrace(dir, 'T-1').length, 1)
   assert.equal(findByTrace(dir, 'T-1')[0].pr, 1)
   assert.deepEqual(findByTrace(dir, 'missing'), [])
+})
+
+test('mainWorktreeRoot 从 worktree 反查主工作区', () => {
+  const base = mkdtempSync(join(tmpdir(), 'dsh-subagents-wt-'))
+  const repo = join(base, 'repo')
+  mkdirSync(repo)
+  spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: repo })
+  writeFileSync(join(repo, 'a.txt'), 'x')
+  spawnSync('git', ['add', '.'], { cwd: repo })
+  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init'], { cwd: repo })
+  const wt = join(base, 'wt')
+  const added = spawnSync('git', ['worktree', 'add', '-q', '-b', 'task/x', wt], { cwd: repo })
+  assert.equal(added.status, 0)
+  assert.equal(realpathSync(mainWorktreeRoot(wt)), realpathSync(repo))
+})
+
+test('mainWorktreeRoot 不在 git 仓库时退回传入目录', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-subagents-nogit-'))
+  assert.equal(realpathSync(mainWorktreeRoot(dir)), realpathSync(dir))
 })

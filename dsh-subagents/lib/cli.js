@@ -22,6 +22,7 @@ import {
   bumpCircuit,
   findByTrace,
   isExpired,
+  mainWorktreeRoot,
   readCircuit,
   readRecord,
   reviewsDir,
@@ -68,7 +69,8 @@ function fail(code, message) {
 }
 
 function root(flags) {
-  return resolve(flags.root || process.cwd())
+  if (flags.root) return resolve(flags.root)
+  return mainWorktreeRoot(process.cwd())
 }
 
 function emit(value, flags) {
