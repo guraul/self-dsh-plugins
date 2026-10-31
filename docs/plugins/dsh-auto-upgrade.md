@@ -153,6 +153,37 @@ pnpm run check                                # node --check
   `gh` 不存在/未登录 → 500 + 原始原因。**绝不调用 `gh auth token`，绝不回显 token。**
 - 前端两处按钮都在同一个块内；成功后同一块显示保持可见的 `#N` 链接。
 
+## 插件自述兼容矩阵（0.2.5，issue #106）
+
+**一句话**：插件 `package.json` 的 `dsh.compatibility.dshReleases` 是**人工实测记录**，官方门禁不读它；
+本插件把它作为「提出」信息接进点名与开 issue，**绝不**让它阻断升级。
+
+- **三态读取**：`lib/host/compat.js` 的 `declaredVerdict(manifest, targetVersion)` ——
+  `compatible` / `incompatible` / **缺失即 `unverified`（从未验证）**。非法记录值（拼错、写成对象等）
+  同样按 `unverified` 处理：没有可用结论就不许假装验证过。
+- **响应形状**：`GET /plugins` 与检测结果里每个插件带 `declared: { verdict, source: 'self-declared' }`；
+  另有 `flagged` 列表把**门禁阻塞（`gate`）**与**自述有问题（`self-declared`，含 `unverified`）**合并，
+  每条带 `sources`（可能是两者）。`incompatible` 数组与 `decision` 仍**只**由门禁决定——
+  `/update` 的阻断行为一行未动。
+- **UI**：`renderPluginBlock`（浮层/设置页共用）里，门禁放行时标题改成「门禁已放行，但插件自述有问题」；
+  **已知不兼容**（门禁 `gate` 或自述 `incompatible`）逐条点名：`incompatible` 显示「插件自述已知不兼容」+
+  矩阵原文 + 修法 + 开 issue 按钮。`unverified` **不逐条占位**，只折叠成一行
+  「另有 N 个插件未验证该版本」（`<details>` 展开看名单），这一行**没有**按钮、也不渲染自述矩阵修法。
+  **升级按钮保持可用**（自述矩阵不是门禁）。
+- **`/report-issue`**：点名列表取实时判定（只读本地 manifest，不联网），但**只取已知不兼容**——
+  门禁阻塞（`gate`）或自述 `incompatible`。正文固定带「自述兼容矩阵证据」表
+  （插件 / 来源 / 目标版本 / 矩阵记录 / verdict）；`unverified` 只作一行背景
+  「另有 N 个插件未验证该版本」，不进表格、不点名。只有自述 `incompatible` 时标题是
+  「… N 个插件自述兼容性有问题」，不诬陷成「阻塞」。**只有 `unverified` 时端点返回 `400`**
+  （「只有 N 个未验证的插件，没有已知不兼容，无需开 issue」），且不调用 `gh`——
+  「我没测过」不是「已知不兼容」，不该被开成 issue。
+
+⚠️ **这份矩阵可能过期 / 漏记**。它只代表某次人工实测的结论，不是门禁语义，也不保证门禁会拦；
+上游插件改了矩阵又没同步 `docs/COMPATIBILITY.md` 时，界面会如实照抄插件自述——所以要改这里时，
+必须保住 `test/declared.test.mjs` 的三态用例与 `test/routes.test.mjs` 的「自述矩阵：…」三条线
+（含「只有 `unverified` → `/report-issue` 400」）；把 `declaredVerdict` 改成恒 `compatible`、
+或把开 issue 的判据放宽到「`flagged` 非空」时它们必须红（非空转反证）。
+
 ## 测试缝（不是公开配置）
 
 `apply(ctx, { stateDir, registry, exit, scheduleHelper, runGh })` 里的 `exit` / `scheduleHelper` / `runGh`
