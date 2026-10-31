@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [v0.2.0, main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test
+      - name: Pack gate (no README static assets in the tarball)
+        run: npm run check-pack

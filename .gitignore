@@ -30,6 +30,7 @@
 !/dsh-plugin-product-subagents/
 !/dsh-plugin-restart/
 !/dsh-prompt-optimizer/
+!/dsh-usage-panel/
 !/dsh-zhihu-sidebar/
 # 放行整个目录后 .probe/ 也会被放行；探针产物含二进制与原始输出，不入库
 dsh-zhihu-sidebar/.probe/
