@@ -14,6 +14,16 @@
 | [`dsh-plugin-product-subagents/`](./dsh-plugin-product-subagents) | `dsh-plugin-product-subagents` | 把 Claude Code / Codex / 任意 ACP CLI 变成基于角色的 subagent（`0.2.0` 线可续接；`0.2.1+` 外部子代理为一次性） | 可用（DSH `0.2.0-rc.2` / `0.2.1-alpha.5` / `0.2.1-rc.1` 均通过一次性 profile 验收） |
 | [`dsh-prompt-optimizer/`](./dsh-prompt-optimizer) | `@y1x1n/dsh-prompt-optimizer` | 发送栏纯图标按钮：一键优化提示词，完成后直接写回输入框（fork：线性图标 / 去文案 / 内联 loading，无弹出面板） | 可用（`0.6.1-fork.1`，门禁全绿；真机 GUI 手点未做） |
 
+## 文档地图
+
+| 目录 / 文件 | 内容 |
+|---|---|
+| [`docs/plugins/`](./docs/plugins/README.md) | 插件级说明：改哪里、注意什么、怎么验证 |
+| [`docs/pipeline/`](./docs/pipeline/README.md) | 交付流程、worktree 纪律、脚本用法 |
+| [`docs/requirements/`](./docs/requirements/README.md) | 需求定义与实现方案：写什么、边界在哪、怎么验收 |
+| [`docs/adr/`](./docs/adr/) | 架构决策记录：为什么这么做、否决了哪些选项 |
+| [`GLOSSARY.md`](./GLOSSARY.md) | 术语表：角色 / 接入形态 / provider 等本仓特有概念 |
+
 ---
 
 ## dsh-auto-upgrade

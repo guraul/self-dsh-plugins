@@ -37,6 +37,9 @@
 | 插件文档总索引（插件 → 文档 → 包名） | [`docs/plugins/README.md`](./docs/plugins/README.md) |
 | 交付流程、worktree 纪律、pipeline 脚本用法 | [`docs/pipeline/README.md`](./docs/pipeline/README.md) |
 | pipeline 进度台账、已定决策（D1–D6） | [`docs/pipeline/PROGRESS.md`](./docs/pipeline/PROGRESS.md) |
+| 需求定义、实现方案、验收标准 | [`docs/requirements/README.md`](./docs/requirements/README.md) |
+| 架构决策：为什么这么做、否决了哪些选项 | [`docs/adr/`](./docs/adr/) |
+| 术语口径（角色 / 接入形态 / provider） | [`GLOSSARY.md`](./GLOSSARY.md) |
 | 历史归档（已废弃的方案，仅存档） | [`docs/archive/`](./docs/archive/README.md) |
 | 某插件的安装 / 配置 / 已知限制（面向使用者） | 各插件目录的 `README.md` |
 | dsh 升级 / 回滚 / 恢复 | [`upgrade-dsh.sh`](./upgrade-dsh.sh) + dsh-auto-upgrade 插件 |
