@@ -15,8 +15,24 @@ const PROVIDERS = {
   },
   codebuddy: {
     bin: 'codebuddy',
-    args: (model, prompt) => ['-p', '--output-format', 'text', '--model', model, prompt],
+    args: (model, prompt) => ['-p', '--model', model, prompt],
   },
+}
+
+/**
+ * codebuddy 在部分参数组合下仍会吐 JSON 信封；能解析出 `result` 就取它，
+ * 否则按纯文本处理——两种情况都不该让调用方多写一个分支。
+ */
+export function unwrapResult(text) {
+  const trimmed = String(text ?? '').trim()
+  if (!trimmed.startsWith('{')) return text
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (parsed && typeof parsed.result === 'string') return parsed.result
+  } catch {
+    // 不是信封，按原文返回
+  }
+  return text
 }
 
 export function providerCommand(provider, model, prompt, env = process.env) {
@@ -49,7 +65,9 @@ export function runProvider({ provider, model, prompt, timeoutMs = 300000, cwd, 
       throw new ContractError('E_UNAVAILABLE', `找不到 ${bin}（形态 B 需要本机安装该 CLI）`)
     }
     if (result.error.code === 'ETIMEDOUT' || result.signal) {
-      throw new ContractError('E_TIMEOUT', `${provider} 超过 ${timeoutMs}ms 未返回`)
+      const error = new ContractError('E_TIMEOUT', `${provider} 超过 ${timeoutMs}ms 未返回`)
+      error.durationMs = durationMs
+      throw error
     }
     throw new ContractError('E_UNAVAILABLE', `${provider} 调用失败: ${result.error.message}`)
   }
@@ -59,7 +77,7 @@ export function runProvider({ provider, model, prompt, timeoutMs = 300000, cwd, 
   }
 
   return {
-    text: result.stdout ?? '',
+    text: unwrapResult(result.stdout),
     meta: { form: 'cli', provider, model, durationMs },
   }
 }

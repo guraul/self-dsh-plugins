@@ -131,7 +131,7 @@ function cmdRecord(flags) {
     head_sha: request.head_sha,
     nonce: request.nonce,
     findings: [],
-    evidence: policy.hit ? policy.reasons : [],
+    evidence: policy.hit ? policy.reasons : (parsed.message ? [parsed.message] : []),
     form: meta.form,
     model: meta.model,
     durationMs: meta.durationMs,
@@ -223,44 +223,55 @@ function cmdReview(flags) {
     nonce: makeNonce(),
   })
   const prompt = buildReviewPrompt({ request, role })
-  const { text, meta } = runProvider({
+  let meta = {
+    form: 'cli',
     provider: flags.provider || 'opencode',
-    model: flags.model,
-    prompt,
-    timeoutMs: request.budget.timeoutMs,
-    cwd: root(flags),
-  })
-
+    model: flags.model || 'unknown',
+    durationMs: 0,
+  }
   let parsed
   try {
+    const run = runProvider({
+      provider: flags.provider || 'opencode',
+      model: flags.model,
+      prompt,
+      timeoutMs: request.budget.timeoutMs,
+      cwd: root(flags),
+    })
+    meta = run.meta
     if (nonceInDiff(request.diff, request.nonce)) {
       throw new ContractError('E_PARSE', 'diff 内出现随机标记')
     }
-    parsed = parseVerdict(text, { nonce: request.nonce, headSha: request.head_sha })
+    parsed = parseVerdict(run.text, { nonce: request.nonce, headSha: request.head_sha })
   } catch (error) {
-    parsed = { verdict: 'ESCALATE', errorCode: error.code ?? 'E_PARSE' }
+    parsed = { verdict: 'ESCALATE', errorCode: error.code ?? 'E_UNAVAILABLE', message: error.message }
+    if (typeof error.durationMs === 'number') meta.durationMs = error.durationMs
   }
 
   const policy = highRiskHit({ files: request.files, diff: request.diff })
-  const record = {
-    schemaVersion: 1,
-    pr: request.pr,
+  const result = {
     verdict: policy.hit ? 'ESCALATE' : parsed.verdict,
     head_sha: request.head_sha,
     nonce: request.nonce,
     findings: [],
-    evidence: policy.hit ? policy.reasons : [],
+    evidence: policy.hit ? policy.reasons : (parsed.message ? [parsed.message] : []),
     form: meta.form,
     model: meta.model,
     durationMs: meta.durationMs,
     traceId: traceId(),
     errorCode: policy.hit ? 'E_POLICY' : (parsed.errorCode ?? null),
+  }
+  const checked = validateResult(result)
+  if (!checked.ok) throw new ContractError('E_PARSE', `结果不合 schema: ${checked.errors.join('; ')}`)
+
+  const record = {
+    schemaVersion: 1,
+    pr: request.pr,
+    ...result,
     request: { issue: request.issue.number, diffChars: request.diff.length, maxChars: request.budget.maxChars },
     policy,
     createdAt: new Date().toISOString(),
   }
-  const checked = validateResult(record)
-  if (!checked.ok) throw new ContractError('E_PARSE', `结果不合 schema: ${checked.errors.join('; ')}`)
 
   const file = writeRecord(dir, record)
   if (record.verdict !== 'APPROVE') bumpCircuit(dir)
