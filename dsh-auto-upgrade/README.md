@@ -32,7 +32,7 @@
 | **设置页常驻升级入口**（浮层被「不再提示」关掉也有地方升级；与浮层同一份计划卡/流程） | ✅ |
 | **降级护栏出路**（`downgrade-guard` 时点名建议渠道 + 「切到 `<渠道>`」按钮） | ✅ |
 | **门禁拒绝点名**（列出阻塞插件与未满足要求，最多 3 条 + 等 N 项 + 修法；浮层/设置页共用一份渲染） | ✅ |
-| **插件自述兼容矩阵点名**（读 `dsh.compatibility.dshReleases` 三态；`incompatible` / `unverified` 都提示并可开 issue，但**不阻断升级**） | ✅ 有单测（缺失 = `unverified`；门禁放行时升级按钮仍可用） |
+| **插件自述兼容矩阵点名**（读 `dsh.compatibility.dshReleases` 三态；`incompatible` 逐条点名并可开 issue，`unverified` 只折叠成一行「另有 N 个插件未验证该版本」且**不给开 issue**；两者都**不阻断升级**） | ✅ 有单测（缺失 = `unverified`；门禁放行时升级按钮仍可用；只有 `unverified` 时 `/report-issue` 回 400） |
 | **设置页插件表按判定目标版本评估**（`GET /plugins?version=<target>`，表头写明评估版本） | ✅ |
 | `POST /plugins/action`（写豁免/禁用插件） | ⛔ 未接线，如实返回 `501`（写豁免按仓库约定必须先拿到用户对具体版本组合的同意） |
 | 静默自动升级 | ⛔ 按用户拍板暂不做（`policy.mode` 只接受 `notify`） |
@@ -44,11 +44,12 @@
 
 ## 一键开 issue 依赖本机 `gh`
 
-升级被插件门禁挡住、或插件自述矩阵里有 `incompatible` / `unverified` 时，浮层与设置页的
+升级被插件门禁挡住、或插件自述矩阵里有 `incompatible` 时，浮层与设置页的
 「开 issue 记录这个不兼容」会调宿主
 `POST /api/dsh-auto-upgrade/report-issue`，由宿主用**本机已登录的 `gh`** 在
 `package.json` 的 `repository.url` 指向的仓库建一条 issue（标题/正文由宿主生成，幂等：同名 open issue
 存在时直接返回）。没装 `gh` 或未登录时接口 500 并给出原因；插件不会读取、也不会回显任何 token。
+只有 `unverified`（从未验证）时**不出现按钮**，接口也会 400——「没测过」不是「已知不兼容」。
 
 ## 安装（**属于用户授权闸门，需用户自己执行**）
 

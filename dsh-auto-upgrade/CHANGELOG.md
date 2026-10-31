@@ -19,19 +19,27 @@
     每条带 `sources`（可能是两者）。**`incompatible` 数组与 `decision` 的判定逻辑一行未动**——
     自述矩阵只「提出」，不「阻断」。
   - **UI**（`renderPluginBlock`，浮层/设置页共用）：门禁放行时标题是「门禁已放行，但插件自述有问题」；
-    `self-declared` 的 `incompatible` 显示「插件自述已知不兼容」+ 矩阵原文 + 修法 + 开 issue 按钮；
-    `unverified` 显示「该版本从未验证」。**升级按钮保持可用**，卡片动作区仍只有「升级 + 不再提示」。
-  - **`/report-issue`**：点名列表取实时判定（本地 manifest，不联网），正文固定带「自述兼容矩阵证据」表
-    （插件 / 来源 / 目标版本 / 矩阵记录 / verdict），缺失写「（无记录 = 从未验证）」；
-    门禁放行、只有自述问题时标题是「… N 个插件自述兼容性有问题」，不诬陷成「阻塞」。
+    `self-declared` 的 `incompatible` 显示「插件自述已知不兼容」+ 矩阵原文 + 修法 + 开 issue 按钮。
+    **升级按钮保持可用**，卡片动作区仍只有「升级 + 不再提示」。
+  - **`unverified` 不逐条占位**（同版本内收敛口径）：只折叠成一行「另有 N 个插件未验证该版本」，
+    展开（`<details>`）才看名单；这一行**没有**开 issue 入口、也不渲染自述矩阵的修法。
+    「我没测过」不是「已知不兼容」——否则任何没写矩阵的插件都会变成一条假阻塞。
+  - **`/report-issue`**：点名列表只取**实时判定里的已知不兼容**（门禁 `gate` 或自述 `incompatible`），
+    正文固定带「自述兼容矩阵证据」表（插件 / 来源 / 目标版本 / 矩阵记录 / verdict）；
+    `unverified` 只作一行背景（「另有 N 个插件未验证该版本」），不进表格、不点名。
+    门禁放行、只有自述 `incompatible` 时标题是「… N 个插件自述兼容性有问题」，不诬陷成「阻塞」；
+    **只有 `unverified` 时返回 `400`**（「只有 N 个未验证的插件，没有已知不兼容，无需开 issue」），
+    不调用 `gh`。
 
 ### 内部
 
 - 新增 `test/declared.test.mjs`（3 条：三态、非法值、`flagged` 来源合并）；`test/routes.test.mjs`
-  新增 2 条（自述 incompatible 进点名且 `/update` 仍 202、正文带矩阵证据；unverified 进点名、
-  自述 compatible 不进）；`test/client-upgrade-entry.test.mjs` 新增 3 条渲染用例
-  （浮层自述点名 + 升级可用、设置页 unverified、过期快照不铺自述结论）与 3 条共用渲染计数守卫。
-  用例总数 77 → 85。把 `declaredVerdict` 改成恒 `compatible` 时这 5 条会红（非空转反证）。
+  覆盖自述 `incompatible` 进点名且 `/update` 仍 202、正文带矩阵证据；只有 `unverified` 时
+  `/report-issue` 回 400 且不调 `gh`；混合现场只把 `incompatible` 写进 issue、`unverified` 只作背景。
+  `test/client-upgrade-entry.test.mjs` 覆盖浮层/设置页逐条点名 + 折叠行、
+  **只有 `unverified` 时两处都没有开 issue 按钮**、过期快照不铺自述结论，另加共用渲染计数守卫。
+  用例总数 77 → 87。把 `declaredVerdict` 改成恒 `compatible`、或把开 issue 的判据放宽到
+  「`flagged` 非空」，这些用例都会红（非空转反证）。
 
 ## [0.2.4] — 2026-10-31
 

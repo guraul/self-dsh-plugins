@@ -768,7 +768,7 @@ test('自述矩阵：门禁放行但 declared=incompatible 仍点名，升级不
   }
 })
 
-test('自述矩阵：没有记录 = unverified，同样点名并可开 issue；自述 compatible 不进点名', async (t) => {
+test('自述矩阵：只有 unverified 时不点名、不开 issue（/report-issue 回 400），自述 compatible 同样不进点名', async (t) => {
   const gh = makeGh()
   const env = await makeEnvironment({
     plugins: [
@@ -794,17 +794,48 @@ test('自述矩阵：没有记录 = unverified，同样点名并可开 issue；�
     const byName = Object.fromEntries(inventory.plugins.map((plugin) => [plugin.name, plugin]))
     assert.deepEqual(byName['never-verified'].declared, { verdict: 'unverified', source: 'self-declared' })
     assert.deepEqual(byName['verified-ok'].declared, { verdict: 'compatible', source: 'self-declared' })
-    assert.deepEqual(inventory.flagged.map((plugin) => plugin.name), ['never-verified'], '只有 unverified 进点名')
+    assert.deepEqual(inventory.flagged.map((plugin) => plugin.name), ['never-verified'], '接口仍如实报告未验证的插件（UI 用它折叠成一行）')
 
-    const reported = await (await fetch(`${env.host.base}${API.reportIssue}`, {
+    // 「我没测过」不是「已知不兼容」：没有可开的 issue。
+    const response = await fetch(`${env.host.base}${API.reportIssue}`, {
       method: 'POST',
       body: JSON.stringify({ target: '9.9.9' }),
-    })).json()
-    assert.equal(reported.ok, true)
+    })
+    assert.equal(response.status, 400, '只有 unverified 时必须拒绝开 issue')
+    const body = await response.json()
+    assert.match(body.error, /只有 1 个未验证的插件，没有已知不兼容，无需开 issue/, '错误文案要说明为什么不开')
+    assert.equal(gh.calls.length, 0, '拒绝时绝不该调用 gh')
+  } finally {
+    await env.close()
+  }
+})
+
+test('自述矩阵：已知不兼容与 unverified 混在一起时，issue 只列不兼容，unverified 只作背景一行', async (t) => {
+  const gh = makeGh()
+  const env = await makeEnvironment({
+    plugins: [
+      DECLARED_INCOMPATIBLE,
+      // 没有矩阵记录：未验证，只能当背景计数。
+      { name: 'never-verified', version: '2.0.0', peerDependencies: { '@deepseek-ai/dsh-tools': '>=0.1.0' } },
+    ],
+    runGh: gh.runGh,
+  })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const inventory = await (await fetch(`${env.host.base}${API.plugins}?version=9.9.9`)).json()
+    assert.deepEqual(inventory.flagged.map((plugin) => plugin.name).sort(), ['declared-bad', 'never-verified'], '接口仍报告两份')
+
+    const reported = await fetch(`${env.host.base}${API.reportIssue}`, {
+      method: 'POST',
+      body: JSON.stringify({ target: '9.9.9' }),
+    })
+    assert.equal(reported.status, 200, '有已知不兼容就必须能开 issue')
     const create = gh.calls.find((args) => args[0] === 'issue' && args[1] === 'create')
+    assert.notEqual(create, undefined, '必须真的去创建 issue')
     const text = create[create.indexOf('--body') + 1]
-    assert.match(text, /\| `never-verified@2\.0\.0` \| `self-declared` \| `9\.9\.9` \| （无记录 = 从未验证） \| `unverified` \|/, '缺失必须写成 unverified')
-    assert.doesNotMatch(text, /verified-ok/, '自述 compatible 的插件不该出现在 issue 里')
+    assert.match(text, /\| `declared-bad@1\.0\.0` \|/, '已知不兼容要进表格')
+    assert.doesNotMatch(text, /never-verified/, 'unverified 不许出现在表格或点名里')
+    assert.match(text, /另有 1 个插件未验证该版本/, 'unverified 只能作一行背景')
   } finally {
     await env.close()
   }

@@ -26,7 +26,9 @@ import {
   issueBody,
   issueTitle,
   ReportError,
+  reportablePlugins,
   reportIssue as createIssue,
+  unverifiedPlugins,
 } from './host/report-issue.js'
 import { ALLOW_SCRIPTS, API, CHANNELS, CODE, DECISION, DEFAULT_REGISTRY, DSH_PACKAGE } from './host/protocol.js'
 import { fetchPackument } from './host/registry.js'
@@ -761,15 +763,19 @@ export function apply(ctx, config = {}) {
         // 标题与正文只由宿主根据检测结果生成：请求体里的 target 已校验为精确版本号，
         // 任何额外字段都不会被写进 issue。
         //
-        // 点名列表取**实时**判定（只读本地 manifest，不联网）：门禁阻塞（`gate`）与
-        // 插件自述矩阵（`self-declared`，含 `unverified`）合并成一份，来源写在每条上。
-        // 门禁放行但自述已知不兼容时同样可以开 issue——这正是本 issue 的诉求。
+        // 点名列表取**实时**判定（只读本地 manifest，不联网）。但只有**已知不兼容**才进 issue：
+        // 门禁阻塞（`gate`）或自述 `incompatible`。`unverified`（从未验证）不点名、不开 issue——
+        // 「我没测过」不是「已知不兼容」，塞进 issue 只会变成噪音；它只作为一行背景计数进正文。
         const state = await stores.state.read()
         const lastCheck = state.lastCheck ?? null
         const inspected = await inspectPlugins(target)
-        const named = inspected.flagged ?? []
+        const flagged = inspected.flagged ?? []
+        const named = reportablePlugins(flagged)
+        const unverified = unverifiedPlugins(flagged)
         if (named.length === 0) {
-          throw new RequestError(400, CODE.BAD_REQUEST, `目标版本 ${target} 没有被阻塞的插件，也没有自述兼容性问题的插件，无需开 issue`)
+          throw new RequestError(400, CODE.BAD_REQUEST, unverified.length > 0
+            ? `目标版本 ${target} 只有 ${unverified.length} 个未验证的插件，没有已知不兼容，无需开 issue`
+            : `目标版本 ${target} 没有被阻塞的插件，也没有自述兼容性问题的插件，无需开 issue`)
         }
 
         const installed = installation === undefined
@@ -781,6 +787,7 @@ export function apply(ctx, config = {}) {
           installed,
           profile: profileContext.name ?? 'web',
           plugins: named,
+          unverifiedCount: unverified.length,
           port: typeof webServer.port === 'number' ? webServer.port : 3080,
         })
         try {

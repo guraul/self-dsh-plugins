@@ -455,7 +455,8 @@ test('浮层与设置页共用同一份计划卡 / 降级出路渲染（不许�
   assert.equal(countOf('function namedPlugins('), 1, '点名合并（门禁 + 自述）只能有一份定义')
   assert.equal(countOf('namedPlugins('), 3, '点名合并必须由浮层与设置页共用（一份定义 + 两次调用）')
   assert.equal(countOf("t('overlay.declaredIncompatible')"), 1, '自述不兼容的渲染只留一份')
-  assert.equal(countOf("t('overlay.declaredUnverified')"), 1, '自述未验证的渲染只留一份')
+  assert.equal(countOf("t('overlay.unverifiedFold'"), 1, '自述未验证的折叠行只留一份')
+  assert.equal(countOf("t('overlay.declaredUnverified')"), 0, '未验证不再逐条占位（旧的逐条文案必须删掉）')
   assert.equal(countOf('function makeIssueReporter('), 1, '开 issue 的提交器只能有一份定义')
   assert.equal(countOf('makeIssueReporter('), 3, '开 issue 必须由浮层与设置页共用（一份定义 + 两次调用）')
   assert.equal(countOf('createUpgradeFlow('), 3, '升级流程必须由浮层与设置页共用（一份定义 + 两次调用）')
@@ -537,7 +538,7 @@ test('浮层：点「开 issue」走 report-issue，成功后同块显示 #N 链
   assert.deepEqual(JSON.parse(posted.body), { target: '0.2.1-rc.4' }, '只允许传目标版本')
 })
 
-test('浮层：门禁放行但插件自述不兼容时点名、给矩阵原文与开 issue，升级按钮仍可用', async () => {
+test('浮层：门禁放行但插件自述不兼容时逐条点名、给矩阵原文与开 issue；unverified 折叠成一行', async () => {
   stubFetch({
     ...pluginRoutes,
     [API.status]: statusWith(DECLARED_CHECK),
@@ -556,10 +557,18 @@ test('浮层：门禁放行但插件自述不兼容时点名、给矩阵原文�
     /dsh\.compatibility\.dshReleases\["0\.2\.2-alpha\.2"\] = "incompatible"/,
     '必须给出矩阵原文',
   )
-  assert.match(text, /该版本从未验证/, 'unverified 也要点名')
-  assert.match(text, /dsh\.compatibility\.dshReleases\["0\.2\.2-alpha\.2"\] 没有记录（= 从未验证）/)
+  // unverified 不再逐条占位：只留一行计数，名单藏在 details 里。
+  assert.match(text, /另有 1 个插件未验证该版本/, 'unverified 折叠成一行计数')
+  assert.doesNotMatch(text, /该版本从未验证/, 'unverified 不许再逐条占位')
+  assert.doesNotMatch(text, /没有记录（= 从未验证）/, 'unverified 不渲染矩阵缺失的逐条修法说明')
+  const folds = collect(tree, (node) => node.type === 'details' && /另有 1 个插件未验证该版本/.test(textOf(node)))
+  assert.equal(folds.length, 1, '未验证必须折叠在 details 里')
+  assert.match(textOf(folds[0]), /dsh-plugin-awake@0\.1\.0/, '展开后要能看到名单')
+  // 折叠行本身不许带开 issue 入口：整块只有一个按钮，且属于不兼容那条。
+  assert.equal(collect(folds[0], (node) => node.type === 'button').length, 0, '未验证那行不许有按钮')
+
   assert.match(text, /自述矩阵是人工实测记录（官方门禁不读它，所以不会阻断升级）/, '修法要说明它不阻断升级')
-  assert.match(text, /开 issue 记录这个不兼容/, '自述问题也能开 issue')
+  assert.match(text, /开 issue 记录这个不兼容/, '自述不兼容也能开 issue')
 
   const upgrade = collect(tree, (node) => node.type === 'button' && textOf(node) === '升级')
   assert.equal(upgrade.length, 1, '升级入口必须还在')
@@ -569,7 +578,7 @@ test('浮层：门禁放行但插件自述不兼容时点名、给矩阵原文�
   assert.deepEqual(collect(row[0], (node) => node.type === 'button').map(textOf), ['升级', '不再提示'])
 })
 
-test('设置页：自述矩阵同样点名（unverified 文案），升级入口仍在', async () => {
+test('设置页：自述不兼容逐条点名，unverified 折叠成一行，升级入口仍在', async () => {
   stubFetch({
     ...pluginRoutes,
     [API.status]: statusWith(DECLARED_CHECK, { dismissed: true, overlay: false }),
@@ -578,12 +587,49 @@ test('设置页：自述矩阵同样点名（unverified 文案），升级入口
   const text = textOf(tree)
   assert.match(text, /发现新版本 0\.2\.2-alpha\.2（当前 0\.2\.0-rc\.2）/, '升级入口常驻')
   assert.match(text, /门禁已放行，但插件自述有问题（目标 0\.2\.2-alpha\.2）/)
-  assert.match(text, /该版本从未验证/)
+  assert.match(text, /另有 1 个插件未验证该版本/, '设置页同样折叠未验证')
+  assert.doesNotMatch(text, /该版本从未验证/)
   assert.match(text, /插件自述已知不兼容/)
   assert.match(text, /开 issue 记录这个不兼容/, '设置页同样能开 issue')
   const upgrade = collect(tree, (node) => node.type === 'button' && textOf(node) === '升级')
   assert.equal(upgrade.length, 1)
   assert.notEqual(upgrade[0].props.disabled, true, '自述矩阵不许阻断升级')
+})
+
+test('只有 unverified：浮层与设置页都只折叠一行，绝不给开 issue 入口', async () => {
+  // 夹具把「自述不兼容」那条摘掉，只剩 unverified——「我没测过」不是已知不兼容。
+  const onlyUnverified = { ...DECLARED_CHECK, flagged: [DECLARED_UNKNOWN] }
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusWith(onlyUnverified),
+  })
+  const overlay = await react.mount(Overlay, {})
+  const overlayText = textOf(overlay)
+  assert.match(overlayText, /另有 1 个插件未验证该版本/, '只有 unverified 时仍要如实提示')
+  assert.match(overlayText, /dsh-plugin-awake@0\.1\.0/, '折叠行要能展开看到名单')
+  assert.doesNotMatch(overlayText, /开 issue 记录这个不兼容/, '只有 unverified 时不许有开 issue 按钮')
+  assert.equal(
+    collect(overlay, (node) => node.type === 'button' && /开 issue/.test(textOf(node))).length,
+    0,
+    '整块不许出现任何开 issue 按钮',
+  )
+  assert.doesNotMatch(overlayText, /插件自述已知不兼容|不能升级到/, '没有已知不兼容就别说「不兼容」')
+  assert.doesNotMatch(overlayText, /自述矩阵是人工实测记录/, '只有 unverified 时不渲染自述矩阵修法')
+
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusWith(onlyUnverified, { dismissed: true, overlay: false }),
+  })
+  const settings = await react.mount(Settings, {})
+  const settingsText = textOf(settings)
+  assert.match(settingsText, /另有 1 个插件未验证该版本/)
+  assert.match(settingsText, /dsh-plugin-awake@0\.1\.0/)
+  assert.doesNotMatch(settingsText, /开 issue 记录这个不兼容/, '设置页同样不许有开 issue 入口')
+  assert.equal(
+    collect(settings, (node) => node.type === 'button' && /开 issue/.test(textOf(node))).length,
+    0,
+    '设置页整块不许出现任何开 issue 按钮',
+  )
 })
 
 test('过期缓存：自述矩阵（flagged）属于过期快照，同样不许铺开', async () => {

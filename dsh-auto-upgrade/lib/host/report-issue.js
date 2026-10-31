@@ -69,6 +69,30 @@ function isGate(plugin) {
 }
 
 /**
+ * 可开 issue 的点名集合：**只有已知不兼容**才算——门禁阻塞（`gate`）或自述 `incompatible`。
+ *
+ * `unverified`（从未验证）不是「已知不兼容」：它不逐条占位、不开 issue，只作背景计数。
+ * 否则任何没写矩阵的插件都会让按钮有东西可开，issue 里就会塞满「我没测过」这种噪音。
+ * @param {object[]} plugins `flagged` 列表（门禁 + 自述合并后的那份）。
+ * @returns {object[]} 可写进 issue 的点名项。
+ */
+export function reportablePlugins(plugins) {
+  return (Array.isArray(plugins) ? plugins : [])
+    .filter((plugin) => isGate(plugin) || plugin?.declared?.verdict === 'incompatible')
+}
+
+/**
+ * 从 `flagged` 里挑出**未验证**的那些（既不是门禁阻塞，也不是自述 `incompatible`）。
+ * 它们只能折叠成一行计数，不能点名、不能开 issue。
+ * @param {object[]} plugins `flagged` 列表。
+ * @returns {object[]} 未验证的插件。
+ */
+export function unverifiedPlugins(plugins) {
+  const reportable = new Set(reportablePlugins(plugins))
+  return (Array.isArray(plugins) ? plugins : []).filter((plugin) => !reportable.has(plugin))
+}
+
+/**
  * 生成确定性的 issue 标题（幂等搜索就靠它）。
  * @param {{target:string, plugins:{name:string, sources?:string[], compatible?:boolean}[]}} input 输入。
  * @returns {string} 标题。
@@ -102,7 +126,8 @@ function requirementLine([name, range]) {
  * @param {string} input.target 目标 dsh 版本。
  * @param {string|null} input.installed 当前 dsh 版本。
  * @param {string} input.profile profile 名。
- * @param {{name:string, version:string, peers?:Record<string,string>, declared?:{verdict:string}, sources?:string[], compatible?:boolean}[]} input.plugins 点名插件。
+ * @param {{name:string, version:string, peers?:Record<string,string>, declared?:{verdict:string}, sources?:string[], compatible?:boolean}[]} input.plugins 点名插件（只含已知不兼容：门禁阻塞或自述 `incompatible`）。
+ * @param {number} [input.unverifiedCount] 另有几个插件未验证该版本（只作背景一行，不进表格）。
  * @param {number} input.port dsh web 端口（拼复现命令）。
  * @returns {string} markdown 正文。
  */
@@ -137,6 +162,10 @@ export function issueBody(input) {
     lines.push(
       `| \`${plugin.name}@${plugin.version}\` | ${sourcesOf(plugin).map((source) => `\`${source}\``).join(' + ')} | \`${input.target}\` | ${recordOf(declared.verdict)} | \`${declared.verdict}\` |`,
     )
+  }
+  // 未验证的插件只留一行背景：不进表格、不点名、也不构成开 issue 的理由。
+  if (Number.isInteger(input.unverifiedCount) && input.unverifiedCount > 0) {
+    lines.push('', `另有 ${input.unverifiedCount} 个插件未验证该版本（未验证 ≠ 已知不兼容，未列入上表）。`)
   }
   lines.push('', '## 点名插件', '')
   for (const plugin of input.plugins) {
