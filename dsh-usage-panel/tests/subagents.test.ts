@@ -296,3 +296,96 @@ test('collect: joins labels + relay, leaves unmatched rows external:null and sor
   assert.equal(orphan.startedAt, 6000)
   assert.equal(payload.items[0]!.sessionId, 'sess-orphan') // newest first
 })
+
+test('collect: rows.subagent.val.identity.label wins over the legacy val.label', async (t) => {
+  const dir = tempDir(t)
+  const projCacheDir = path.join(dir, 'projcache')
+  mkdirSync(projCacheDir, { recursive: true })
+  const registryPath = path.join(dir, 'registry.json')
+  writeFileSync(registryPath, '{}')
+  clearSubagentCache()
+
+  // Both shapes present: the live projection writes `identity.label`, the flat
+  // `label` is what older caches carried. Identity must win.
+  writeFileSync(
+    path.join(projCacheDir, 'sess-identity.json'),
+    JSON.stringify({
+      record: {
+        rows: {
+          subagent: {
+            val: { label: 'legacy flat label', identity: { mode: 'continuable', label: 'explore: 仓库根目录: /tmp/x', seq: 2 } },
+          },
+        },
+      },
+    }),
+  )
+
+  const sq = {
+    listSessions: async () => [{ header: { id: 'sess-identity', createdAt: 1000, delegationDepth: 1 }, live: false, persisted: true }],
+    readTitle: async () => ({ title: 'session title' }),
+  } as unknown as Parameters<typeof collectSubagents>[0]['sq']
+
+  const payload = await collectSubagents({
+    sq,
+    registryPath,
+    projCacheDir,
+    codebuddyProjectsDir: path.join(dir, 'codebuddy'),
+    opencodeDbPaths: [],
+    now: 10_000,
+  })
+
+  assert.equal(payload.items.length, 1)
+  assert.equal(payload.items[0]!.label, 'explore: 仓库根目录: /tmp/x')
+})
+
+test('collect: readTitle is only called for rows without a projection label, and in parallel', async (t) => {
+  const dir = tempDir(t)
+  const projCacheDir = path.join(dir, 'projcache')
+  mkdirSync(projCacheDir, { recursive: true })
+  const registryPath = path.join(dir, 'registry.json')
+  writeFileSync(registryPath, '{}')
+  clearSubagentCache()
+
+  writeFileSync(
+    path.join(projCacheDir, 'sess-titled.json'),
+    JSON.stringify({ record: { rows: { subagent: { val: { identity: { label: 'explore: has label' } } } } } }),
+  )
+
+  const titled = Array.from({ length: 24 }, (_, i) => 'sess-title-' + i)
+  const ids = ['sess-titled', ...titled]
+  const calls: string[] = []
+  let inFlight = 0
+  let maxInFlight = 0
+
+  const sq = {
+    listSessions: async () => ids.map((id, i) => ({ header: { id, createdAt: 1000 + i, delegationDepth: 1 }, live: false, persisted: true })),
+    readTitle: async (sessionId: string) => {
+      calls.push(sessionId)
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight -= 1
+      return { title: 'title of ' + sessionId }
+    },
+  } as unknown as Parameters<typeof collectSubagents>[0]['sq']
+
+  const payload = await collectSubagents({
+    sq,
+    registryPath,
+    projCacheDir,
+    codebuddyProjectsDir: path.join(dir, 'codebuddy'),
+    opencodeDbPaths: [],
+    now: 10_000,
+  })
+
+  // A label in the projection cache must bypass the host service call entirely.
+  assert.ok(!calls.includes('sess-titled'))
+  assert.deepEqual([...calls].sort(), [...titled].sort())
+  assert.equal(payload.items.length, ids.length)
+  assert.equal(payload.items.find((item) => item.sessionId === 'sess-titled')!.label, 'explore: has label')
+  assert.equal(payload.items.find((item) => item.sessionId === 'sess-title-7')!.label, 'title of sess-title-7')
+
+  // Bounded fan-out: the fallback must not run one call at a time.
+  assert.ok(maxInFlight > 1, 'expected concurrent readTitle calls, saw max ' + maxInFlight)
+  assert.ok(maxInFlight <= 8, 'readTitle fan-out exceeded the concurrency cap: ' + maxInFlight)
+})
