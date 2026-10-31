@@ -31,6 +31,7 @@
 !/dsh-plugin-product-subagents/
 !/dsh-plugin-restart/
 !/dsh-prompt-optimizer/
+!/dsh-subagents/
 !/dsh-usage-panel/
 !/dsh-zhihu-sidebar/
 # 放行整个目录后 .probe/ 也会被放行；探针产物含二进制与原始输出，不入库
@@ -73,6 +74,9 @@ build/
 
 # audit-subagents.mjs 的运行产物（日报 + run.log），属本机运行态
 .dsh-web/audit/
+
+# 审核记录与熔断状态：本机运行态，不入库
+.dsh-web/reviews/
 
 # 系统 / 编辑器
 .DS_Store

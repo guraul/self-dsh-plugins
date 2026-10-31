@@ -1,0 +1,6 @@
+# dsh-plugin-subagents 的 bundle patch：把插件挂成 profile 的一层。
+# PR2 只做骨架，宿主侧能力（provider 注册、审核路由）在 PR4 补齐。
+- insert:
+    - id: subagents
+      name: dsh-plugin-subagents
+      config: {}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/guraul/self-dsh-plugins/dsh-subagents/schema/review-result.json",
+  "title": "ReviewResult",
+  "description": "一次审核的结构化结果。单一真源：文档引用它，lib/contract.js 的 validateResult 按它实现。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "head_sha",
+    "nonce",
+    "findings",
+    "evidence",
+    "form",
+    "model",
+    "durationMs",
+    "traceId"
+  ],
+  "properties": {
+    "verdict": { "enum": ["APPROVE", "REJECT", "ESCALATE"] },
+    "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "nonce": { "type": "string", "pattern": "^[A-Z2-7]{12}$" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "file", "line", "message"],
+        "properties": {
+          "severity": { "enum": ["blocker", "major", "minor", "nit"] },
+          "file": { "type": "string", "minLength": 1 },
+          "line": { "type": "integer", "minimum": 0 },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "form": { "enum": ["native", "cli", "web"] },
+    "model": { "type": "string", "minLength": 1 },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "traceId": { "type": "string", "pattern": "^[0-9]{8}T[0-9]{6}Z-[a-z0-9]{8}$" },
+    "errorCode": {
+      "enum": [
+        "E_UNAVAILABLE",
+        "E_TIMEOUT",
+        "E_PARSE",
+        "E_SHA_MISMATCH",
+        "E_BUDGET",
+        "E_POLICY"
+      ]
+    }
+  }
+}
