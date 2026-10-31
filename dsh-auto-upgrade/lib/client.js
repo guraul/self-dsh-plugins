@@ -60,6 +60,9 @@ window.__ModuleLoader__.load({
       'overlay.switchChannel': '切到 {channel}',
       'overlay.unknown': '无法确认是否有更新（{error}）',
       'overlay.cached': '今天已检查过',
+      'overlay.staleChecking': '正在重新检测…',
+      'overlay.staleCheckFailed': '重新检测失败，稍后可再点「立即检查」',
+      'overlay.staleInstalled': '上次检查时是 {version}',
       'overlay.upgrade': '升级',
       'overlay.dismiss': '不再提示',
       'overlay.close': '关闭',
@@ -131,6 +134,9 @@ window.__ModuleLoader__.load({
       'overlay.switchChannel': 'Switch to {channel}',
       'overlay.unknown': 'Cannot confirm updates ({error})',
       'overlay.cached': 'already checked today',
+      'overlay.staleChecking': 'Re-checking…',
+      'overlay.staleCheckFailed': 'Re-check failed; use "Check now" to retry',
+      'overlay.staleInstalled': 'Last checked with {version}',
       'overlay.upgrade': 'Upgrade',
       'overlay.dismiss': 'Do not show again',
       'overlay.close': 'Close',
@@ -287,6 +293,24 @@ window.__ModuleLoader__.load({
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error), httpStatus: 0 }
       }
+    }
+
+    /**
+     * 过期结论的补检：**每次页面加载最多一次**（这个模块一次页面加载只加载一次）。
+     * 浮层与设置页共用同一个 promise——两边同时发现过期也只打一次 `/check/run`，
+     * 不会变成「多开一个面板就多打几次 registry」的重算风暴。
+     */
+    let staleRecheck = null
+
+    /**
+     * 取（必要时发起）本次页面加载的过期补检。
+     * @returns {Promise<any>} `/check/run` 的结果。
+     */
+    function recheckStaleOnce() {
+      if (staleRecheck === null) {
+        staleRecheck = request(API.checkRun, { method: 'POST', body: { force: true } })
+      }
+      return staleRecheck
     }
 
     /**
@@ -766,6 +790,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = react.useState(null)
       const [plan, setPlan] = react.useState(null)
       const [hidden, setHidden] = react.useState(false)
+      const [recheck, setRecheck] = react.useState(null)
       const [handoff, setHandoff] = react.useState(null)
       const [lastResult, setLastResult] = react.useState(null)
       const [blocked, setBlocked] = react.useState(null)
@@ -846,9 +871,21 @@ window.__ModuleLoader__.load({
           const today = new Date().toISOString().slice(0, 10)
           const lastCheck = snapshot.lastCheck
           const checkedToday = lastCheck?.date === today || lastCheck?.checkedAt?.slice(0, 10) === today
-          // 当天已经检测过：直接把上次结论铺上（标注 cached），否则浮层会永远停在「正在检查…」
+          // 当天已经检测过：先把上次结论铺上（标注 cached），否则浮层会永远停在「正在检查…」
           if (lastCheck != null) setCheck({ ...lastCheck, cached: true })
-          if (snapshot.policy?.dailyCheck !== false && !checkedToday) await runCheck(false)
+          if (lastCheck?.stale === true) {
+            // 前提已经变了（升级成功 / 换渠道）：旧结论不许当结论，补检一次本页最多一次。
+            setRecheck('running')
+            const fresh = await recheckStaleOnce()
+            if (cancelled) return
+            if (fresh.ok === true) {
+              setRecheck(null)
+              setCheck(fresh)
+            } else {
+              setRecheck('failed')
+              setNotice(fresh.error ?? 'check failed')
+            }
+          } else if (snapshot.policy?.dailyCheck !== false && !checkedToday) await runCheck(false)
           const diagnostics = await request(API.restartDiagnostics)
           if (cancelled || diagnostics.ok !== true || diagnostics.result == null) return
           const finished = Date.parse(diagnostics.result.finishedAt ?? '')
@@ -888,12 +925,18 @@ window.__ModuleLoader__.load({
 
       if (hidden) return null
 
-      const decision = check?.decision
-      const installed = check?.installed ?? status?.dsh?.installed ?? '?'
+      // 过期结论不许当结论：`decision` 只在这份快照的前提仍然成立时才使用。
+      const stale = check?.stale === true
+      const decision = stale ? undefined : check?.decision
+      // 「当前版本」一律用实时已装版本；缓存里的 `installed` 只用来解释「上次检查时是 X」。
+      const liveInstalled = status?.dsh?.installed ?? '?'
+      const installed = liveInstalled
+      const staleInstalled = check?.installed != null && check.installed !== liveInstalled ? check.installed : null
       const target = check?.target ?? null
       let line
       if (handoff !== null) line = ''
       else if (check === null) line = t('overlay.checking')
+      else if (stale) line = recheck === 'failed' ? '' : t('overlay.staleChecking')
       else if (decision === 'up-to-date') line = t('overlay.upToDate', { version: installed })
       else if (decision === 'update-available') line = t('overlay.available', { target, installed })
       // 有风险时不再用「N 个插件不兼容」这种没有名字的文案：正文交给 renderPluginBlock 点名。
@@ -915,7 +958,10 @@ window.__ModuleLoader__.load({
       if (line !== '') {
         copy.push(h('p', { key: 'line', className: decision === 'update-with-plugin-risk' ? 'dsh-au-warn' : undefined }, line))
       }
-      if (check?.cached === true) copy.push(h('p', { key: 'cached', className: 'dsh-au-muted' }, t('overlay.cached')))
+      if (staleInstalled !== null) {
+        copy.push(h('p', { key: 'staleInstalled', className: 'dsh-au-muted' }, t('overlay.staleInstalled', { version: staleInstalled })))
+      }
+      if (check?.cached === true && !stale) copy.push(h('p', { key: 'cached', className: 'dsh-au-muted' }, t('overlay.cached')))
       if (notice !== null) copy.push(h('p', { key: 'notice', className: 'dsh-au-warn' }, notice))
 
       // 降级护栏只说现象会让人无路可走：点出跨线的渠道，并给一个「切过去」的出口。
@@ -1029,6 +1075,7 @@ window.__ModuleLoader__.load({
       const [blocked, setBlocked] = react.useState(null)
       const [report, setReport] = react.useState(null)
       const [progress, setProgress] = react.useState(null)
+      const [recheck, setRecheck] = react.useState(null)
       const watchRef = react.useRef(null)
 
       const refresh = react.useCallback(async () => {
@@ -1043,11 +1090,28 @@ window.__ModuleLoader__.load({
         if (result.ok === true) {
           setDiagnostics({ log: result.log ?? [], result: result.result ?? null, payload: result.payload ?? null })
         }
+        return snapshot
       }, [])
 
       react.useEffect(() => {
-        refresh()
+        let cancelled = false
+        ;(async () => {
+          const snapshot = await refresh()
+          if (cancelled || snapshot.ok !== true || snapshot.lastCheck?.stale !== true) return
+          // 过期结论不许铺开：补检一次（每次页面加载最多一次），拿到新结论再刷新这一页。
+          setRecheck('running')
+          const fresh = await recheckStaleOnce()
+          if (cancelled) return
+          if (fresh.ok !== true) {
+            setRecheck('failed')
+            setNotice(fresh.error ?? 'check failed')
+            return
+          }
+          await refresh()
+          if (!cancelled) setRecheck(null)
+        })()
         return () => {
+          cancelled = true
           if (watchRef.current !== null) {
             clearInterval(watchRef.current)
             watchRef.current = null
@@ -1061,9 +1125,14 @@ window.__ModuleLoader__.load({
 
       // 检测结论直接用上次那一次（设置页不重复打 registry）；点「立即检查」会刷新它。
       const check = state?.lastCheck ?? null
-      const decision = check?.decision
+      // 过期结论不许当结论：`decision` 只在这份快照的前提仍然成立时才使用。
+      const stale = check?.stale === true
+      const decision = stale ? undefined : check?.decision
       const target = check?.target ?? null
-      const installed = check?.installed ?? state?.dsh?.installed ?? '?'
+      // 「当前版本」一律用实时已装版本；缓存里的 `installed` 只用来解释「上次检查时是 X」。
+      const liveInstalled = state?.dsh?.installed ?? '?'
+      const installed = liveInstalled
+      const staleInstalled = check?.installed != null && check.installed !== liveInstalled ? check.installed : null
       const hasUpdate = decision === 'update-available' || decision === 'update-with-plugin-risk'
       // 设置页与浮层同样点名：优先用宿主 409 回传的插件，其次用本次检测结果。
       const blockers = blocked !== null && Array.isArray(blocked.plugins) && blocked.plugins.length > 0
@@ -1202,6 +1271,16 @@ window.__ModuleLoader__.load({
             : t('overlay.handingOff', { step: progress.step ?? '…' })),
           (progress.log ?? []).length === 0 ? null : h('div', { key: 'pre', className: 'dsh-au-pre' }, progress.log.join('\n')),
         ]),
+        // 缓存里的 installed 只解释「上次检查时是 X」；「当前版本」永远是上面的实时值。
+        staleInstalled === null
+          ? null
+          : h('div', { key: 'staleInstalled', className: 'dsh-au-muted' }, t('overlay.staleInstalled', { version: staleInstalled })),
+        // 上次检测的前提已经变了（升级成功 / 换渠道）：说清「正在重新检测」，不铺过期结论。
+        stale ? h('div', { key: 'stale', className: 'dsh-au-panel' }, [
+          h('div', { key: 'l', className: 'dsh-au-line' }, recheck === 'failed'
+            ? t('overlay.staleCheckFailed')
+            : t('overlay.staleChecking')),
+        ]) : null,
         // 升级入口在设置页常驻（浮层被 dismissed / hidden 都不影响这里）；计划卡与浮层同一份渲染。
         hasUpdate ? h('div', { key: 'update', className: 'dsh-au-panel' }, [
           settingRow(
@@ -1359,8 +1438,10 @@ window.__ModuleLoader__.load({
 
     exports.apply = apply
     exports.inject = ['slots']
-    // 导出给单测（`test/client-upgrade-entry.test.mjs`）：降级护栏「建议渠道」的纯函数。
+    // 导出给单测（`test/client-upgrade-entry.test.mjs`）：降级护栏「建议渠道」的纯函数，
+    // 以及「本页已补检过」的闸门重置器（让每条用例都能独立验证「每次页面加载最多一次」）。
     exports.suggestChannel = suggestChannel
+    exports.resetStaleRecheck = () => { staleRecheck = null }
     return module.exports
   },
 })

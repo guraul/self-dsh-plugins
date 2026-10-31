@@ -149,9 +149,12 @@ function stubFetch(routes) {
     const path = exact.split('?')[0]
     const key = Object.hasOwn(routes, exact) ? exact : path
     calls.push({ url: exact, method: options.method ?? 'GET', body: options.body })
+    // 路由值可以是响应体，也可以是一个返回 Promise<响应> 的函数（用来把请求挂住、观察中间态）。
+    const value = Object.hasOwn(routes, key) ? routes[key] : { ok: false, error: `unexpected request: ${exact}` }
+    if (typeof value === 'function') return value()
     return {
       status: 200,
-      json: async () => (Object.hasOwn(routes, key) ? routes[key] : { ok: false, error: `unexpected request: ${exact}` }),
+      json: async () => value,
     }
   }
   return { calls }
@@ -246,6 +249,37 @@ const RISK_CHECK = {
   incompatible: [BRIDGE],
 }
 
+const TODAY = new Date().toISOString().slice(0, 10)
+
+/**
+ * 升级成功后的真实现场：已装 `0.2.2-alpha.2`，但缓存里还是升级前那次检测（0.2.1-rc.5）。
+ * `stale` / `staleReason` 由宿主在 `/status` 上标注（issue #100）。
+ */
+const STALE_CHECK = {
+  date: TODAY,
+  checkedAt: new Date().toISOString(),
+  decision: 'update-available',
+  installed: '0.2.1-rc.5',
+  target: '0.2.2-alpha.2',
+  channel: 'alpha',
+  tags: TAGS,
+  incompatible: [],
+  cached: false,
+  stale: true,
+  staleReason: 'installed-changed',
+}
+
+/**
+ * 造一份「已装版本是 X」的 `/status` 快照。
+ * @param {object} lastCheck 上次检测结论。
+ * @param {string} installed 实时已装版本。
+ * @param {{dismissed?:boolean, overlay?:boolean}} [settings] 浮层设置。
+ * @returns {object} 快照。
+ */
+function statusAt(lastCheck, installed, settings = { dismissed: false, overlay: true }) {
+  return { ...statusWith(lastCheck, settings), dsh: { installed } }
+}
+
 test('设置页：有更新时渲染升级入口，无更新时不渲染（且不受「不再提示」影响）', async () => {
   stubFetch({
     ...pluginRoutes,
@@ -271,8 +305,10 @@ test('设置页：有更新时渲染升级入口，无更新时不渲染（且�
 test('设置页：降级护栏给出出路并点名建议渠道', async () => {
   stubFetch({
     ...pluginRoutes,
-    [API.status]: statusWith(
+    // 「当前版本」现在一律取实时已装版本，夹具里两边必须一致才是真实现场。
+    [API.status]: statusAt(
       { date: '2026-10-18', decision: 'downgrade-guard', installed: '0.2.1-alpha.5', target: '0.2.0-rc.2', channel: 'latest', tags: TAGS, incompatible: [] },
+      '0.2.1-alpha.5',
       { dismissed: true, overlay: false },
     ),
   })
@@ -286,7 +322,10 @@ test('设置页：降级护栏给出出路并点名建议渠道', async () => {
 test('浮层：降级护栏给出出路并点名建议渠道', async () => {
   stubFetch({
     ...pluginRoutes,
-    [API.status]: statusWith({ date: '2026-10-18', decision: 'downgrade-guard', installed: '0.2.1-alpha.5', target: '0.2.0-rc.2', channel: 'latest', tags: TAGS, incompatible: [] }),
+    [API.status]: statusAt(
+      { date: '2026-10-18', decision: 'downgrade-guard', installed: '0.2.1-alpha.5', target: '0.2.0-rc.2', channel: 'latest', tags: TAGS, incompatible: [] },
+      '0.2.1-alpha.5',
+    ),
   })
   const text = textOf(await react.mount(Overlay, {}))
   assert.match(text, /本机版本高于发布源（0\.2\.1-alpha\.5 > 0\.2\.0-rc\.2）/)
@@ -452,4 +491,77 @@ test('浮层：点「开 issue」走 report-issue，成功后同块显示 #N 链
   const posted = calls.find((call) => call.url === API.reportIssue)
   assert.equal(posted.method, 'POST')
   assert.deepEqual(JSON.parse(posted.body), { target: '0.2.1-rc.4' }, '只允许传目标版本')
+})
+
+test('过期缓存：不把旧结论当结论，改用实时 installed，且每页最多一次 /check/run', async () => {
+  exported.resetStaleRecheck()
+  // 把补检挂住，好观察「正在重新检测…」这个中间态（而不是被新结论立刻覆盖）。
+  const held = new Promise(() => {})
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusAt(STALE_CHECK, '0.2.2-alpha.2'),
+    [API.checkRun]: () => held,
+  })
+  const tree = await react.mount(Overlay, {})
+  const text = textOf(tree)
+  assert.match(text, /正在重新检测…/, '补检期间必须说清正在做什么')
+  assert.match(text, /上次检查时是 0\.2\.1-rc\.5/, '缓存里的 installed 只能用来解释过去')
+  assert.doesNotMatch(text, /当前 0\.2\.1-rc\.5/, '「当前版本」不许用缓存里的旧值')
+  assert.doesNotMatch(text, /有新版本 0\.2\.2-alpha\.2/, '过期的 update-available 不许当结论')
+  const row = collect(tree, (node) => node.props?.className === 'dsh-au-row')
+  assert.deepEqual(
+    collect(row[0], (node) => node.type === 'button').map(textOf),
+    ['不再提示'],
+    '过期结论不许给出升级按钮',
+  )
+
+  // 设置页同时打开：与浮层共用同一个闸门，同一份页面不该再打一次。
+  const settingsText = textOf(await react.mount(Settings, {}))
+  assert.match(settingsText, /正在重新检测…/)
+  assert.match(settingsText, /上次检查时是 0\.2\.1-rc\.5/)
+  assert.doesNotMatch(settingsText, /发现新版本 0\.2\.2-alpha\.2/, '设置页同样不许铺过期结论')
+  assert.equal(
+    calls.filter((call) => call.url === API.checkRun && call.method === 'POST').length,
+    1,
+    '每次页面加载最多触发一次 /check/run（浮层 + 设置页共用）',
+  )
+})
+
+test('过期缓存：补检拿到新结论后替换旧结论（不重复打 /check/run）', async () => {
+  exported.resetStaleRecheck()
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusAt(STALE_CHECK, '0.2.2-alpha.2'),
+    [API.checkRun]: {
+      ok: true,
+      decision: 'up-to-date',
+      installed: '0.2.2-alpha.2',
+      target: '0.2.2-alpha.2',
+      channel: 'alpha',
+      tags: TAGS,
+      cached: false,
+      stale: false,
+      staleReason: null,
+      incompatible: [],
+    },
+  })
+  const text = textOf(await react.mount(Overlay, {}))
+  assert.match(text, /已是最新（0\.2\.2-alpha\.2）/, '补检结论必须替换过期结论')
+  assert.doesNotMatch(text, /正在重新检测/)
+  assert.doesNotMatch(text, /上次检查时是/, '结论已与实时版本对齐，不再解释过去')
+  assert.equal(calls.filter((call) => call.url === API.checkRun).length, 1, '只补检一次')
+})
+
+test('「当前版本」一律用实时已装版本；缓存 installed 只说明「上次检查时是 X」', async () => {
+  exported.resetStaleRecheck()
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusAt({ ...STALE_CHECK, stale: false, staleReason: null }, '0.2.0-rc.2'),
+  })
+  const overlay = textOf(await react.mount(Overlay, {}))
+  assert.match(overlay, /有新版本 0\.2\.2-alpha\.2（当前 0\.2\.0-rc\.2）/, '「当前版本」必须是实时值')
+  assert.match(overlay, /上次检查时是 0\.2\.1-rc\.5/)
+  const settings = textOf(await react.mount(Settings, {}))
+  assert.match(settings, /发现新版本 0\.2\.2-alpha\.2（当前 0\.2\.0-rc\.2）/, '设置页同样用实时值')
+  assert.match(settings, /上次检查时是 0\.2\.1-rc\.5/)
 })

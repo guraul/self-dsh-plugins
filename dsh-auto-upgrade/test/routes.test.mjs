@@ -9,6 +9,7 @@ import { join } from 'node:path'
 
 import { API } from '../lib/host/protocol.js'
 import { issueTitle } from '../lib/host/report-issue.js'
+import { localDate } from '../lib/host/state.js'
 import { apply } from '../lib/index.js'
 
 /**
@@ -308,6 +309,67 @@ test('POST /check/auto 判定有更新，且当天第二次走缓存', async (t)
       body: JSON.stringify({ force: true }),
     })).json()
     assert.equal(forced.cached, false)
+  } finally {
+    await env.close()
+  }
+})
+
+test('过期缓存：installed / channel 变了就标 stale，/check/auto 必须重算而不是回放（issue #100）', async (t) => {
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const installed = installedVersion(env.anchor)
+    const today = localDate()
+    const checkedAt = new Date().toISOString()
+    await mkdir(env.stateDir, { recursive: true })
+
+    /** 直接落一份「今天已检测过」的旧结论，跳过真实检测。 */
+    const seedLastCheck = async (lastCheck) => {
+      await writeFile(join(env.stateDir, 'state.json'), `${JSON.stringify({
+        lastCheckDate: today,
+        lastCheck: { date: today, checkedAt, cached: false, tags: null, incompatible: [], ...lastCheck },
+      }, null, 2)}\n`)
+    }
+
+    // ① 已装版本变了（升级成功的现场）：旧结论描述的是升级前那次检测。
+    await seedLastCheck({ decision: 'update-available', channel: 'latest', installed: '0.2.1-rc.5', target: '9.9.9' })
+    const status = await (await fetch(`${env.host.base}${API.status}`)).json()
+    assert.equal(status.lastCheck.stale, true, '升级后旧结论必须标过期')
+    assert.equal(status.lastCheck.staleReason, 'installed-changed')
+    assert.equal(status.dsh.installed, installed, '/status 的已装版本仍是实时值')
+    assert.equal(status.lastCheck.installed, '0.2.1-rc.5', '缓存里的 installed 如实保留（用来解释「上次检查时是 X」）')
+
+    const recomputed = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    assert.equal(recomputed.cached, false, '当天幂等不能把过期结论锁死一天，必须重算')
+    assert.equal(recomputed.stale, false, '刚算出来的结论自己不过期')
+    assert.equal(recomputed.installed, installed, '重算用的是实时已装版本')
+    assert.equal(recomputed.decision, 'update-available')
+
+    // ② 只换了渠道（installed 没变）：同样是过期结论。
+    await seedLastCheck({ decision: 'update-available', channel: 'latest', installed, target: '9.9.9' })
+    await writeFile(join(env.stateDir, 'policy.json'), `${JSON.stringify({ channel: 'next' }, null, 2)}\n`)
+    const channelStatus = await (await fetch(`${env.host.base}${API.status}`)).json()
+    assert.equal(channelStatus.lastCheck.stale, true, '换渠道后缓存也必须失效')
+    assert.equal(channelStatus.lastCheck.staleReason, 'channel-changed')
+
+    const channelRecomputed = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    assert.equal(channelRecomputed.cached, false, '换渠道后必须按新渠道重算')
+    assert.equal(channelRecomputed.channel, 'next')
+    assert.equal(channelRecomputed.target, '9.9.9', '新渠道的 dist-tag 就是新目标')
+
+    // ③ 两项都变：优先报 installed-changed。
+    await seedLastCheck({ decision: 'update-available', channel: 'alpha', installed: '0.2.1-rc.5', target: '9.9.9' })
+    const bothStatus = await (await fetch(`${env.host.base}${API.status}`)).json()
+    assert.equal(bothStatus.lastCheck.staleReason, 'installed-changed', '两项都变时优先 installed-changed')
+
+    // ④ 前提没变：不 stale，当天第二次仍然走缓存（原本的幂等没被破坏）。
+    const fresh = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    const consistent = await (await fetch(`${env.host.base}${API.status}`)).json()
+    assert.equal(consistent.lastCheck.stale, false)
+    assert.equal(consistent.lastCheck.staleReason, null)
+    const cached = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    assert.equal(cached.cached, true, '前提仍成立时不许无脑重算')
+    assert.equal(cached.checkedAt, fresh.checkedAt, '缓存回放的必须是同一条结论')
   } finally {
     await env.close()
   }

@@ -3,6 +3,33 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.4] — 2026-10-31
+
+### 修复
+
+- **过期缓存不再当结论：升级成功后界面不再显示旧的「当前版本」（issue #100）。** 用 `alpha` 渠道升到
+  `0.2.2-alpha.2` 后，界面仍显示「发现新版本 0.2.2-alpha.2（当前 0.2.1-rc.5）」——`/status` 的
+  `dsh.installed` 是实时的正确值，但客户端优先读了 `lastCheck.installed`（升级前那次检测的缓存），
+  而「当天只检测一次」的幂等又把这份过期结论锁了一整天。`next` / `latest` 渠道看不出问题，只是因为
+  缓存里 `installed == target`，错得恰好正确。三处一起修：
+  - **宿主判定过期**：新增 `lib/host/staleness.js`（纯函数，不联网），`GET /status` 的 `lastCheck`
+    补 `stale` 与 `staleReason`：`lastCheck.installed !== 实时已装版本` → `installed-changed`；
+    否则 `lastCheck.channel !== policy.channel` → `channel-changed`；两项同时变时优先 `installed-changed`。
+    `/status` **只标过期，不重算**。
+  - **`POST /check/auto` 遇过期必须重算**：当天的幂等只在「前提仍然成立」时回放缓存，升级成功或换渠道
+    之后按新事实重新检测；前提没变时仍然走缓存（原幂等不受影响）。
+  - **客户端**：「当前版本」一律用实时的 `status.dsh.installed`，缓存里的 `installed` 只用于一行
+    「上次检查时是 `<X>`」；`lastCheck.stale === true` 时不采用过期 `decision`（不给升级按钮），
+    转而触发一次 `POST /check/run` 并显示「正在重新检测…」。补检由浮层与设置页**共用一个 promise**，
+    **每次页面加载最多一次**，避免两个面板同时打开时反复打 registry。
+
+### 内部
+
+- 新增 `lib/host/staleness.js` 与 `test/staleness.test.mjs`（7 条纯函数用例）；`test/routes.test.mjs`
+  新增「installed 变了 / 换渠道 / 两者都变 / 前提一致仍走缓存」一条多段用例；`test/client-upgrade-entry.test.mjs`
+  新增 3 条渲染用例（stale 不铺旧结论且只补检一次、补检替换结论、当前版本取实时值）。
+  用例总数 66 → 77。门禁语义（`compatible` / `exempted` / `incompatible`）、升级链路与 `/report-issue` 未改动。
+
 ## [0.2.3] — 2026-10-29
 
 ### 新增
