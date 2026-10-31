@@ -19,12 +19,18 @@
 5. 开 PR        （在 worktree 内）scripts/pipeline/open-pr.sh
                 → 自动推送 + 开 PR，body 首行 Closes #<issue号>
 6. CI           GitHub Actions（.github/workflows/ci.yml）：只跑测试 + node --check 语法检查
-                ④ 用户 review 确认 —— **人在环，唯一一步**
-7. 合并         scripts/pipeline/merge-pr.sh         # squash merge + 清理现场 + 快进 main
+6.5 审核        reviewer 产出审核记录 .dsh-web/reviews/<pr>-<sha>.json
+                （dsh-subagents 的 prepare → 调用 → record）
+7. 合并         scripts/pipeline/merge-pr.sh --review-record=<记录>   # 闸门 → squash merge → 清理 → 快进 main
 8. 收尾         合并后**没有部署**；只有 CI 测试通过这一件事
 ```
 
-**人在环（唯一一步）**：agent 完成开发并开 PR 后，**必须向用户询问"review 是否完成"**；**用户回复 ok** 后，agent 才允许运行 `merge-pr.sh`。除这一步之外，从 issue 到合并全程自动化。
+**两道闸门，一个纪律**：
+
+- **CI**（第 6 步）：测试与语法检查，不过就停；
+- **审核闸门**（`merge-pr.sh` 内置）：合并前必须有审核记录，校验判定、提交绑定、时效与高风险路径。**默认 fail-closed**——没记录就拒绝合并。要绕过必须显式声明 `--no-review` 或 `DSH_REVIEWER=off`，此时脚本打印警告并写一条跳过审计（`.dsh-web/reviews/skips/`），事后可查。
+
+**人在环仍是调用纪律**：脚本不替用户做决定，`--review-record` 只能证明「有个审核方看过」，不能证明「用户同意了」。因此在 reviewer 判定 `APPROVE` 之后、跑 `merge-pr.sh` 之前，agent 仍须拿到用户对本次 review 的**明确同意**。
 
 **合并后没有部署**：本仓库没有服务器、没有 rsync / ssh / systemd、没有线上 curl 验证。合并的唯一后果是 main 前进一格、CI 重跑一遍。
 
@@ -91,11 +97,19 @@ scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎
 ```
 | 项 | 说明 |
 |---|---|
-| 行为 | 定位 PR → CI checks 未过则拒绝 → `gh pr merge --squash` → 删远端分支 → 删本地分支（`-D`）→ 移除对应 worktree → `worktree prune` → 主工作区快进（`ff_main()`：`git fetch --prune origin main` + `git merge --ff-only origin/main`，**显式命名 merge head** 以绕开 `FETCH_HEAD` 竞态，仍绝不做非快进合并；失败时**先确认无分叉才自动重试一次**，真分叉则拒绝并提示不要用 `--force`） |
+| 行为 | 定位 PR → CI checks 未过则拒绝 → 审核闸门未过则拒绝 → `gh pr merge --squash` → 删远端分支 → 删本地分支（`-D`）→ 移除对应 worktree → `worktree prune` → 主工作区快进（`ff_main()`：`git fetch --prune origin main` + `git merge --ff-only origin/main`，**显式命名 merge head** 以绕开 `FETCH_HEAD` 竞态，仍绝不做非快进合并；失败时**先确认无分叉才自动重试一次**，真分叉则拒绝并提示不要用 `--force`） |
 | 幂等 | PR 已是 `MERGED` → 跳过合并，只清理现场并快进 main |
 | 退出码 | 0 成功；1 找不到 main 工作区 / 找不到 PR / 状态非 OPEN·MERGED / CI 未过 / 快进失败 |
 
-⚠️ **调用方必须先拿到用户对本次 review 的明确同意**（见 §一、§四红线 1）。脚本自己不询问、也不校验——这是调用纪律。
+| 新参数 | 说明 |
+|---|---|
+| `--review-record=<文件>` | 审核记录路径；**不传即拒绝合并**（fail-closed） |
+| `--no-review` | 显式跳过审核闸门：打印警告 + 写 `.dsh-web/reviews/skips/*.json` |
+| `DSH_REVIEWER=off` | 等价于 `--no-review` |
+
+审核闸门排在 `--check-only` **之前**——演练模式恰恰最该验证闸门拦不拦得住。闸门内部调用
+`node dsh-subagents/lib/cli.js check`，判定、SHA 绑定、时效、高风险路径都由它负责，脚本只负责
+「拿不到记录就拒绝」与「显式跳过要留痕」。
 
 ### status.sh
 
@@ -209,7 +223,7 @@ node --test scripts/pipeline/audit-subagents.test.mjs           # 单测 + 两�
 
 ## 四、关键约定（红线）
 
-1. **人在环**：没有用户对本次 review 的**明确同意**，绝不运行 `merge-pr.sh`。
+1. **审核闸门 + 人在环**：`merge-pr.sh` 默认要求 `--review-record`，没有审核记录绝不合并；绕过必须显式 `--no-review`（会留痕）。同时，reviewer 判 `APPROVE` 之后仍须拿到用户对本次 review 的**明确同意**——闸门证明「审过」，不证明「用户同意」。
 2. **合并只能 squash**；PR body 首行必须 `Closes #<issue号>`（`open-pr.sh` 已内置）。
 3. **绝不用真实 `~/.dsh` 做安装实验**：一律走 `install-check.sh`（一次性 `DSH_HOME`，装完即删）。
 4. **版本豁免（version exemption）是逃生舱**：只在拿到用户对**具体版本组合**的明确同意后才用（CLI 需 `--accept-risk`）；用完必须撤销，`dsh plugin --profile web version-exemptions` 应回到 `{}`。插件升版本或 DSH 升版本都会让它自动失效。
