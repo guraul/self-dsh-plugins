@@ -32,6 +32,7 @@ import { ALLOW_SCRIPTS, API, CHANNELS, CODE, DECISION, DEFAULT_REGISTRY, DSH_PAC
 import { fetchPackument } from './host/registry.js'
 import { compareVersions, isExactVersion } from './host/semver.js'
 import { listRunningSessions } from './host/sessions.js'
+import { checkStaleness } from './host/staleness.js'
 import { localDate, openStores, resolveStateDir } from './host/state.js'
 import { TaskRegistry } from './host/tasks.js'
 import { preflight, readInstalledVersion, resolveInstallation } from './host/toolchain.js'
@@ -213,7 +214,11 @@ export function apply(ctx, config = {}) {
     if (options.trigger === 'auto' && options.force !== true) {
       const state = await stores.state.read()
       if (state.lastCheckDate === today && state.lastCheck !== null) {
-        return { ...state.lastCheck, cached: true, sessions: listRunningSessions(getAgents()) }
+        // 「当天只检测一次」只对**前提仍然成立**的快照生效：升级成功或换渠道之后，
+        // 旧结论描述的是过去，回放它就是在拿过期缓存当结论（issue #100）。
+        if (checkStaleness(state.lastCheck, { installed, channel: policy.channel }).stale !== true) {
+          return { ...state.lastCheck, stale: false, staleReason: null, cached: true, sessions: listRunningSessions(getAgents()) }
+        }
       }
     }
 
@@ -245,6 +250,9 @@ export function apply(ctx, config = {}) {
       date: today,
       trigger: options.trigger,
       cached: false,
+      // 刚算出来的结论，前提就是此刻的已装版本与渠道：必然不过期。
+      stale: false,
+      staleReason: null,
       decision,
       channel: policy.channel,
       installed,
@@ -436,7 +444,10 @@ export function apply(ctx, config = {}) {
           registry,
           policy,
           settings,
-          lastCheck: state.lastCheck,
+          // 只标「过期」，绝不在这里联网重算：重算由 /check/auto（宿主）或客户端的一次性 /check/run 负责。
+          lastCheck: state.lastCheck === null
+            ? null
+            : { ...state.lastCheck, ...checkStaleness(state.lastCheck, { installed, channel: policy.channel }) },
           pendingRestart: state.pendingRestart,
           sessions: listRunningSessions(getAgents()),
           task: active === undefined ? null : { id: active.id, kind: active.kind, phase: active.phase },

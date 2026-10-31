@@ -104,6 +104,30 @@ pnpm run check                                # node --check
 | 有会话在跑 | `409 E_SESSIONS_RUNNING`，`detail.bypassable = true` —— 前端弹警告，确认后可带 `force` 继续 |
 | 已装插件与**目标版本**不兼容 | `409 E_PLUGIN_INCOMPATIBLE`，`detail.bypassable = false` —— 不可绕过 |
 
+## 过期缓存不算结论（0.2.4，issue #100）
+
+**一句话**：`state.lastCheck` 只是一份**有前提的快照**（当时的已装版本 + 当时的渠道），前提变了就不许再当结论。
+
+- **判定只有一处**：`lib/host/staleness.js` 的 `checkStaleness(lastCheck, { installed, channel })`，纯函数、不联网。
+  顺序即优先级：`lastCheck.installed !== 实时已装版本` → `installed-changed`；否则
+  `lastCheck.channel !== policy.channel` → `channel-changed`；都一致 → `{stale:false, staleReason:null}`。
+  实时已装版本取不到（安装树解析失败）时**不做已装版本比较**（否则每次都会虚报过期、白重算）。
+- **`GET /status` 只标过期，不重算**：返回的 `lastCheck` = 原快照 + `{stale, staleReason}`。
+  缓存里的 `installed` 刻意保留原值——它的唯一用途是让界面说「上次检查时是 `<X>`」。
+- **`POST /check/auto` 遇过期必须重算**：「当天只检测一次」的幂等只对**前提仍成立**的快照生效，
+  否则升级成功 / 换渠道之后会被锁死一整天（0.2.3 的真实故障）。前提没变时仍走缓存（`cached:true`）。
+- **客户端**（`lib/client.js`，浮层与设置页同一口径）：
+  - 「当前版本」**一律**用 `status.dsh.installed`；缓存里的 `installed` 只写一行
+    `overlay.staleInstalled`（「上次检查时是 `<X>`」）。**不要再写回 `check?.installed ?? …` 那种回落。**
+  - `lastCheck.stale === true` 时 `decision` 一律不用（不出升级按钮、不铺降级护栏、不点名插件），
+    显示「正在重新检测…」（`overlay.staleChecking`）并补检一次。
+  - 补检 = `POST /check/run`，由 `recheckStaleOnce()` 里的**模块级 promise** 承担：
+    浮层与设置页共用同一个请求，**每次页面加载最多一次**（模块一次页面加载只加载一次）。
+    单测用 `exports.resetStaleRecheck()` 复位这道闸门。
+- **守卫**：`test/staleness.test.mjs`（判定矩阵）、`test/routes.test.mjs` 的「过期缓存：…」
+  （四种现场 + 前提一致仍走缓存）、`test/client-upgrade-entry.test.mjs` 的 3 条渲染用例
+  （stale 不铺旧结论 / 只补检一次 / 当前版本取实时值）。把 `checkStaleness` 改成恒 `false` 时这些用例必须红。
+
 ## `/plugins` 响应的 `peers` 字段
 
 `GET /api/dsh-auto-upgrade/plugins` 里每个插件带的 `peers` 是「未满足的 peer 明细」，取自官方
