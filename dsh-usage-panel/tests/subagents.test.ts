@@ -389,3 +389,92 @@ test('collect: readTitle is only called for rows without a projection label, and
   assert.ok(maxInFlight > 1, 'expected concurrent readTitle calls, saw max ' + maxInFlight)
   assert.ok(maxInFlight <= 8, 'readTitle fan-out exceeded the concurrency cap: ' + maxInFlight)
 })
+
+// issue #127: codebuddy usage is OpenAI-style — `inputTokens` already includes
+// the cached prefix. Reading it as uncached input inflated input ~80x and hid
+// the cache column.
+function codebuddyCacheFixture(t: { after: (fn: () => void) => void }): { dir: string; cwd: string; remoteId: string } {
+  const dir = tempDir(t as never)
+  const cwd = '/tmp/cache-proj'
+  const remoteId = '01a1-cache'
+  const filePath = codebuddyTranscriptPath(dir, cwd, remoteId)
+  mkdirSync(path.dirname(filePath), { recursive: true })
+  return { dir, cwd, remoteId }
+}
+
+test('codebuddy: rawUsage hit/miss splits cache read from uncached input', async (t) => {
+  const { dir, cwd, remoteId } = codebuddyCacheFixture(t)
+  const filePath = codebuddyTranscriptPath(dir, cwd, remoteId)
+  writeFileSync(
+    filePath,
+    JSON.stringify({
+      type: 'message',
+      role: 'assistant',
+      timestamp: 1000,
+      providerData: {
+        model: 'deepseek-v4.1-flash',
+        usage: { inputTokens: 28779, outputTokens: 193 },
+        rawUsage: {
+          prompt_tokens: 28779,
+          completion_tokens: 193,
+          prompt_cache_hit_tokens: 28416,
+          prompt_cache_miss_tokens: 363,
+          prompt_cache_write_tokens: 0,
+          prompt_tokens_details: { cached_tokens: 28416 },
+          credit: 0.05,
+        },
+      },
+    }) + '\n',
+  )
+  const read = await readCodebuddySession(remoteId, cwd, { projectsDir: dir })
+  assert.ok(read.hit)
+  // 363 uncached + 193 output + 28416 cache read — never 28779 as "input".
+  assert.equal(read.hit!.totals.input, 363)
+  assert.equal(read.hit!.totals.cacheRead, 28416)
+  assert.equal(read.hit!.totals.output, 193)
+  assert.equal(read.hit!.totals.total, 363 + 193 + 28416)
+})
+
+test('codebuddy: falls back to prompt_tokens_details.cached_tokens when hit/miss are absent', async (t) => {
+  const { dir, cwd, remoteId } = codebuddyCacheFixture(t)
+  const filePath = codebuddyTranscriptPath(dir, cwd, remoteId)
+  writeFileSync(
+    filePath,
+    JSON.stringify({
+      type: 'message',
+      role: 'assistant',
+      timestamp: 1000,
+      providerData: {
+        model: 'glm-5.3',
+        usage: { inputTokens: 1000, outputTokens: 10 },
+        rawUsage: { prompt_tokens_details: { cached_tokens: 800 } },
+      },
+    }) + '\n',
+  )
+  const read = await readCodebuddySession(remoteId, cwd, { projectsDir: dir })
+  assert.ok(read.hit)
+  assert.equal(read.hit!.totals.cacheRead, 800)
+  assert.equal(read.hit!.totals.input, 200) // 1000 - 800, not 1000
+})
+
+test('codebuddy: without rawUsage, inputTokensDetails still prevents double counting', async (t) => {
+  const { dir, cwd, remoteId } = codebuddyCacheFixture(t)
+  const filePath = codebuddyTranscriptPath(dir, cwd, remoteId)
+  writeFileSync(
+    filePath,
+    JSON.stringify({
+      type: 'message',
+      role: 'assistant',
+      timestamp: 1000,
+      providerData: {
+        model: 'deepseek-v4-flash',
+        usage: { inputTokens: 500, outputTokens: 5, inputTokensDetails: [{ cached_tokens: 400 }] },
+      },
+    }) + '\n',
+  )
+  const read = await readCodebuddySession(remoteId, cwd, { projectsDir: dir })
+  assert.ok(read.hit)
+  assert.equal(read.hit!.totals.cacheRead, 400)
+  assert.equal(read.hit!.totals.input, 100)
+  assert.equal(read.hit!.totals.total, 505)
+})

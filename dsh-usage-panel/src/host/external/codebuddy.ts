@@ -56,6 +56,8 @@ interface Aggregate {
   model: string | null
   input: number
   output: number
+  cacheRead: number
+  cacheWrite: number
   calls: number
   credit: number
   hasCredit: boolean
@@ -63,11 +65,37 @@ interface Aggregate {
   endedAt: number | null
 }
 
+/** Numeric coercion that rejects NaN/Infinity/negatives. */
+function toNumber(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+/** First coercible number wins; `undefined`/`null`/garbage fall through. */
+function firstNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    const n = toNumber(value)
+    if (n !== null) return n
+  }
+  return null
+}
+
+function objectOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+}
+
 /**
  * Parse one transcript. Only `type === 'message' && role === 'assistant'`
- * lines with a usage block count. Per the fork contract cacheRead/cacheWrite
- * stay 0 (codebuddy reports them separately but the panel keeps the external
- * row faithful to input/output only). Malformed lines are ignored.
+ * lines with a usage block count.
+ *
+ * ⚠️ codebuddy reports **OpenAI-style** usage: `usage.inputTokens` (=
+ * `prompt_tokens`) ALREADY includes the cached prefix. The clean decomposition
+ * lives in `rawUsage`:
+ *   `prompt_cache_hit_tokens`  → cache read
+ *   `prompt_cache_miss_tokens` → uncached input
+ * Reading `inputTokens` as uncached input inflates it by the cache-hit amount
+ * (~80x on cache-heavy turns) and hides the cache column entirely (issue #127).
+ * Malformed lines are ignored.
  */
 export async function readCodebuddySession(
   remoteId: string,
@@ -93,6 +121,8 @@ export async function readCodebuddySession(
     model: null,
     input: 0,
     output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
     calls: 0,
     credit: 0,
     hasCredit: false,
@@ -121,12 +151,21 @@ export async function readCodebuddySession(
       if (!usage || typeof usage !== 'object' || Array.isArray(usage)) continue
       const buckets = usage as Record<string, unknown>
 
-      agg.input += num(buckets.inputTokens)
+      const rawUsage = objectOf(pd.rawUsage)
+      const details = Array.isArray(buckets.inputTokensDetails) ? objectOf(buckets.inputTokensDetails[0]) : null
+      const promptTotal = num(buckets.inputTokens)
+      const cacheRead =
+        firstNumber(rawUsage?.prompt_cache_hit_tokens, objectOf(rawUsage?.prompt_tokens_details)?.cached_tokens, details?.cached_tokens) ?? 0
+      const cacheMiss = firstNumber(rawUsage?.prompt_cache_miss_tokens)
+      // Never double count: hit + miss must not exceed promptTotal.
+      const uncachedInput = cacheMiss !== null ? cacheMiss : Math.max(0, promptTotal - cacheRead)
+      agg.input += uncachedInput
+      agg.cacheRead += cacheRead
+      agg.cacheWrite += firstNumber(rawUsage?.prompt_cache_write_tokens) ?? 0
       agg.output += num(buckets.outputTokens)
       if (typeof pd.model === 'string' && pd.model) agg.model = pd.model
-      const rawUsage = pd.rawUsage
-      if (rawUsage && typeof rawUsage === 'object' && !Array.isArray(rawUsage)) {
-        const credit = (rawUsage as Record<string, unknown>).credit
+      if (rawUsage) {
+        const credit = rawUsage.credit
         const value = Number(credit)
         if (credit !== undefined && credit !== null && Number.isFinite(value)) {
           agg.credit += value
@@ -151,9 +190,9 @@ export async function readCodebuddySession(
   const totals: UsageTotals = {
     input: agg.input,
     output: agg.output,
-    cacheRead: 0,
-    cacheWrite: 0,
-    total: agg.input + agg.output,
+    cacheRead: agg.cacheRead,
+    cacheWrite: agg.cacheWrite,
+    total: agg.input + agg.output + agg.cacheRead + agg.cacheWrite,
   }
   const hit: SubagentExternal = {
     executor: 'codebuddy',
