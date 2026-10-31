@@ -2110,20 +2110,31 @@ export function apply(ctx: Context, config: Config): void {
       position: { index: number; total: number },
     ): Promise<void> {
       const ready = await waitForReady(30_000)
-      if (!ready) throw new Error('企微连接未就绪')
+      if (!ready) {
+        console.warn('[im-bridge] 审批卡片未发送：企微连接 30 秒内未就绪')
+        throw new Error('企微连接未就绪')
+      }
       const minutes = approvalTimeoutMinutes()
       const card = buildApprovalCard(entry, minutes)
       const payload = { msgtype: 'template_card', template_card: card }
+      /** 把异常压成一行，避免日志里出现整段堆栈。 */
+      const reason = (error: unknown): string =>
+        error instanceof Error ? `${error.name}: ${error.message}` : String(error)
       try {
         await ws.sendMessage(entry.chatTarget, payload)
-      } catch {
+        console.log(`[im-bridge] 审批卡片已发送 id=${entry.id} 目标=${entry.chatTarget}`)
+      } catch (first) {
+        console.warn(`[im-bridge] 审批卡片发送失败（将重试一次）: ${reason(first)}`)
         try {
           await ws.sendMessage(entry.chatTarget, payload)
-        } catch {
+          console.log(`[im-bridge] 审批卡片重试成功 id=${entry.id} 目标=${entry.chatTarget}`)
+        } catch (second) {
+          console.warn(`[im-bridge] 审批卡片重试失败（降级文本）: ${reason(second)}`)
           await ws.sendMessage(entry.chatTarget, {
             msgtype: 'text',
             text: { content: formatApprovalText(entry, position, minutes) },
           })
+          console.log(`[im-bridge] 审批已降级为文本 id=${entry.id} 目标=${entry.chatTarget}`)
         }
       }
       const timer = setTimeout(() => {
@@ -2210,6 +2221,7 @@ export function apply(ctx: Context, config: Config): void {
       approvals.add({ ...draft, settle: (decision) => { resolveRelay(decision) } })
 
       const onAbort = (): void => {
+        console.warn(`[im-bridge] 审批被中止（工具调用取消）id=${draft.id} tool=${request.toolName}`)
         approvals.settle(draft.id, 'rejected', 'unavailable')
         resolveRelay('rejected')
       }
@@ -2380,6 +2392,10 @@ export function apply(ctx: Context, config: Config): void {
           )
         })
     }) as (...args: never[]) => void)
+
+    // 启动即注册：不再依赖「收到第一条企微消息」。此前实现在纯网页会话或重启后
+    // 未收到消息时根本没有注册监听，触发审批会静默走浏览器。
+    installRootApprovalRelay()
 
     ws.connect()
 
