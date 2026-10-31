@@ -103,6 +103,10 @@ window.__ModuleLoader__.load({
       "subagents.calls": "{n} \u6B21\u8C03\u7528",
       "subagents.loading": "\u6B63\u5728\u8BFB\u53D6\u5B50\u4EE3\u7406\u2026",
       "subagents.error": "\u5B50\u4EE3\u7406\u6570\u636E\u52A0\u8F7D\u5931\u8D25\uFF1A{msg}",
+      "subagentProviders.title": "\u5B50\u4EE3\u7406\u6267\u884C\u65B9\u7528\u91CF",
+      "subagentProviders.sub": "\u6309\u5916\u90E8\u771F\u5B9E\u6D88\u8017",
+      "subagentProviders.detail": "{sessions} \u4E2A\u5B50\u4EE3\u7406 \xB7 {calls} \u6B21\u8C03\u7528 \xB7 \u8F93\u5165 {input} \xB7 \u8F93\u51FA {output} \xB7 \u7F13\u5B58\u8BFB {cacheRead}",
+      "sessions.withSubagents": "\u542B {n} \u4E2A\u5B50\u4EE3\u7406",
       "providers.title": "\u670D\u52A1\u5546\u7528\u91CF",
       "export.button": "\u5BFC\u51FA",
       "export.json": "\u5BFC\u51FA JSON",
@@ -182,6 +186,10 @@ window.__ModuleLoader__.load({
       "subagents.calls": "{n} calls",
       "subagents.loading": "Reading subagents\u2026",
       "subagents.error": "Failed to load subagents: {msg}",
+      "subagentProviders.title": "Subagent executors",
+      "subagentProviders.sub": "Real external spend",
+      "subagentProviders.detail": "{sessions} subagents \xB7 {calls} calls \xB7 input {input} \xB7 output {output} \xB7 cache read {cacheRead}",
+      "sessions.withSubagents": "includes {n} subagents",
       "providers.title": "Providers",
       "export.button": "Export",
       "export.json": "Export JSON",
@@ -389,6 +397,7 @@ window.__ModuleLoader__.load({
       ".dsw-ust-stag{font-size:10px;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2);border-radius:4px;padding:0 5px;flex-shrink:0;line-height:16px}",
       ".dsw-ust-stag.sub{color:#8b5cf6;border-color:rgba(139,92,246,.45)}",
       ".dsw-ust-stokens{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}",
+      ".dsw-ust-ssub{color:var(--dsw-alias-label-tertiary);font-size:.92em;margin-left:.25em}",
       ".dsw-ust-prow{display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:12px;min-width:0}",
       ".dsw-ust-prow+.dsw-ust-prow{border-top:1px solid var(--dsw-alias-border-l1)}",
       ".dsw-ust-pbar{flex:1;height:6px;border-radius:3px;background:var(--dsw-alias-bg-layer-2);overflow:hidden;min-width:60px}",
@@ -919,14 +928,19 @@ window.__ModuleLoader__.load({
 
     // src/client/components/SessionsCard.tsx
     var React5 = __toESM(require("react"), 1);
-    function SessionsCard({ sessions, i18n }) {
+    function SessionsCard({ sessions, i18n, rollups }) {
       const t = i18n.t;
       const locale = i18n.locale;
       if (!sessions.length) return /* @__PURE__ */ React5.createElement("div", null);
       return /* @__PURE__ */ React5.createElement("div", { className: "dsw-ust-card" }, /* @__PURE__ */ React5.createElement("div", { className: "dsw-ust-card-head" }, /* @__PURE__ */ React5.createElement("div", { className: "dsw-ust-card-title" }, /* @__PURE__ */ React5.createElement("h3", null, t("sessions.title")), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-card-sub" }, t("sessions.sub")))), sessions.map((s, i) => {
         const d = new Date(s.lastActive);
         const date = d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
-        return /* @__PURE__ */ React5.createElement("div", { key: s.id, className: "dsw-ust-srow" }, /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-srank" }, i + 1), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-sname", title: s.id }, s.title || t("sessions.untitled")), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-stag" + (s.depth > 0 ? " sub" : "") }, s.depth > 0 ? t("sessions.subagent") : t("sessions.main")), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-smeta" }, date), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-stokens" }, fmtTokens(s.totals.total, locale)));
+        return /* @__PURE__ */ React5.createElement("div", { key: s.id, className: "dsw-ust-srow" }, /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-srank" }, i + 1), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-sname", title: s.id }, s.title || t("sessions.untitled")), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-stag" + (s.depth > 0 ? " sub" : "") }, s.depth > 0 ? t("sessions.subagent") : t("sessions.main")), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-smeta" }, date), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-stokens" }, (() => {
+          const rollup = rollups ? rollups.get(s.id) : void 0;
+          const own = s.totals.total;
+          if (!rollup || rollup.subagentCount === 0) return fmtTokens(own, locale);
+          return /* @__PURE__ */ React5.createElement(React5.Fragment, null, fmtTokens(own + rollup.subagentTotals.total, locale), /* @__PURE__ */ React5.createElement("span", { className: "dsw-ust-ssub", title: t("sessions.withSubagents", { n: rollup.subagentCount }) }, " +", " ", fmtTokens(rollup.subagentTotals.total, locale)));
+        })()));
       }));
     }
 
@@ -973,19 +987,106 @@ window.__ModuleLoader__.load({
       })) : null, coverage && coverage.errors.length ? /* @__PURE__ */ React6.createElement("ul", { className: "dsw-ust-sub-errors" }, coverage.errors.slice(0, MAX_ERRORS).map((msg, i) => /* @__PURE__ */ React6.createElement("li", { key: i, title: msg }, msg))) : null, error && payload ? /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-sub-warn" }, t("subagents.error", { msg: error })) : null, body);
     }
 
-    // src/client/components/ProvidersCard.tsx
+    // src/client/subagent-providers.ts
+    function zero() {
+      return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+    }
+    function aggregateByExecutor(items) {
+      const map = /* @__PURE__ */ new Map();
+      for (const item of items) {
+        const ext = item.external;
+        if (!ext) continue;
+        let row = map.get(ext.executor);
+        if (!row) {
+          row = { executor: ext.executor, totals: zero(), sessions: 0, calls: 0 };
+          map.set(ext.executor, row);
+        }
+        row.totals.input += ext.totals.input;
+        row.totals.output += ext.totals.output;
+        row.totals.cacheRead += ext.totals.cacheRead;
+        row.totals.cacheWrite += ext.totals.cacheWrite;
+        row.totals.total += ext.totals.total;
+        row.sessions += 1;
+        row.calls += ext.calls;
+      }
+      return [...map.values()].sort((a, b) => b.totals.total - a.totals.total);
+    }
+
+    // src/client/components/SubagentProvidersCard.tsx
     var React7 = __toESM(require("react"), 1);
+    function SubagentProvidersCard({ items, i18n }) {
+      const t = i18n.t;
+      const locale = i18n.locale;
+      const rows = aggregateByExecutor(items);
+      if (!rows.length) return null;
+      const top = Math.max(1, rows[0].totals.total);
+      const grand = rows.reduce((sum, row) => sum + row.totals.total, 0);
+      return /* @__PURE__ */ React7.createElement("div", { className: "dsw-ust-card" }, /* @__PURE__ */ React7.createElement("div", { className: "dsw-ust-card-head" }, /* @__PURE__ */ React7.createElement("div", { className: "dsw-ust-card-title" }, /* @__PURE__ */ React7.createElement("h3", null, t("subagentProviders.title")), /* @__PURE__ */ React7.createElement("span", { className: "dsw-ust-card-sub" }, t("subagentProviders.sub")))), rows.map((row) => {
+        const share = grand > 0 ? Math.round(row.totals.total / grand * 100) : 0;
+        const detail = t("subagentProviders.detail", {
+          sessions: row.sessions,
+          calls: row.calls,
+          input: fmtTokens(row.totals.input, locale),
+          output: fmtTokens(row.totals.output, locale),
+          cacheRead: fmtTokens(row.totals.cacheRead, locale)
+        });
+        return /* @__PURE__ */ React7.createElement("div", { key: row.executor, className: "dsw-ust-prow", title: detail }, /* @__PURE__ */ React7.createElement("span", { className: "dsw-ust-pname" }, row.executor), /* @__PURE__ */ React7.createElement("div", { className: "dsw-ust-pbar" }, /* @__PURE__ */ React7.createElement("i", { style: { width: Math.max(2, Math.round(row.totals.total / top * 100)) + "%", background: "#4f8cff" } })), /* @__PURE__ */ React7.createElement("span", { className: "dsw-ust-ptokens" }, fmtTokens(row.totals.total, locale), " \xB7 ", share, "%"));
+      }));
+    }
+
+    // src/client/session-rollup.ts
+    function zero2() {
+      return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+    }
+    function rollupByRoot(rootIds, items) {
+      const children = /* @__PURE__ */ new Map();
+      for (const item of items) {
+        const parent = item.parentSessionId;
+        if (!parent) continue;
+        const bucket = children.get(parent);
+        if (bucket) bucket.push(item);
+        else children.set(parent, [item]);
+      }
+      const out = /* @__PURE__ */ new Map();
+      for (const rootId of rootIds) {
+        const rollup = { subagentTotals: zero2(), subagentCount: 0, withoutExternal: 0 };
+        const visited = /* @__PURE__ */ new Set();
+        const stack = [...children.get(rootId) ?? []];
+        while (stack.length) {
+          const item = stack.pop();
+          if (visited.has(item.sessionId)) continue;
+          visited.add(item.sessionId);
+          if (item.external) {
+            rollup.subagentTotals.input += item.external.totals.input;
+            rollup.subagentTotals.output += item.external.totals.output;
+            rollup.subagentTotals.cacheRead += item.external.totals.cacheRead;
+            rollup.subagentTotals.cacheWrite += item.external.totals.cacheWrite;
+            rollup.subagentTotals.total += item.external.totals.total;
+            rollup.subagentCount += 1;
+          } else {
+            rollup.withoutExternal += 1;
+          }
+          const grand = children.get(item.sessionId);
+          if (grand) stack.push(...grand);
+        }
+        out.set(rootId, rollup);
+      }
+      return out;
+    }
+
+    // src/client/components/ProvidersCard.tsx
+    var React8 = __toESM(require("react"), 1);
     function ProvidersCard({ providers, i18n }) {
       const locale = i18n.locale;
       if (!providers.length) return null;
       if (providers.length === 1 && (providers[0].id === "unknown" || providers[0].totals.total <= 0)) return null;
       if (providers.length === 1 && providers[0].id === "unknown") return null;
       const top = Math.max(1, providers[0].totals.total);
-      return /* @__PURE__ */ React7.createElement("div", { className: "dsw-ust-card" }, /* @__PURE__ */ React7.createElement("h3", null, i18n.t("providers.title")), providers.map((p) => /* @__PURE__ */ React7.createElement("div", { key: p.id, className: "dsw-ust-prow" }, /* @__PURE__ */ React7.createElement("span", { className: "dsw-ust-pname", title: p.id }, p.name), /* @__PURE__ */ React7.createElement("div", { className: "dsw-ust-pbar" }, /* @__PURE__ */ React7.createElement("i", { style: { width: Math.max(2, Math.round(p.totals.total / top * 100)) + "%", background: "#4f8cff" } })), /* @__PURE__ */ React7.createElement("span", { className: "dsw-ust-ptokens" }, fmtTokens(p.totals.total, locale)))));
+      return /* @__PURE__ */ React8.createElement("div", { className: "dsw-ust-card" }, /* @__PURE__ */ React8.createElement("h3", null, i18n.t("providers.title")), providers.map((p) => /* @__PURE__ */ React8.createElement("div", { key: p.id, className: "dsw-ust-prow" }, /* @__PURE__ */ React8.createElement("span", { className: "dsw-ust-pname", title: p.id }, p.name), /* @__PURE__ */ React8.createElement("div", { className: "dsw-ust-pbar" }, /* @__PURE__ */ React8.createElement("i", { style: { width: Math.max(2, Math.round(p.totals.total / top * 100)) + "%", background: "#4f8cff" } })), /* @__PURE__ */ React8.createElement("span", { className: "dsw-ust-ptokens" }, fmtTokens(p.totals.total, locale)))));
     }
 
     // src/client/components/ModelDonut.tsx
-    var React8 = __toESM(require("react"), 1);
+    var React9 = __toESM(require("react"), 1);
     function ModelDonut({ byModel, total, i18n, onTip }) {
       const t = i18n.t;
       const locale = i18n.locale;
@@ -1000,7 +1101,7 @@ window.__ModuleLoader__.load({
         const len = frac * C;
         const rate = hitRate(r.buckets);
         segs.push(
-          /* @__PURE__ */ React8.createElement(
+          /* @__PURE__ */ React9.createElement(
             "circle",
             {
               key: r.model,
@@ -1034,9 +1135,9 @@ window.__ModuleLoader__.load({
       }
       const listRows = rows.map((r) => {
         const rate = hitRate(r.buckets);
-        return /* @__PURE__ */ React8.createElement("div", { key: r.model, className: "dsw-ust-mrow" }, /* @__PURE__ */ React8.createElement("i", { className: "dsw-ust-dot", style: { background: r.rest ? "var(--dsw-alias-label-secondary)" : r.color, opacity: r.rest ? 0.45 : 1 } }), /* @__PURE__ */ React8.createElement("span", { className: "dsw-ust-mname", title: r.model }, r.model), /* @__PURE__ */ React8.createElement("span", { className: "dsw-ust-mtokens" }, fmtTokens(r.total, locale)), /* @__PURE__ */ React8.createElement("span", { className: "dsw-ust-mpct" }, pctOf(r.total, total) + "%"), /* @__PURE__ */ React8.createElement("span", { className: "dsw-ust-mrate" }, rate === null ? "\u2014" : pctFull(rate) + "%"));
+        return /* @__PURE__ */ React9.createElement("div", { key: r.model, className: "dsw-ust-mrow" }, /* @__PURE__ */ React9.createElement("i", { className: "dsw-ust-dot", style: { background: r.rest ? "var(--dsw-alias-label-secondary)" : r.color, opacity: r.rest ? 0.45 : 1 } }), /* @__PURE__ */ React9.createElement("span", { className: "dsw-ust-mname", title: r.model }, r.model), /* @__PURE__ */ React9.createElement("span", { className: "dsw-ust-mtokens" }, fmtTokens(r.total, locale)), /* @__PURE__ */ React9.createElement("span", { className: "dsw-ust-mpct" }, pctOf(r.total, total) + "%"), /* @__PURE__ */ React9.createElement("span", { className: "dsw-ust-mrate" }, rate === null ? "\u2014" : pctFull(rate) + "%"));
       });
-      return /* @__PURE__ */ React8.createElement("div", { className: "dsw-ust-card" }, /* @__PURE__ */ React8.createElement("h3", null, t("donut.title")), /* @__PURE__ */ React8.createElement("div", { className: "dsw-ust-models" }, /* @__PURE__ */ React8.createElement("div", { className: "dsw-ust-donut" }, /* @__PURE__ */ React8.createElement("svg", { width: 180, height: 180, viewBox: "0 0 180 180" }, /* @__PURE__ */ React8.createElement("circle", { cx: 90, cy: 90, r: R, fill: "none", stroke: "var(--dsw-alias-bg-layer-2)", strokeWidth: 24 }), segs, /* @__PURE__ */ React8.createElement("text", { x: 90, y: 86, textAnchor: "middle", className: "dsw-ust-donut-total" }, fmtTokens(total, locale)), /* @__PURE__ */ React8.createElement("text", { x: 90, y: 106, textAnchor: "middle", className: "dsw-ust-donut-cap" }, t("donut.cap")))), /* @__PURE__ */ React8.createElement("div", { className: "dsw-ust-mlist" }, /* @__PURE__ */ React8.createElement("div", { className: "dsw-ust-mhead" }, /* @__PURE__ */ React8.createElement("span", { style: { width: 18, flexShrink: 0 } }), /* @__PURE__ */ React8.createElement("span", { className: "h-model" }, t("donut.model")), /* @__PURE__ */ React8.createElement("span", null, t("donut.tokens")), /* @__PURE__ */ React8.createElement("span", { className: "h-share" }, t("donut.share")), /* @__PURE__ */ React8.createElement("span", { className: "h-rate" }, t("donut.hitRate"))), listRows)));
+      return /* @__PURE__ */ React9.createElement("div", { className: "dsw-ust-card" }, /* @__PURE__ */ React9.createElement("h3", null, t("donut.title")), /* @__PURE__ */ React9.createElement("div", { className: "dsw-ust-models" }, /* @__PURE__ */ React9.createElement("div", { className: "dsw-ust-donut" }, /* @__PURE__ */ React9.createElement("svg", { width: 180, height: 180, viewBox: "0 0 180 180" }, /* @__PURE__ */ React9.createElement("circle", { cx: 90, cy: 90, r: R, fill: "none", stroke: "var(--dsw-alias-bg-layer-2)", strokeWidth: 24 }), segs, /* @__PURE__ */ React9.createElement("text", { x: 90, y: 86, textAnchor: "middle", className: "dsw-ust-donut-total" }, fmtTokens(total, locale)), /* @__PURE__ */ React9.createElement("text", { x: 90, y: 106, textAnchor: "middle", className: "dsw-ust-donut-cap" }, t("donut.cap")))), /* @__PURE__ */ React9.createElement("div", { className: "dsw-ust-mlist" }, /* @__PURE__ */ React9.createElement("div", { className: "dsw-ust-mhead" }, /* @__PURE__ */ React9.createElement("span", { style: { width: 18, flexShrink: 0 } }), /* @__PURE__ */ React9.createElement("span", { className: "h-model" }, t("donut.model")), /* @__PURE__ */ React9.createElement("span", null, t("donut.tokens")), /* @__PURE__ */ React9.createElement("span", { className: "h-share" }, t("donut.share")), /* @__PURE__ */ React9.createElement("span", { className: "h-rate" }, t("donut.hitRate"))), listRows)));
     }
 
     // src/client/components/ExportMenu.tsx
@@ -1093,7 +1194,7 @@ window.__ModuleLoader__.load({
     }
 
     // src/client/components/ExportMenu.tsx
-    var React9 = __toESM(require("react"), 1);
+    var React10 = __toESM(require("react"), 1);
     function ExportMenu({ overview, i18n }) {
       const t = i18n.t;
       const [open, setOpen] = (0, import_react3.useState)(false);
@@ -1104,11 +1205,11 @@ window.__ModuleLoader__.load({
         else download(t("export.file.models"), buildModelCsv(overview.byModel), "text/csv");
         setOpen(false);
       };
-      return /* @__PURE__ */ React9.createElement("div", { className: "dsw-ust-export", ref: menuRef }, /* @__PURE__ */ React9.createElement("button", { className: "dsw-ust-refresh", onClick: () => setOpen((v) => !v) }, t("export.button")), open ? /* @__PURE__ */ React9.createElement("div", { className: "dsw-ust-export-menu" }, /* @__PURE__ */ React9.createElement("button", { onClick: () => run("json") }, t("export.json")), /* @__PURE__ */ React9.createElement("button", { onClick: () => run("daily") }, t("export.daily")), /* @__PURE__ */ React9.createElement("button", { onClick: () => run("models") }, t("export.models"))) : null);
+      return /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-export", ref: menuRef }, /* @__PURE__ */ React10.createElement("button", { className: "dsw-ust-refresh", onClick: () => setOpen((v) => !v) }, t("export.button")), open ? /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-export-menu" }, /* @__PURE__ */ React10.createElement("button", { onClick: () => run("json") }, t("export.json")), /* @__PURE__ */ React10.createElement("button", { onClick: () => run("daily") }, t("export.daily")), /* @__PURE__ */ React10.createElement("button", { onClick: () => run("models") }, t("export.models"))) : null);
     }
 
     // src/client/StatsSection.tsx
-    var React10 = __toESM(require("react"), 1);
+    var React11 = __toESM(require("react"), 1);
     function StatsSection({ rpc, i18n: baseI18n }) {
       const i18n = useI18n(baseI18n);
       const t = i18n.t;
@@ -1164,6 +1265,10 @@ window.__ModuleLoader__.load({
         if (cached) setSubagents(cached.payload);
         loadSubagents(false);
       }, [loadSubagents]);
+      const rollups = React11.useMemo(() => {
+        if (!data || !subagents) return void 0;
+        return rollupByRoot(data.topSessions.map((s) => s.id), subagents.items);
+      }, [data, subagents]);
       const allTime = data && data.allTime || { totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, sessionCount: 0, byModel: [] };
       const allTimeTotal = allTime.totals.total || 0;
       const recentByModel = data && data.byModel || [];
@@ -1180,14 +1285,14 @@ window.__ModuleLoader__.load({
       }
       let body;
       if (!data && !error) {
-        body = /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-empty" }, /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-empty-title" }, t("status.loading")), /* @__PURE__ */ React10.createElement("div", null, t("status.loading.hint")));
+        body = /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-empty" }, /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-empty-title" }, t("status.loading")), /* @__PURE__ */ React11.createElement("div", null, t("status.loading.hint")));
       } else if (error && !data) {
-        body = /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-empty" }, t("status.error", { msg: error }));
+        body = /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-empty" }, t("status.error", { msg: error }));
       } else if (allTimeTotal === 0 && data?.coverage.sessionsTotal === 0) {
-        body = /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-empty" }, /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-empty-title" }, t("empty.title")), /* @__PURE__ */ React10.createElement("div", null, t("empty.hint")));
+        body = /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-empty" }, /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-empty-title" }, t("empty.title")), /* @__PURE__ */ React11.createElement("div", null, t("empty.hint")));
       } else {
         const overview = data;
-        body = /* @__PURE__ */ React10.createElement(React10.Fragment, null, /* @__PURE__ */ React10.createElement(KpiCards, { overview, i18n }), /* @__PURE__ */ React10.createElement(Heatmap, { days, i18n, onTip: setHeatTip }), /* @__PURE__ */ React10.createElement(BarChart, { days, byModel: recentByModel, i18n, onTip: setBarTip }), /* @__PURE__ */ React10.createElement(SessionsCard, { sessions: overview.topSessions, i18n }), /* @__PURE__ */ React10.createElement(
+        body = /* @__PURE__ */ React11.createElement(React11.Fragment, null, /* @__PURE__ */ React11.createElement(KpiCards, { overview, i18n }), /* @__PURE__ */ React11.createElement(Heatmap, { days, i18n, onTip: setHeatTip }), /* @__PURE__ */ React11.createElement(BarChart, { days, byModel: recentByModel, i18n, onTip: setBarTip }), /* @__PURE__ */ React11.createElement(SessionsCard, { sessions: overview.topSessions, i18n, rollups }), /* @__PURE__ */ React11.createElement(
           SubagentsCard,
           {
             payload: subagents,
@@ -1196,9 +1301,9 @@ window.__ModuleLoader__.load({
             i18n,
             onRetry: () => loadSubagents(true)
           }
-        ), /* @__PURE__ */ React10.createElement(ProvidersCard, { providers: overview.providers, i18n }), /* @__PURE__ */ React10.createElement(ModelDonut, { byModel: allTime.byModel, total: allTimeTotal, i18n, onTip: setDonutTip }));
+        ), /* @__PURE__ */ React11.createElement(SubagentProvidersCard, { items: subagents ? subagents.items : [], i18n }), /* @__PURE__ */ React11.createElement(ProvidersCard, { providers: overview.providers, i18n }), /* @__PURE__ */ React11.createElement(ModelDonut, { byModel: allTime.byModel, total: allTimeTotal, i18n, onTip: setDonutTip }));
       }
-      return /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-root" }, /* @__PURE__ */ React10.createElement(Tooltip, { tip: barTip }), /* @__PURE__ */ React10.createElement(Tooltip, { tip: donutTip }), /* @__PURE__ */ React10.createElement(Tooltip, { tip: heatTip }), /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-head" }, /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-head-title" }, /* @__PURE__ */ React10.createElement("svg", { className: "dsw-ust-page-icon", width: 16, height: 16, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", "aria-hidden": "true" }, /* @__PURE__ */ React10.createElement("path", { d: "M3 13V9.5" }), /* @__PURE__ */ React10.createElement("path", { d: "M8 13V5.5" }), /* @__PURE__ */ React10.createElement("path", { d: "M13 13V3" }), /* @__PURE__ */ React10.createElement("path", { d: "M2 13.5h12" })), /* @__PURE__ */ React10.createElement("div", null, /* @__PURE__ */ React10.createElement("h2", null, t("nav.label")), subText ? /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-sub" }, subText) : null)), /* @__PURE__ */ React10.createElement("div", { className: "dsw-ust-head-actions" }, data ? /* @__PURE__ */ React10.createElement(ExportMenu, { overview: data, i18n }) : null, /* @__PURE__ */ React10.createElement(
+      return /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-root" }, /* @__PURE__ */ React11.createElement(Tooltip, { tip: barTip }), /* @__PURE__ */ React11.createElement(Tooltip, { tip: donutTip }), /* @__PURE__ */ React11.createElement(Tooltip, { tip: heatTip }), /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-head" }, /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-head-title" }, /* @__PURE__ */ React11.createElement("svg", { className: "dsw-ust-page-icon", width: 16, height: 16, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", "aria-hidden": "true" }, /* @__PURE__ */ React11.createElement("path", { d: "M3 13V9.5" }), /* @__PURE__ */ React11.createElement("path", { d: "M8 13V5.5" }), /* @__PURE__ */ React11.createElement("path", { d: "M13 13V3" }), /* @__PURE__ */ React11.createElement("path", { d: "M2 13.5h12" })), /* @__PURE__ */ React11.createElement("div", null, /* @__PURE__ */ React11.createElement("h2", null, t("nav.label")), subText ? /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-sub" }, subText) : null)), /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-head-actions" }, data ? /* @__PURE__ */ React11.createElement(ExportMenu, { overview: data, i18n }) : null, /* @__PURE__ */ React11.createElement(
         "button",
         {
           className: "dsw-ust-refresh",
@@ -1209,14 +1314,14 @@ window.__ModuleLoader__.load({
           disabled: loading,
           title: t("refresh.title")
         },
-        /* @__PURE__ */ React10.createElement("svg", { width: 13, height: 13, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React10.createElement("path", { d: "M21 12a9 9 0 1 1-2.64-6.36" }), /* @__PURE__ */ React10.createElement("polyline", { points: "21 3 21 9 15 9" })),
+        /* @__PURE__ */ React11.createElement("svg", { width: 13, height: 13, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React11.createElement("path", { d: "M21 12a9 9 0 1 1-2.64-6.36" }), /* @__PURE__ */ React11.createElement("polyline", { points: "21 3 21 9 15 9" })),
         loading ? t("refresh.loading") : t("refresh.button")
       ))), body);
     }
 
     // src/client/boundary.tsx
     var import_react5 = require("react");
-    var React11 = __toESM(require("react"), 1);
+    var React12 = __toESM(require("react"), 1);
     var Boundary = class extends import_react5.Component {
       state = { error: null };
       static getDerivedStateFromError(err) {
@@ -1232,7 +1337,7 @@ window.__ModuleLoader__.load({
       render() {
         const t = this.props.i18n.t;
         if (this.state.error !== null) {
-          return /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-empty" }, /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-empty-title" }, t("error.title")), /* @__PURE__ */ React11.createElement("div", { style: { margin: "6px 0 12px" } }, t("error.detail", { msg: this.state.error })), /* @__PURE__ */ React11.createElement("button", { className: "dsw-ust-refresh", onClick: this.reset }, t("error.reset")));
+          return /* @__PURE__ */ React12.createElement("div", { className: "dsw-ust-empty" }, /* @__PURE__ */ React12.createElement("div", { className: "dsw-ust-empty-title" }, t("error.title")), /* @__PURE__ */ React12.createElement("div", { style: { margin: "6px 0 12px" } }, t("error.detail", { msg: this.state.error })), /* @__PURE__ */ React12.createElement("button", { className: "dsw-ust-refresh", onClick: this.reset }, t("error.reset")));
         }
         return this.props.children;
       }
