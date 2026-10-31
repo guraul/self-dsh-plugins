@@ -241,7 +241,7 @@ else
 fi
 
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
-  ok "演练模式（--check-only）：CI 门槛已通过，跳过合并与清理现场"
+  ok "演练模式（--check-only）：CI 门槛与审核闸门已通过，跳过合并与清理现场"
   exit 0
 fi
 
