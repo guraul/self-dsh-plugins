@@ -7,12 +7,29 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 
 export const DEFAULT_TTL_MS = 30 * 60 * 1000
 export const MAX_CONSECUTIVE_FAILURES = 3
 
 export function reviewsDir(root) {
   return join(root, '.dsh-web', 'reviews')
+}
+
+/**
+ * 审核记录属于仓库级运行态，必须落在**主工作区**：工作树会在合并收尾时被
+ * `git worktree remove --force` 删掉，把证据放进去等于没留痕。
+ * 取不到主工作区时退回传入目录（例如不在 git 仓库里跑单测）。
+ */
+export function mainWorktreeRoot(cwd = process.cwd()) {
+  const result = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd, encoding: 'utf8' })
+  if (result.status === 0) {
+    const first = String(result.stdout ?? '')
+      .split('\n')
+      .find((line) => line.startsWith('worktree '))
+    if (first) return first.slice('worktree '.length)
+  }
+  return cwd
 }
 
 function stamp(date) {

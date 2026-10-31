@@ -16,7 +16,7 @@
 |---|---|---|
 | 判定行格式 / 解析规则 / 高风险路径 | `lib/contract.js` | 改完必须同步 `schema/review-result.json` 与 `REQ-001-design.md` §4 |
 | 请求组装、diff 围栏、预算 | `lib/request.js` | diff 走 git，元数据走 gh；`--diff-file` / `--meta-file` 留给测试 |
-| 记录落盘、traceId、熔断 | `lib/record.js` | 记录目录 `.dsh-web/reviews/` 已在 `.gitignore` 里忽略 |
+| 记录落盘、traceId、熔断 | `lib/record.js` | 记录目录 `.dsh-web/reviews/` 已在 `.gitignore` 里忽略；**落在主工作区**（`mainWorktreeRoot`），不要改回 `cwd` |
 | 角色字段与加载 | `lib/roles.js` + `roles/*.json` | 非法值降级到最保守值，坏文件跳过 |
 | 形态 B 的 CLI 调用 | `lib/bridge-cli.js` | 一期只有 `opencode` / `codebuddy`；ACP 在 PR4 |
 | 子命令 | `lib/cli.js` | 退出码契约：0 通过 / 1 拒绝 / 2 参数或环境错误 |
@@ -32,6 +32,7 @@
 3. **随机标记必须每次新生成。** 复用会让「判定行来自模型」这件事不可证。
 4. **`nonce` 是 `ReviewResult` 的必填字段**，比 REQ-001 §7.2 多一个——结果不带它就无法证明对应哪次标记。
 5. **不要在这里写「自动换模型」。** 模型不可用就 `ESCALATE`，静默降级比失败更危险。
+6. **记录不能落在工作树里。** 工作树合并完就被删；`mainWorktreeRoot()` 就是为这件事存在的，PR3 上线后真实丢过一次跳过审计。
 
 ## 怎么验证
 
