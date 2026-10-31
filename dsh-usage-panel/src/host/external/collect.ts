@@ -21,6 +21,26 @@ import { defaultRegistryPath, loadRegistry, normalizeSessionId, type RegistryEnt
 
 const CACHE_TTL_MS = 60_000
 const LABEL_MAX = 80
+// Projection-cache reads are file I/O + JSON.parse; titles cross the host
+// service boundary, so they get a tighter ceiling.
+const PROJ_CONCURRENCY = 16
+const TITLE_CONCURRENCY = 8
+
+/** Run `fn` over `items` with at most `limit` promises in flight, preserving order. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  const width = Math.max(1, Math.min(limit, items.length))
+  const workers = Array.from({ length: width }, async () => {
+    for (;;) {
+      const index = next++
+      if (index >= items.length) return
+      results[index] = await fn(items[index]!, index)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
 
 export interface SubagentDeps {
   sq: Pick<SessionQueryEngine, 'listSessions' | 'readTitle'>
@@ -87,9 +107,10 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 /**
- * Read the session projection cache for the subagent label (`rows.subagent.val.label`)
- * and the relay usage (`rows.usagePanel` / `rows.tokenUsage`). Missing or malformed
- * files yield null — callers fall back to the session title.
+ * Read the session projection cache for the subagent label
+ * (`rows.subagent.val.identity.label`, older caches: `rows.subagent.val.label`)
+ * and the relay usage (`rows.usagePanel` / `rows.tokenUsage`). Missing or
+ * malformed files yield null — callers fall back to the session title.
  */
 async function readProjCache(dir: string, sessionId: string): Promise<RelayInfo | null> {
   const filePath = path.join(dir, sessionId + '.json')
@@ -109,7 +130,10 @@ async function readProjCache(dir: string, sessionId: string): Promise<RelayInfo 
   if (!rows) return null
 
   const subagent = record(record(rows.subagent)?.val)
-  const label = typeof subagent?.label === 'string' && subagent.label ? subagent.label : null
+  const identity = record(subagent?.identity)
+  const identityLabel = typeof identity?.label === 'string' && identity.label ? identity.label : null
+  const legacyLabel = typeof subagent?.label === 'string' && subagent.label ? subagent.label : null
+  const label = identityLabel ?? legacyLabel
 
   let model: string | null = null
   let relay = emptyTotals()
@@ -202,10 +226,12 @@ export async function collectSubagents(deps: SubagentDeps): Promise<SubagentsPay
 
   if (cache && cache.key === signature && now - cache.at < ttl) return cache.payload
 
+  const scanStart = Date.now()
   const sessions = await deps.sq.listSessions()
   const { entries, errors: registryErrors } = await loadRegistry(registryPath)
   const errors = [...registryErrors]
   const subagents = sessions.filter((rec: SessionRecord) => Number(rec?.header?.delegationDepth) > 0)
+  const sessionIds = subagents.map((rec: SessionRecord) => String(rec.header.id))
 
   const registryOf = (sessionId: string): RegistryEntry | undefined => entries.get(normalizeSessionId(sessionId))
 
@@ -224,9 +250,10 @@ export async function collectSubagents(deps: SubagentDeps): Promise<SubagentsPay
   }
 
   const codebuddyEntries = [...codebuddyTasks.entries()]
-  const [opencode, codebuddyResults] = await Promise.all([
+  const [opencode, codebuddyResults, projCaches] = await Promise.all([
     readOpencodeSessions(opencodeIds, { dbPaths }),
     Promise.all(codebuddyEntries.map(async ([key, pending]) => [key, await pending] as const)),
+    mapLimit(sessionIds, PROJ_CONCURRENCY, (sessionId) => readProjCache(projCacheDir, normalizeSessionId(sessionId))),
   ])
   errors.push(...opencode.errors)
   const codebuddyHits = new Map<string, SubagentExternal>()
@@ -247,14 +274,24 @@ export async function collectSubagents(deps: SubagentDeps): Promise<SubagentsPay
     return null
   }
 
+  // Titles are the only expensive fallback: fetch them in parallel, and only
+  // for rows whose projection cache carried no label.
+  const labels: (string | null)[] = projCaches.map((proj) => proj?.label ?? null)
+  const needTitle: number[] = []
+  for (let index = 0; index < labels.length; index += 1) {
+    if (!labels[index]) needTitle.push(index)
+  }
+  await mapLimit(needTitle, TITLE_CONCURRENCY, async (index) => {
+    labels[index] = await titleLabel(deps.sq, sessionIds[index]!)
+  })
+
   const items: SubagentItem[] = []
-  for (const rec of subagents) {
-    const header = rec.header
-    const sessionId = String(header.id)
+  for (let index = 0; index < subagents.length; index += 1) {
+    const header = subagents[index]!.header
+    const sessionId = sessionIds[index]!
     const entry = registryOf(sessionId)
-    const proj = await readProjCache(projCacheDir, normalizeSessionId(sessionId))
-    let label = proj?.label ?? null
-    if (!label) label = await titleLabel(deps.sq, sessionId)
+    const proj = projCaches[index] ?? null
+    const label = labels[index] ?? null
 
     const external = externalOf(entry)
     const startCandidates: number[] = []
@@ -290,6 +327,7 @@ export async function collectSubagents(deps: SubagentDeps): Promise<SubagentsPay
   })
 
   const matched = items.reduce((count, item) => count + (item.external ? 1 : 0), 0)
+  console.log('[dsh-usage-panel] subagents scan done: items=' + items.length + ' matched=' + matched + ' ms=' + (Date.now() - scanStart))
   const payload: SubagentsPayload = {
     items,
     coverage: {

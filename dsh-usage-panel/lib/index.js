@@ -848,6 +848,22 @@ async function loadRegistry(filePath = defaultRegistryPath()) {
 // src/host/external/collect.ts
 var CACHE_TTL_MS = 6e4;
 var LABEL_MAX = 80;
+var PROJ_CONCURRENCY = 16;
+var TITLE_CONCURRENCY = 8;
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const width = Math.max(1, Math.min(limit, items.length));
+  const workers = Array.from({ length: width }, async () => {
+    for (; ; ) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 var cache = null;
 function defaultProjCacheDir() {
   const home = process.env.DSH_HOME || path4.join(os4.homedir(), ".dsh");
@@ -888,7 +904,10 @@ async function readProjCache(dir, sessionId) {
   const rows = record(record(root?.record)?.rows);
   if (!rows) return null;
   const subagent = record(record(rows.subagent)?.val);
-  const label = typeof subagent?.label === "string" && subagent.label ? subagent.label : null;
+  const identity = record(subagent?.identity);
+  const identityLabel = typeof identity?.label === "string" && identity.label ? identity.label : null;
+  const legacyLabel = typeof subagent?.label === "string" && subagent.label ? subagent.label : null;
+  const label = identityLabel ?? legacyLabel;
   let model = null;
   let relay = emptyTotals();
   let firstTime = null;
@@ -961,10 +980,12 @@ async function collectSubagents(deps) {
     ...dbPaths.map((dbPath) => signaturePart(dbPath))
   ])).join("|");
   if (cache && cache.key === signature && now - cache.at < ttl) return cache.payload;
+  const scanStart = Date.now();
   const sessions = await deps.sq.listSessions();
   const { entries, errors: registryErrors } = await loadRegistry(registryPath);
   const errors = [...registryErrors];
   const subagents = sessions.filter((rec) => Number(rec?.header?.delegationDepth) > 0);
+  const sessionIds = subagents.map((rec) => String(rec.header.id));
   const registryOf = (sessionId) => entries.get(normalizeSessionId(sessionId));
   const opencodeIds = [];
   const codebuddyTasks = /* @__PURE__ */ new Map();
@@ -980,9 +1001,10 @@ async function collectSubagents(deps) {
     }
   }
   const codebuddyEntries = [...codebuddyTasks.entries()];
-  const [opencode, codebuddyResults] = await Promise.all([
+  const [opencode, codebuddyResults, projCaches] = await Promise.all([
     readOpencodeSessions(opencodeIds, { dbPaths }),
-    Promise.all(codebuddyEntries.map(async ([key, pending]) => [key, await pending]))
+    Promise.all(codebuddyEntries.map(async ([key, pending]) => [key, await pending])),
+    mapLimit(sessionIds, PROJ_CONCURRENCY, (sessionId) => readProjCache(projCacheDir, normalizeSessionId(sessionId)))
   ]);
   errors.push(...opencode.errors);
   const codebuddyHits = /* @__PURE__ */ new Map();
@@ -1001,14 +1023,21 @@ async function collectSubagents(deps) {
     }
     return null;
   }
+  const labels = projCaches.map((proj) => proj?.label ?? null);
+  const needTitle = [];
+  for (let index = 0; index < labels.length; index += 1) {
+    if (!labels[index]) needTitle.push(index);
+  }
+  await mapLimit(needTitle, TITLE_CONCURRENCY, async (index) => {
+    labels[index] = await titleLabel(deps.sq, sessionIds[index]);
+  });
   const items = [];
-  for (const rec of subagents) {
-    const header = rec.header;
-    const sessionId = String(header.id);
+  for (let index = 0; index < subagents.length; index += 1) {
+    const header = subagents[index].header;
+    const sessionId = sessionIds[index];
     const entry = registryOf(sessionId);
-    const proj = await readProjCache(projCacheDir, normalizeSessionId(sessionId));
-    let label = proj?.label ?? null;
-    if (!label) label = await titleLabel(deps.sq, sessionId);
+    const proj = projCaches[index] ?? null;
+    const label = labels[index] ?? null;
     const external = externalOf(entry);
     const startCandidates = [];
     if (timeOrNull2(header.createdAt) !== null) startCandidates.push(Number(header.createdAt));
@@ -1039,6 +1068,7 @@ async function collectSubagents(deps) {
     return right - left;
   });
   const matched = items.reduce((count, item) => count + (item.external ? 1 : 0), 0);
+  console.log("[dsh-usage-panel] subagents scan done: items=" + items.length + " matched=" + matched + " ms=" + (Date.now() - scanStart));
   const payload = {
     items,
     coverage: {
