@@ -189,7 +189,9 @@ test('codebuddy: aggregates only assistant message usage from the cwd-slugged JS
   assert.deepEqual(read.errors, [])
   assert.ok(read.hit)
   assert.equal(read.hit!.executor, 'codebuddy')
-  assert.equal(read.hit!.model, 'deepseek-v4.1')
+  // issue #134: the model is the mode, ties keep the first seen — both models
+  // appear once here, so the first (`deepseek-v4.1-flash`) wins.
+  assert.equal(read.hit!.model, 'deepseek-v4.1-flash')
   assert.deepEqual(read.hit!.totals, { input: 150, output: 25, cacheRead: 0, cacheWrite: 0, total: 175 })
   assert.equal(read.hit!.calls, 2)
   assert.equal(read.hit!.credit, 0.75)
@@ -477,4 +479,47 @@ test('codebuddy: without rawUsage, inputTokensDetails still prevents double coun
   assert.equal(read.hit!.totals.cacheRead, 400)
   assert.equal(read.hit!.totals.input, 100)
   assert.equal(read.hit!.totals.total, 505)
+})
+
+// issue #134: a session's model is the one used by most calls. CodeBuddy falls
+// back to its Auto variant for tail calls; reporting the last model made a
+// 157-call deepseek-v4.1-flash session display as hy4-preview.
+test('codebuddy: reports the dominant model, not the last one seen', async (t) => {
+  const { dir, cwd, remoteId } = codebuddyCacheFixture(t)
+  const filePath = codebuddyTranscriptPath(dir, cwd, remoteId)
+  const line = (model: string, ts: number) =>
+    JSON.stringify({
+      type: 'message',
+      role: 'assistant',
+      timestamp: ts,
+      providerData: { model, usage: { inputTokens: 10, outputTokens: 1 } },
+    })
+  writeFileSync(
+    filePath,
+    [
+      line('deepseek-v4.1-flash', 1000),
+      line('deepseek-v4.1-flash', 1100),
+      line('deepseek-v4.1-flash', 1200),
+      line('hy4-preview', 1300),
+    ].join('\n') + '\n',
+  )
+  const read = await readCodebuddySession(remoteId, cwd, { projectsDir: dir })
+  assert.ok(read.hit)
+  assert.equal(read.hit!.model, 'deepseek-v4.1-flash')
+})
+
+test('codebuddy: single-model sessions keep that model', async (t) => {
+  const { dir, cwd, remoteId } = codebuddyCacheFixture(t)
+  const filePath = codebuddyTranscriptPath(dir, cwd, remoteId)
+  writeFileSync(
+    filePath,
+    JSON.stringify({
+      type: 'message',
+      role: 'assistant',
+      timestamp: 1000,
+      providerData: { model: 'glm-5.3', usage: { inputTokens: 10, outputTokens: 1 } },
+    }) + '\n',
+  )
+  const read = await readCodebuddySession(remoteId, cwd, { projectsDir: dir })
+  assert.equal(read.hit!.model, 'glm-5.3')
 })
