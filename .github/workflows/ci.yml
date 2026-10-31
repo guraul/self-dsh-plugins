@@ -4,8 +4,9 @@
 #
 # 包管理：本仓库统一用 pnpm（全局约定禁用 npm / npx，npx 由 pnpm dlx 代替）。
 #
-# 另注：本仓库 .gitignore 是白名单，现已放行全部 6 个插件目录 + docs/ + scripts/ + .github/，
-# 因此 CI 检出后 6 个插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
+# 另注：本仓库 .gitignore 是白名单，现已放行全部 10 个插件目录 + docs/ + scripts/ + .github/
+# （其中 9 个已入库；dsh-plugin-restart/ 目前只占白名单、尚无内容），
+# 因此 CI 检出后这些插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
 # （例如新插件目录还没加进白名单），命中它是预期行为，不是失败。
 #
 # dsh-im-bridge-workspaces：依赖已在 issue #3 修复，可正常 `pnpm install`（peer 为
@@ -74,6 +75,11 @@ jobs:
             entry: |
               lib/index.js
               lib/client.js
+          - dir: dsh-usage-panel
+            install: true
+            entry: |
+              lib/index.js
+              lib/client.js
     steps:
       - uses: actions/checkout@v4
 
@@ -108,6 +114,7 @@ jobs:
           #   * dsh-plugin-memx             —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           #   * dsh-plugin-product-subagents —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           #   * dsh-im-bridge-workspaces     —— 无 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
+          #   * dsh-usage-panel             —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           # 本仓库只留 pnpm-lock.yaml：npm 的 package-lock.json 已按全局约定清掉，并被 .gitignore 挡下。
           #
           # ⚠️ CI 下 pnpm 默认 frozen-lockfile=true：兜底必须显式 --no-frozen-lockfile。
