@@ -85,6 +85,7 @@ window.__ModuleLoader__.load({
       "sessions.lastActive": "\u6700\u8FD1\u6D3B\u8DC3 {date}",
       "subagents.title": "\u5B50\u4EE3\u7406",
       "subagents.sub": "\u6267\u884C\u65B9 / \u771F\u5B9E\u6A21\u578B / \u771F\u5B9E Token",
+      "subagents.window": "\u6700\u8FD1 3 \u5929 \xB7 \u6309\u6D88\u8017\u91CF\u524D 10",
       "subagents.coverage": "\u5171 {total} \u4E2A\u5B50\u4EE3\u7406 \xB7 \u5339\u914D {matched} \xB7 \u65E0\u5916\u90E8\u8BB0\u5F55 {noExternal}",
       "subagents.col.task": "\u4EFB\u52A1",
       "subagents.col.executor": "\u6267\u884C\u65B9",
@@ -163,6 +164,7 @@ window.__ModuleLoader__.load({
       "sessions.lastActive": "Active {date}",
       "subagents.title": "Subagents",
       "subagents.sub": "Executor / real model / real tokens",
+      "subagents.window": "Last 3 days \xB7 top 10 by spend",
       "subagents.coverage": "Total {total} subagents \xB7 matched {matched} \xB7 no external record {noExternal}",
       "subagents.col.task": "Task",
       "subagents.col.executor": "Executed by",
@@ -928,26 +930,33 @@ window.__ModuleLoader__.load({
       }));
     }
 
+    // src/client/subagents-select.ts
+    var SUBAGENT_WINDOW_DAYS = 3;
+    var SUBAGENT_TOP_LIMIT = 10;
+    var WINDOW_MS = SUBAGENT_WINDOW_DAYS * 24 * 60 * 60 * 1e3;
+    function subagentSpend(item) {
+      return item.external ? item.external.totals.total : -1;
+    }
+    function selectRecentTop(items, now) {
+      const cutoff = now - WINDOW_MS;
+      return items.filter((item) => {
+        const at = item.startedAt ?? item.lastActive;
+        return at !== null && at >= cutoff;
+      }).slice().sort((a, b) => subagentSpend(b) - subagentSpend(a)).slice(0, SUBAGENT_TOP_LIMIT);
+    }
+
     // src/client/components/SubagentsCard.tsx
     var React6 = __toESM(require("react"), 1);
-    var PAGE_SIZE = 20;
     var MAX_ERRORS = 2;
-    function byRecent(a, b) {
-      const left = a.startedAt ?? a.lastActive ?? Number.NEGATIVE_INFINITY;
-      const right = b.startedAt ?? b.lastActive ?? Number.NEGATIVE_INFINITY;
-      return right - left;
-    }
     function SubagentsCard({ payload, error, loading, i18n, onRetry }) {
       const t = i18n.t;
       const locale = i18n.locale;
-      const [expanded, setExpanded] = React6.useState(false);
-      const items = payload ? payload.items.slice().sort(byRecent) : [];
-      const shown = expanded ? items : items.slice(0, PAGE_SIZE);
+      const shown = payload ? selectRecentTop(payload.items, payload.updatedAt) : [];
       const coverage = payload ? payload.coverage : null;
       let body;
       if (!payload) {
         body = error ? /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-sub-state" }, /* @__PURE__ */ React6.createElement("div", null, t("subagents.error", { msg: error })), /* @__PURE__ */ React6.createElement("button", { className: "dsw-ust-sub-morebtn", onClick: onRetry }, t("refresh.button"))) : /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-sub-state" }, t("subagents.loading"));
-      } else if (!items.length) {
+      } else if (!shown.length) {
         body = /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-sub-state" }, t("subagents.empty"));
       } else {
         body = /* @__PURE__ */ React6.createElement(React6.Fragment, null, /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-sub-wrap" }, /* @__PURE__ */ React6.createElement("table", { className: "dsw-ust-sub-table" }, /* @__PURE__ */ React6.createElement("thead", null, /* @__PURE__ */ React6.createElement("tr", null, /* @__PURE__ */ React6.createElement("th", null, t("subagents.col.task")), /* @__PURE__ */ React6.createElement("th", null, t("subagents.col.executor")), /* @__PURE__ */ React6.createElement("th", null, t("subagents.col.model")), /* @__PURE__ */ React6.createElement("th", { className: "num" }, t("subagents.col.input")), /* @__PURE__ */ React6.createElement("th", { className: "num" }, t("subagents.col.output")), /* @__PURE__ */ React6.createElement("th", { className: "num" }, t("subagents.col.cacheRead")), /* @__PURE__ */ React6.createElement("th", { className: "num" }, t("subagents.col.duration")), /* @__PURE__ */ React6.createElement("th", null, t("subagents.col.started")), /* @__PURE__ */ React6.createElement("th", null, t("subagents.col.status")))), /* @__PURE__ */ React6.createElement("tbody", null, shown.map((item) => {
@@ -955,9 +964,9 @@ window.__ModuleLoader__.load({
           const executor = ext ? ext.executor : "unknown";
           const model = ext && ext.model || item.relay.model;
           return /* @__PURE__ */ React6.createElement("tr", { key: item.sessionId }, /* @__PURE__ */ React6.createElement("td", { className: "dsw-ust-sub-task" }, /* @__PURE__ */ React6.createElement("span", { className: "dsw-ust-sub-label", title: item.sessionId }, item.label || item.sessionId.slice(0, 8)), ext ? /* @__PURE__ */ React6.createElement("span", { className: "dsw-ust-sub-calls" }, t("subagents.calls", { n: ext.calls })) : null), /* @__PURE__ */ React6.createElement("td", null, /* @__PURE__ */ React6.createElement("span", { className: "dsw-ust-sub-badge is-" + executor }, executor)), /* @__PURE__ */ React6.createElement("td", { className: "dsw-ust-sub-model", title: model || void 0 }, model || "\u2014"), /* @__PURE__ */ React6.createElement("td", { className: "num" }, ext ? fmtTokens(ext.totals.input, locale) : "\u2014"), /* @__PURE__ */ React6.createElement("td", { className: "num" }, ext ? fmtTokens(ext.totals.output, locale) : "\u2014"), /* @__PURE__ */ React6.createElement("td", { className: "num" }, ext ? fmtTokens(ext.totals.cacheRead, locale) : "\u2014"), /* @__PURE__ */ React6.createElement("td", { className: "num" }, formatDuration(ext ? ext.startedAt : null, ext ? ext.endedAt : null)), /* @__PURE__ */ React6.createElement("td", { className: "dsw-ust-sub-time" }, formatLocalDateTime(item.startedAt)), /* @__PURE__ */ React6.createElement("td", null, ext ? /* @__PURE__ */ React6.createElement("span", { className: "dsw-ust-sub-src" }, ext.source) : /* @__PURE__ */ React6.createElement("span", { className: "dsw-ust-sub-muted" }, t("subagents.noExternal"))));
-        })))), items.length > PAGE_SIZE ? /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-sub-more" }, /* @__PURE__ */ React6.createElement("button", { className: "dsw-ust-sub-morebtn", onClick: () => setExpanded(!expanded) }, expanded ? t("subagents.collapse") : t("subagents.expand"))) : null);
+        })))));
       }
-      return /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-card" }, /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-card-head" }, /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-card-title" }, /* @__PURE__ */ React6.createElement("h3", null, t("subagents.title")), /* @__PURE__ */ React6.createElement("span", { className: "dsw-ust-card-sub" }, t("subagents.sub"))), loading && payload ? /* @__PURE__ */ React6.createElement("span", { className: "dsw-ust-sub-load" }, t("subagents.loading")) : null), coverage ? /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-sub-coverage" }, t("subagents.coverage", {
+      return /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-card" }, /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-card-head" }, /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-card-title" }, /* @__PURE__ */ React6.createElement("h3", null, t("subagents.title")), /* @__PURE__ */ React6.createElement("span", { className: "dsw-ust-card-sub" }, t("subagents.sub"))), loading && payload ? /* @__PURE__ */ React6.createElement("span", { className: "dsw-ust-sub-load" }, t("subagents.loading")) : null), coverage ? /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-sub-coverage" }, t("subagents.window"), " \xB7 ", t("subagents.coverage", {
         total: coverage.total,
         matched: coverage.matched,
         noExternal: coverage.noExternal
