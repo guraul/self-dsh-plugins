@@ -1,0 +1,42 @@
+{
+  "name": "dsh-plugin-subagents",
+  "version": "0.1.0",
+  "description": "角色化的子代理层：角色（executor / reviewer）× 接入形态（A 原生 / B 委派 CLI / C 伪模型），三种形态共享同一份判定契约。",
+  "type": "module",
+  "main": "lib/index.js",
+  "bin": {
+    "dsh-subagents": "lib/cli.js"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./contract": "./lib/contract.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "roles",
+    "schema",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check lib/index.js && node --check lib/cli.js && node --check lib/contract.js && node --check lib/roles.js && node --check lib/record.js && node --check lib/request.js && node --check lib/bridge-cli.js"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "subagent",
+    "reviewer",
+    "role"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

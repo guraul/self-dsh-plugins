@@ -251,6 +251,8 @@ require_gh → 参数解析 → main_worktree → 定位 PR → state 必须 OPE
 
 后两条为本仓补充，前六条来自 REQ-001 §10.2。
 
+**预期内的「自我触发」**：新增一个插件目录的首个 PR 几乎必然命中——它要同时改 `.github/workflows/`、`scripts/pipeline/lib.sh`、`.gitignore` 与插件索引，行数也远超 400。这不是规则的缺陷，是规则的意图：新插件是最该由人看一眼的变更类型，因此**不设豁免**。第一个撞上它的是 PR #118（`dsh-subagents` 骨架，1580 行，判定 `ESCALATE` + `E_POLICY`）。
+
 ---
 
 ## 7. 审核记录

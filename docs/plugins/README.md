@@ -11,6 +11,7 @@
 | `dsh-external-discuss/` | [`dsh-external-discuss.md`](./dsh-external-discuss.md) | `dsh-plugin-external-discuss` | 原创 |
 | `dsh-im-bridge-workspaces/` | [`dsh-im-bridge-workspaces.md`](./dsh-im-bridge-workspaces.md) · [演进记录](./dsh-im-bridge-workspaces-evolution.md) | `@mhfire/dsh-im-bridge` | fork（npm `@mhfire/dsh-im-bridge@0.4.4`） |
 | `dsh-plugin-product-subagents/` | [`dsh-plugin-product-subagents.md`](./dsh-plugin-product-subagents.md) | `dsh-plugin-product-subagents` | fork（`shaokeyibb/dsh-plugin-product-subagents` v0.4.0） |
+| `dsh-subagents/` | [`dsh-subagents.md`](./dsh-subagents.md) | `dsh-plugin-subagents` | 原创（替代 fork `dsh-plugin-product-subagents`） |
 | `dsh-prompt-optimizer/` | [`dsh-prompt-optimizer.md`](./dsh-prompt-optimizer.md) | `@y1x1n/dsh-prompt-optimizer` | fork（npm `@y1x1n/dsh-prompt-optimizer@0.6.1`） |
 | `dsh-usage-panel/` | [`dsh-usage-panel.md`](./dsh-usage-panel.md) | `dsh-usage-panel` | fork（`AlfredChaos/dsh-usage-panel` v0.2.3，`0.2.3-fork.1`） |
 | `dsh-zhihu-sidebar/` | [`dsh-zhihu-sidebar.md`](./dsh-zhihu-sidebar.md) | `dsh-plugin-zhihu-sidebar` | 原创 |
