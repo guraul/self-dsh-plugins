@@ -573,6 +573,17 @@ function firstNumber(...values) {
   }
   return null;
 }
+function dominantModel(models) {
+  let best = null;
+  let bestCount = 0;
+  for (const [model, count] of models) {
+    if (count > bestCount) {
+      best = model;
+      bestCount = count;
+    }
+  }
+  return best;
+}
 function objectOf(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
@@ -591,7 +602,7 @@ async function readCodebuddySession(remoteId, cwd, options = {}) {
     return { hit: null, errors };
   }
   const agg = {
-    model: null,
+    models: /* @__PURE__ */ new Map(),
     input: 0,
     output: 0,
     cacheRead: 0,
@@ -632,7 +643,9 @@ async function readCodebuddySession(remoteId, cwd, options = {}) {
       agg.cacheRead += cacheRead;
       agg.cacheWrite += firstNumber(rawUsage?.prompt_cache_write_tokens) ?? 0;
       agg.output += num(buckets.outputTokens);
-      if (typeof pd.model === "string" && pd.model) agg.model = pd.model;
+      if (typeof pd.model === "string" && pd.model) {
+        agg.models.set(pd.model, (agg.models.get(pd.model) ?? 0) + 1);
+      }
       if (rawUsage) {
         const credit = rawUsage.credit;
         const value = Number(credit);
@@ -665,7 +678,7 @@ async function readCodebuddySession(remoteId, cwd, options = {}) {
   const hit = {
     executor: "codebuddy",
     remoteId,
-    model: agg.model,
+    model: dominantModel(agg.models),
     totals: totals2,
     calls: agg.calls,
     startedAt: agg.startedAt,

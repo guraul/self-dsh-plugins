@@ -53,7 +53,8 @@ function time(value: unknown): number | null {
 }
 
 interface Aggregate {
-  model: string | null
+  /** Model id → call count; the session's model is the mode, not the last one. */
+  models: Map<string, number>
   input: number
   output: number
   cacheRead: number
@@ -78,6 +79,24 @@ function firstNumber(...values: unknown[]): number | null {
     if (n !== null) return n
   }
   return null
+}
+
+/**
+ * The session's model is the one used by most calls. CodeBuddy falls back to
+ * its `Auto` variant for a few tail calls (compaction, title, built-in
+ * subagents); reporting the LAST model made a 157-call deepseek-v4.1-flash
+ * session show up as `hy4-preview` (issue #134). Ties keep the first seen.
+ */
+function dominantModel(models: Map<string, number>): string | null {
+  let best: string | null = null
+  let bestCount = 0
+  for (const [model, count] of models) {
+    if (count > bestCount) {
+      best = model
+      bestCount = count
+    }
+  }
+  return best
 }
 
 function objectOf(value: unknown): Record<string, unknown> | null {
@@ -118,7 +137,7 @@ export async function readCodebuddySession(
   }
 
   const agg: Aggregate = {
-    model: null,
+    models: new Map<string, number>(),
     input: 0,
     output: 0,
     cacheRead: 0,
@@ -163,7 +182,9 @@ export async function readCodebuddySession(
       agg.cacheRead += cacheRead
       agg.cacheWrite += firstNumber(rawUsage?.prompt_cache_write_tokens) ?? 0
       agg.output += num(buckets.outputTokens)
-      if (typeof pd.model === 'string' && pd.model) agg.model = pd.model
+      if (typeof pd.model === 'string' && pd.model) {
+        agg.models.set(pd.model, (agg.models.get(pd.model) ?? 0) + 1)
+      }
       if (rawUsage) {
         const credit = rawUsage.credit
         const value = Number(credit)
@@ -197,7 +218,7 @@ export async function readCodebuddySession(
   const hit: SubagentExternal = {
     executor: 'codebuddy',
     remoteId,
-    model: agg.model,
+    model: dominantModel(agg.models),
     totals,
     calls: agg.calls,
     startedAt: agg.startedAt,
