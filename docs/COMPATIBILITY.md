@@ -31,15 +31,34 @@
   想真正挡住某个预发布线得显式写 `<0.2.2-0`。所以"声明没写"≠"装不上"——矩阵里的
   `incompatible` 是**我们自己的 verdict**，不保证门禁会拦。
 
+## 验证深度（L1–L4）
+
+同一个「✅ 通过」可能只代表「能装配」，也可能代表「业务链路实测过」——两者不是一回事。
+所以每条记录都要带**深度**：`package.json` 的 `dsh.compatibility.dshDepth[<版本>]`，与 `dshReleases` 并列。
+
+| 深度 | 验的是什么 | 怎么验 | 能得出什么结论 |
+|---|---|---|---|
+| **L1 装配** | profile 能否把这个插件装进去 | `scripts/pipeline/install-check.sh` / `compat-matrix.sh`（一次性 `DSH_HOME` + `plugin add` + `--dump-config` grep 包名） | 插件不会因为装配失败而「莫名其妙没加载」 |
+| **L2 启动** | 加载后会不会当场报错 | headless 起一次，看插件自身日志有没有异常栈 | 初始化路径没炸 |
+| **L3 编译期** | 依赖的官方 API 有没有变 | 该版本依赖下 `tsc` / `pnpm run build`（只对有构建步骤的插件有意义） | 类型契约没漂移（im-bridge 的 `TS2554` 就是这层抓到的） |
+| **L4 业务链路** | 功能是否真的可用 | 真机实测：发消息 / 点按钮 / `/ws` 切换 | 端到端可用 |
+
+规则：
+
+- **verdict 在「该深度及更深」成立**：记 `L2` + ✅ 表示「装配与启动都过」，不表示 L3/L4 过。
+- **`dshDepth` 与 `dshReleases` 必须成对**：有 verdict 就该有深度；缺深度 = **深度未记录**
+  （按最浅的 L1 理解，表里显式写「未记录」，不许默认当成验深了）。
+- 只想快速铺一遍「能不能装配」时，用 `scripts/pipeline/compat-matrix.sh <版本>`，它的结论是 **L1**。
+
 ## 矩阵
 
-| 插件 | 包版本 | 验过的 dsh 版本 | 结果 | 日期 | 怎么验的 |
-|---|---|---|---|---|---|
-| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.4.4-ws.2` | `0.2.1-rc.2` | ✅ 通过 | 2026-10-29 | 一次性 `DSH_HOME`：`plugin --profile headless add` + `--dump-config` grep + headless 启动看到插件自身日志 |
-| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.4.4-ws.2` | `0.2.1-rc.4` | ✅ 通过 | 2026-10-29 | 同上（headless 启动输出 `[im-bridge] workspaceRegistry 不可用…` / `[im-bridge] 跳过启动: 缺少 botId/secret…`） |
-| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.4.4-ws.2` | `0.2.2-alpha.2` | ❌ **不兼容（未放宽）**<br>装配/加载可过，但 `tsc` 报 `TS2554`，且 `reasoningEffort` 静默失效 | 2026-10-29 | 一次性 `DSH_HOME` 装配 + headless 启动均通过；**CI 解析到 alpha.2 类型后 `pnpm run typecheck` 失败** → 见文末「已知差异」 |
+| 插件 | 包版本 | 验过的 dsh 版本 | 深度 | 结果 | 日期 | 怎么验的 |
+|---|---|---|---|---|---|---|
+| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.1` | `0.2.1-rc.2` | **L2** | ✅ 通过 | 2026-10-29 | 一次性 `DSH_HOME`：`plugin --profile headless add` + `--dump-config` grep + headless 启动看到插件自身日志 |
+| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.1` | `0.2.1-rc.4` | **L2** | ✅ 通过 | 2026-10-29 | 同上（headless 启动输出 `[im-bridge] workspaceRegistry 不可用…` / `[im-bridge] 跳过启动: 缺少 botId/secret…`） |
+| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.1` | `0.2.2-alpha.2` | **L3** | ❌ **不兼容（未放宽）**<br>装配/加载可过，但 `tsc` 报 `TS2554`，且 `reasoningEffort` 静默失效 | 2026-10-29 | 一次性 `DSH_HOME` 装配 + headless 启动均通过；**CI 解析到 alpha.2 类型后 `pnpm run typecheck` 失败** → 见文末「已知差异」 |
 
-**未验证的版本不要写进表**。验不过的版本按下面"失败时怎么记"处理。
+**未验证的版本不要写进表**。验不过的版本按下面"失败时怎么记"处理；写进表的每条都要有深度（缺了就写「未记录」）。
 
 ## 验证方法（可复现）
 
