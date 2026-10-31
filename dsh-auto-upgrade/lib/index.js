@@ -191,6 +191,7 @@ export function apply(ctx, config = {}) {
       return {
         plugins: [],
         incompatible: [],
+        flagged: [],
         exemptions: {},
         inventoryError: 'profileContext is unavailable; cannot inspect profile plugins',
       }
@@ -230,7 +231,7 @@ export function apply(ctx, config = {}) {
       : (packument.ok ? packument.tags[policy.channel] : undefined)
 
     const compat = installation === undefined
-      ? { plugins: [], incompatible: [], exemptions: {}, inventoryError: installationError }
+      ? { plugins: [], incompatible: [], flagged: [], exemptions: {}, inventoryError: installationError }
       : await inspectPlugins(target ?? installed ?? '0.0.0')
     const facts = installation === undefined ? null : await runPreflight().catch((error) => ({ error: error.message }))
 
@@ -262,6 +263,8 @@ export function apply(ctx, config = {}) {
       registryError: packument.ok ? null : packument.error,
       plugins: compat.plugins,
       incompatible: compat.incompatible,
+      // 自述矩阵的点名项（含 `unverified`）：只用于提示与开 issue，**不参与 decision**。
+      flagged: compat.flagged,
       exemptions: compat.exemptions,
       inventoryError: compat.inventoryError ?? null,
       preflight: facts,
@@ -757,24 +760,27 @@ export function apply(ctx, config = {}) {
 
         // 标题与正文只由宿主根据检测结果生成：请求体里的 target 已校验为精确版本号，
         // 任何额外字段都不会被写进 issue。
+        //
+        // 点名列表取**实时**判定（只读本地 manifest，不联网）：门禁阻塞（`gate`）与
+        // 插件自述矩阵（`self-declared`，含 `unverified`）合并成一份，来源写在每条上。
+        // 门禁放行但自述已知不兼容时同样可以开 issue——这正是本 issue 的诉求。
         const state = await stores.state.read()
         const lastCheck = state.lastCheck ?? null
-        const blockers = lastCheck !== null && lastCheck.target === target && Array.isArray(lastCheck.incompatible)
-          ? lastCheck.incompatible
-          : (await inspectPlugins(target)).incompatible
-        if (blockers.length === 0) {
-          throw new RequestError(400, CODE.BAD_REQUEST, `目标版本 ${target} 没有被阻塞的插件，无需开 issue`)
+        const inspected = await inspectPlugins(target)
+        const named = inspected.flagged ?? []
+        if (named.length === 0) {
+          throw new RequestError(400, CODE.BAD_REQUEST, `目标版本 ${target} 没有被阻塞的插件，也没有自述兼容性问题的插件，无需开 issue`)
         }
 
         const installed = installation === undefined
           ? (lastCheck?.installed ?? null)
           : ((await readInstalledVersion(installation.manifestPath)) ?? lastCheck?.installed ?? null)
-        const title = issueTitle({ target, plugins: blockers })
+        const title = issueTitle({ target, plugins: named })
         const text = issueBody({
           target,
           installed,
           profile: profileContext.name ?? 'web',
-          plugins: blockers,
+          plugins: named,
           port: typeof webServer.port === 'number' ? webServer.port : 3080,
         })
         try {

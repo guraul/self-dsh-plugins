@@ -51,6 +51,12 @@ window.__ModuleLoader__.load({
       'overlay.pluginRequirements': '要求明细（{count} 项）',
       'overlay.requirementsMore': '等 {count} 项',
       'overlay.pluginFix': '→ 修法：放宽该插件的 peer 声明后重跑其装配验收（scripts/pipeline/install-check.sh <插件目录>）；或为该版本组合申请版本豁免（dsh plugin --profile web allow-version …）',
+      'overlay.pluginDeclaredRisk': '门禁已放行，但插件自述有问题（目标 {target}）：',
+      'overlay.declaredIncompatible': '插件自述已知不兼容',
+      'overlay.declaredUnverified': '该版本从未验证',
+      'overlay.declaredMatrix': '自述矩阵：dsh.compatibility.dshReleases["{target}"] = "{entry}"',
+      'overlay.declaredMatrixMissing': '自述矩阵：dsh.compatibility.dshReleases["{target}"] 没有记录（= 从未验证）',
+      'overlay.declaredFix': '→ 自述矩阵是人工实测记录（官方门禁不读它，所以不会阻断升级）：复测后把结论同步写回插件的 dsh.compatibility.dshReleases 与 docs/COMPATIBILITY.md',
       'overlay.reportIssue': '开 issue 记录这个不兼容',
       'overlay.reportIssueCreated': '已记录为 issue',
       'overlay.reportIssueFailed': '开 issue 失败：{error}',
@@ -125,6 +131,12 @@ window.__ModuleLoader__.load({
       'overlay.pluginRequirements': 'Unmet requirements ({count})',
       'overlay.requirementsMore': 'and {count} more',
       'overlay.pluginFix': '→ Fix: widen the plugin peer declaration and re-run its assembly check (scripts/pipeline/install-check.sh <plugin dir>); or request a version exemption for this combination (dsh plugin --profile web allow-version …)',
+      'overlay.pluginDeclaredRisk': 'The gate allows this upgrade, but the plugin self-reports a problem (target {target}):',
+      'overlay.declaredIncompatible': 'the plugin self-reports this version as incompatible',
+      'overlay.declaredUnverified': 'this version has never been verified',
+      'overlay.declaredMatrix': 'Self-declared matrix: dsh.compatibility.dshReleases["{target}"] = "{entry}"',
+      'overlay.declaredMatrixMissing': 'Self-declared matrix: no dsh.compatibility.dshReleases["{target}"] entry (= never verified)',
+      'overlay.declaredFix': '→ The self-declared matrix is a manual test record (the official gate does not read it, so it never blocks an upgrade): after re-testing, write the verdict back to the plugin\'s dsh.compatibility.dshReleases and docs/COMPATIBILITY.md',
       'overlay.reportIssue': 'Open an issue for this incompatibility',
       'overlay.reportIssueCreated': 'Recorded as issue',
       'overlay.reportIssueFailed': 'Could not open the issue: {error}',
@@ -678,19 +690,80 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 一条点名记录来自哪里：门禁（`gate`）还是插件自述矩阵（`self-declared`）。
+     * 宿主新响应带 `sources`；409 里的旧对象没有，按门禁口径兜底。
+     * @param {object} plugin 点名记录。
+     * @returns {string[]} 来源列表。
+     */
+    function sourcesOf(plugin) {
+      if (Array.isArray(plugin?.sources)) return plugin.sources
+      return plugin?.compatible === false && plugin?.exempted !== true ? ['gate'] : []
+    }
+
+    /**
+     * 合并点名项：门禁阻塞（409 或检测结果）与插件自述矩阵（`flagged`，含 `unverified`）。
+     * 同名只留一条：门禁那条带 `peers` 明细，优先；自述信息两边都来自同一份 manifest。
+     * 浮层与设置页共用这一份（`client-upgrade-entry` 有计数守卫）。
+     * @param {object[]} gate 门禁阻塞项。
+     * @param {object[]} flagged 自述点名项。
+     * @returns {object[]} 合并后的列表。
+     */
+    function namedPlugins(gate, flagged) {
+      const merged = new Map()
+      for (const plugin of Array.isArray(flagged) ? flagged : []) {
+        merged.set(plugin.name, { ...plugin, sources: sourcesOf(plugin) })
+      }
+      for (const plugin of Array.isArray(gate) ? gate : []) {
+        const existing = merged.get(plugin.name)
+        const entry = { ...plugin, sources: sourcesOf(plugin) }
+        if (entry.sources.length === 0) entry.sources = ['gate']
+        merged.set(plugin.name, existing === undefined
+          ? entry
+          : {
+            ...existing,
+            ...entry,
+            declared: entry.declared ?? existing.declared,
+            sources: [...new Set([...sourcesOf(existing), ...entry.sources])],
+          })
+      }
+      return [...merged.values()]
+    }
+
+    /**
      * 门禁拒绝的共用渲染：点名不兼容插件 + 要求明细（最多 3 条，其余折叠）+ 修法 + 开 issue。
+     *
+     * 同一块里也承载**插件自述矩阵**（`declared`）：`incompatible` 与 `unverified` 都点名，
+     * 但**不阻断升级**——门禁放行时标题改成「门禁已放行，但插件自述有问题」。
      * 浮层与设置页共用这一份；各写一份必然漂移（`test/client-upgrade-entry.test.mjs` 有计数守卫）。
      * @param {{t:Function, target:string|null, plugins:object[], busy:boolean, buttonClass:string, report:any, onReport:Function}} props 输入。
      * @returns {any} React 元素。
      */
     function renderPluginBlock({ t, target, plugins, busy, buttonClass, report, onReport }) {
       const list = Array.isArray(plugins) ? plugins : []
+      const hasGate = list.some((plugin) => sourcesOf(plugin).includes('gate'))
+      const hasDeclaredProblem = list.some((plugin) => plugin?.declared !== undefined && plugin.declared !== null && plugin.declared.verdict !== 'compatible')
+      const shownTarget = target ?? '?'
       const rows = []
       for (const plugin of list) {
         const requirements = Object.entries(plugin.peers ?? {})
         const shown = requirements.slice(0, 3)
         const rest = requirements.length - shown.length
         const first = shown.length === 0 ? '' : formatRequirement(t, shown[0])
+        // 自述矩阵原文：有记录就照抄 verdict，没有就明说「从未验证」。
+        const declared = plugin.declared === undefined || plugin.declared === null ? null : plugin.declared
+        const declaredNode = declared === null || declared.verdict === 'compatible'
+          ? null
+          : h('div', {
+            key: 'declared',
+            className: declared.verdict === 'incompatible' ? 'dsh-au-warn' : 'dsh-au-muted',
+          }, [
+            h('div', { key: 'verdict' }, declared.verdict === 'incompatible'
+              ? t('overlay.declaredIncompatible')
+              : t('overlay.declaredUnverified')),
+            h('div', { key: 'matrix', className: 'dsh-au-muted' }, declared.verdict === 'incompatible'
+              ? t('overlay.declaredMatrix', { target: shownTarget, entry: declared.verdict })
+              : t('overlay.declaredMatrixMissing', { target: shownTarget })),
+          ])
         rows.push(h('div', { key: `plugin-${plugin.name}`, className: 'dsh-au-warn' }, [
           h('div', { key: 'name' }, `${plugin.name}@${plugin.version}${first === '' ? '' : ` ${t('overlay.requires', { requirement: first })}`}`),
           requirements.length === 0
@@ -702,6 +775,7 @@ window.__ModuleLoader__.load({
                 rest === 0 ? null : h('div', { key: 'more' }, t('overlay.requirementsMore', { count: rest })),
               ]),
             ]),
+          declaredNode,
         ]))
       }
 
@@ -733,9 +807,13 @@ window.__ModuleLoader__.load({
       }
 
       return h('div', { key: 'plugins', className: 'dsh-au-panel' }, [
-        h('div', { key: 'head', className: 'dsh-au-warn' }, t('overlay.pluginCannotUpgrade', { target: target ?? '?' })),
+        h('div', { key: 'head', className: 'dsh-au-warn' }, hasGate
+          ? t('overlay.pluginCannotUpgrade', { target: shownTarget })
+          : t('overlay.pluginDeclaredRisk', { target: shownTarget })),
         ...rows,
-        h('div', { key: 'fix', className: 'dsh-au-muted' }, t('overlay.pluginFix')),
+        // 门禁已放行时不再给「放宽 peer」的修法（那是给阻塞用的），只给自述矩阵的修法。
+        hasGate ? h('div', { key: 'fix-gate', className: 'dsh-au-muted' }, t('overlay.pluginFix')) : null,
+        hasDeclaredProblem ? h('div', { key: 'fix-declared', className: 'dsh-au-muted' }, t('overlay.declaredFix')) : null,
         issue,
       ])
     }
@@ -945,9 +1023,15 @@ window.__ModuleLoader__.load({
       else line = t('overlay.unknown', { error: check?.registryError ?? 'unknown' })
 
       // 被门禁挡住时点名插件：优先用宿主 409 回传的那份，其次用本次检测结果。
-      const blockers = blocked !== null && Array.isArray(blocked.plugins) && blocked.plugins.length > 0
+      const gateBlockers = blocked !== null && Array.isArray(blocked.plugins) && blocked.plugins.length > 0
         ? blocked.plugins
         : (decision === 'update-with-plugin-risk' ? (check?.incompatible ?? []) : [])
+      // 自述矩阵（含 `unverified`）只在「确实要升级到某个新版本」时点名；过期结论一律不看。
+      const declaredBlockers = stale ? [] : (Array.isArray(check?.flagged) ? check.flagged : [])
+      const showDeclared = declaredBlockers.length > 0 && (decision === 'update-available' || decision === 'update-with-plugin-risk')
+      const blockers = gateBlockers.length > 0 || showDeclared
+        ? namedPlugins(gateBlockers, declaredBlockers)
+        : []
       const blockTarget = blocked?.target ?? target
 
       const actions = []
@@ -1135,9 +1219,15 @@ window.__ModuleLoader__.load({
       const staleInstalled = check?.installed != null && check.installed !== liveInstalled ? check.installed : null
       const hasUpdate = decision === 'update-available' || decision === 'update-with-plugin-risk'
       // 设置页与浮层同样点名：优先用宿主 409 回传的插件，其次用本次检测结果。
-      const blockers = blocked !== null && Array.isArray(blocked.plugins) && blocked.plugins.length > 0
+      const gateBlockers = blocked !== null && Array.isArray(blocked.plugins) && blocked.plugins.length > 0
         ? blocked.plugins
         : (decision === 'update-with-plugin-risk' ? (check?.incompatible ?? []) : [])
+      // 自述矩阵（含 `unverified`）只在「确实要升级到某个新版本」时点名；过期结论一律不看。
+      const declaredBlockers = stale ? [] : (Array.isArray(check?.flagged) ? check.flagged : [])
+      const showDeclared = declaredBlockers.length > 0 && (decision === 'update-available' || decision === 'update-with-plugin-risk')
+      const blockers = gateBlockers.length > 0 || showDeclared
+        ? namedPlugins(gateBlockers, declaredBlockers)
+        : []
       const blockTarget = blocked?.target ?? target
 
       // 升级流程与浮层共用同一份实现；浮层是否被 dismissed / hidden 都不影响这里。

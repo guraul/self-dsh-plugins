@@ -32,7 +32,7 @@ function findInstallAnchor() {
 
 /**
  * 造一个最小可解析的 profile 目录。
- * @param {{plugins?:{name:string, version:string, peerDependencies?:object}[]}} [options] 选项。
+ * @param {{plugins?:{name:string, version:string, peerDependencies?:object, dsh?:object}[]}} [options] 选项。
  * @returns {Promise<string>} profile 目录。
  */
 async function makeProfile(options = {}) {
@@ -48,7 +48,7 @@ async function makeProfile(options = {}) {
         name: plugin.name,
         version: plugin.version,
         peerDependencies: plugin.peerDependencies ?? {},
-        dsh: { bundle: { patch: './cordis.patch.yml' } },
+        dsh: plugin.dsh ?? { bundle: { patch: './cordis.patch.yml' } },
       }, null, 2)}\n`,
     )
     await writeFile(join(pluginDir, 'cordis.patch.yml'), `\n- insert:\n    - id: ${plugin.name}\n      name: '${plugin.name}'\n`)
@@ -706,5 +706,106 @@ test('POST /report-issue：只接受精确 target，GET 不被允许，没有阻
     assert.equal(gh.calls.length, 0)
   } finally {
     await clean.close()
+  }
+})
+
+/**
+ * 门禁会放行、但 `dsh.compatibility.dshReleases` 自述不兼容的插件。
+ * peer 用宽范围 `>=0.1.0`：9.9.9 满足它，所以官方门禁判「兼容」——这正是 issue #106 的现场。
+ * @type {object}
+ */
+const DECLARED_INCOMPATIBLE = {
+  name: 'declared-bad',
+  version: '1.0.0',
+  peerDependencies: { '@deepseek-ai/dsh-tools': '>=0.1.0' },
+  dsh: {
+    bundle: { patch: './cordis.patch.yml' },
+    compatibility: { dshReleases: { '9.9.9': 'incompatible' } },
+  },
+}
+
+test('自述矩阵：门禁放行但 declared=incompatible 仍点名，升级不被阻断，开 issue 正文带矩阵证据', async (t) => {
+  const gh = makeGh()
+  const env = await makeEnvironment({ plugins: [DECLARED_INCOMPATIBLE], runGh: gh.runGh })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const inventory = await (await fetch(`${env.host.base}${API.plugins}?version=9.9.9`)).json()
+    assert.equal(inventory.incompatible.length, 0, '门禁确实放行了')
+    const plugin = inventory.plugins[0]
+    assert.equal(plugin.compatible, true)
+    assert.deepEqual(plugin.declared, { verdict: 'incompatible', source: 'self-declared' }, '每个插件都带自述三态')
+    assert.equal(inventory.flagged.length, 1, '自述 incompatible 必须进点名列表')
+    assert.deepEqual(inventory.flagged[0].sources, ['self-declared'], '能与门禁来源区分')
+    assert.equal(inventory.flagged[0].source, 'self-declared')
+
+    const check = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    assert.equal(check.decision, 'update-available', '自述矩阵不许把检测降级成 plugin-risk')
+    assert.equal(check.flagged.length, 1, '检测结果里也要有这份点名')
+
+    const reported = await fetch(`${env.host.base}${API.reportIssue}`, {
+      method: 'POST',
+      body: JSON.stringify({ target: '9.9.9' }),
+    })
+    assert.equal(reported.status, 200)
+    const create = gh.calls.find((args) => args[0] === 'issue' && args[1] === 'create')
+    assert.notEqual(create, undefined, '必须真的去创建 issue')
+    assert.match(create[create.indexOf('--title') + 1], /自述兼容性有问题/, '门禁放行时标题不能诬陷它「阻塞」')
+    const text = create[create.indexOf('--body') + 1]
+    assert.match(text, /## 自述兼容矩阵证据/, '正文必须有自述矩阵一节')
+    assert.match(text, /\| `declared-bad@1\.0\.0` \| `self-declared` \| `9\.9\.9` \| `"incompatible"` \| `incompatible` \|/, '正文要带来源、矩阵原文与 verdict')
+    assert.doesNotMatch(text, /没有任何矩阵记录/, '有记录就别写成缺失')
+
+    // 关键边界：自述矩阵**不阻断升级**——门禁放行时 /update 必须照常交接。
+    const update = await fetch(`${env.host.base}${API.update}`, {
+      method: 'POST',
+      body: JSON.stringify({ version: '9.9.9' }),
+    })
+    assert.equal(update.status, 202, '自述矩阵不许阻断升级')
+    await waitFor(() => env.host.scheduled.length === 1, 'the helper to be scheduled')
+    assert.equal(env.host.scheduled[0].target, '9.9.9')
+  } finally {
+    await env.close()
+  }
+})
+
+test('自述矩阵：没有记录 = unverified，同样点名并可开 issue；自述 compatible 不进点名', async (t) => {
+  const gh = makeGh()
+  const env = await makeEnvironment({
+    plugins: [
+      // 没有任何 dsh.compatibility.dshReleases：从未验证。
+      { name: 'never-verified', version: '2.0.0', peerDependencies: { '@deepseek-ai/dsh-tools': '>=0.1.0' } },
+      // 明确记了 compatible：不许进点名列表。
+      {
+        name: 'verified-ok',
+        version: '3.0.0',
+        peerDependencies: { '@deepseek-ai/dsh-tools': '>=0.1.0' },
+        dsh: {
+          bundle: { patch: './cordis.patch.yml' },
+          compatibility: { dshReleases: { '9.9.9': 'compatible' } },
+        },
+      },
+    ],
+    runGh: gh.runGh,
+  })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const inventory = await (await fetch(`${env.host.base}${API.plugins}?version=9.9.9`)).json()
+    assert.equal(inventory.incompatible.length, 0)
+    const byName = Object.fromEntries(inventory.plugins.map((plugin) => [plugin.name, plugin]))
+    assert.deepEqual(byName['never-verified'].declared, { verdict: 'unverified', source: 'self-declared' })
+    assert.deepEqual(byName['verified-ok'].declared, { verdict: 'compatible', source: 'self-declared' })
+    assert.deepEqual(inventory.flagged.map((plugin) => plugin.name), ['never-verified'], '只有 unverified 进点名')
+
+    const reported = await (await fetch(`${env.host.base}${API.reportIssue}`, {
+      method: 'POST',
+      body: JSON.stringify({ target: '9.9.9' }),
+    })).json()
+    assert.equal(reported.ok, true)
+    const create = gh.calls.find((args) => args[0] === 'issue' && args[1] === 'create')
+    const text = create[create.indexOf('--body') + 1]
+    assert.match(text, /\| `never-verified@2\.0\.0` \| `self-declared` \| `9\.9\.9` \| （无记录 = 从未验证） \| `unverified` \|/, '缺失必须写成 unverified')
+    assert.doesNotMatch(text, /verified-ok/, '自述 compatible 的插件不该出现在 issue 里')
+  } finally {
+    await env.close()
   }
 })

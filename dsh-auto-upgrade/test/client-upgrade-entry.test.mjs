@@ -219,7 +219,6 @@ function statusWith(lastCheck, settings = { dismissed: false, overlay: true }) {
 }
 
 const TAGS = { latest: '0.2.0-rc.2', alpha: '0.2.1-alpha.5', next: '0.2.1-rc.2' }
-
 /**
  * 真实世界的阻塞形态：一个插件把 12 个 `@deepseek-ai/*` 钉成精确版本。
  * 这里取 5 条（>3，正好验证「最多 3 条 + 等 N 项」的折叠）。
@@ -239,6 +238,8 @@ const BRIDGE = {
   },
 }
 
+const TODAY = new Date().toISOString().slice(0, 10)
+
 const RISK_CHECK = {
   date: '2026-10-29',
   decision: 'update-with-plugin-risk',
@@ -249,7 +250,46 @@ const RISK_CHECK = {
   incompatible: [BRIDGE],
 }
 
-const TODAY = new Date().toISOString().slice(0, 10)
+/**
+ * 门禁放行、但插件在 `dsh.compatibility.dshReleases` 里自述不兼容的现场（issue #106）。
+ * 宿主把这类记录放在 `check.flagged` 里，`sources` 与门禁的 `gate` 区分。
+ */
+const DECLARED_BAD = {
+  name: '@mhfire/dsh-im-bridge',
+  version: '0.5.0-ws.1',
+  compatible: true,
+  exempted: false,
+  known: true,
+  peers: {},
+  declared: { verdict: 'incompatible', source: 'self-declared' },
+  sources: ['self-declared'],
+  source: 'self-declared',
+}
+
+/** 矩阵里根本没有目标版本：`unverified`（从未验证）。 */
+const DECLARED_UNKNOWN = {
+  name: 'dsh-plugin-awake',
+  version: '0.1.0',
+  compatible: true,
+  exempted: false,
+  known: true,
+  peers: {},
+  declared: { verdict: 'unverified', source: 'self-declared' },
+  sources: ['self-declared'],
+  source: 'self-declared',
+}
+
+/** 门禁放行 + 自述有问题：`decision` 仍是 `update-available`（自述矩阵不许阻断升级）。 */
+const DECLARED_CHECK = {
+  date: TODAY,
+  decision: 'update-available',
+  installed: '0.2.1-rc.4',
+  target: '0.2.2-alpha.2',
+  channel: 'alpha',
+  tags: TAGS,
+  incompatible: [],
+  flagged: [DECLARED_BAD, DECLARED_UNKNOWN],
+}
 
 /**
  * 升级成功后的真实现场：已装 `0.2.2-alpha.2`，但缓存里还是升级前那次检测（0.2.1-rc.5）。
@@ -412,6 +452,10 @@ test('浮层与设置页共用同一份计划卡 / 降级出路渲染（不许�
   assert.equal(countOf('renderDowngradeExit('), 3, '降级出路必须由浮层与设置页共用（一份定义 + 两次调用）')
   assert.equal(countOf('function renderPluginBlock('), 1, '门禁拒绝块只能有一份定义')
   assert.equal(countOf('renderPluginBlock('), 3, '门禁拒绝块必须由浮层与设置页共用（一份定义 + 两次调用）')
+  assert.equal(countOf('function namedPlugins('), 1, '点名合并（门禁 + 自述）只能有一份定义')
+  assert.equal(countOf('namedPlugins('), 3, '点名合并必须由浮层与设置页共用（一份定义 + 两次调用）')
+  assert.equal(countOf("t('overlay.declaredIncompatible')"), 1, '自述不兼容的渲染只留一份')
+  assert.equal(countOf("t('overlay.declaredUnverified')"), 1, '自述未验证的渲染只留一份')
   assert.equal(countOf('function makeIssueReporter('), 1, '开 issue 的提交器只能有一份定义')
   assert.equal(countOf('makeIssueReporter('), 3, '开 issue 必须由浮层与设置页共用（一份定义 + 两次调用）')
   assert.equal(countOf('createUpgradeFlow('), 3, '升级流程必须由浮层与设置页共用（一份定义 + 两次调用）')
@@ -491,6 +535,67 @@ test('浮层：点「开 issue」走 report-issue，成功后同块显示 #N 链
   const posted = calls.find((call) => call.url === API.reportIssue)
   assert.equal(posted.method, 'POST')
   assert.deepEqual(JSON.parse(posted.body), { target: '0.2.1-rc.4' }, '只允许传目标版本')
+})
+
+test('浮层：门禁放行但插件自述不兼容时点名、给矩阵原文与开 issue，升级按钮仍可用', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusWith(DECLARED_CHECK),
+  })
+  const tree = await react.mount(Overlay, {})
+  const text = textOf(tree)
+  assert.match(text, /门禁已放行，但插件自述有问题（目标 0\.2\.2-alpha\.2）/, '必须说清门禁已放行')
+  assert.doesNotMatch(text, /不能升级到/, '门禁放行时不许用「不能升级」的口径')
+  assert.match(
+    text,
+    /@mhfire\/dsh-im-bridge@0\.5\.0-ws\.1[\s\S]*插件自述已知不兼容/,
+    '必须点名自述不兼容的插件',
+  )
+  assert.match(
+    text,
+    /dsh\.compatibility\.dshReleases\["0\.2\.2-alpha\.2"\] = "incompatible"/,
+    '必须给出矩阵原文',
+  )
+  assert.match(text, /该版本从未验证/, 'unverified 也要点名')
+  assert.match(text, /dsh\.compatibility\.dshReleases\["0\.2\.2-alpha\.2"\] 没有记录（= 从未验证）/)
+  assert.match(text, /自述矩阵是人工实测记录（官方门禁不读它，所以不会阻断升级）/, '修法要说明它不阻断升级')
+  assert.match(text, /开 issue 记录这个不兼容/, '自述问题也能开 issue')
+
+  const upgrade = collect(tree, (node) => node.type === 'button' && textOf(node) === '升级')
+  assert.equal(upgrade.length, 1, '升级入口必须还在')
+  assert.notEqual(upgrade[0].props.disabled, true, '自述矩阵不许阻断升级')
+  // 动作区仍只有「升级 + 不再提示」：自述块只加正文，不加第二个升级按钮。
+  const row = collect(tree, (node) => node.props?.className === 'dsh-au-row')
+  assert.deepEqual(collect(row[0], (node) => node.type === 'button').map(textOf), ['升级', '不再提示'])
+})
+
+test('设置页：自述矩阵同样点名（unverified 文案），升级入口仍在', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusWith(DECLARED_CHECK, { dismissed: true, overlay: false }),
+  })
+  const tree = await react.mount(Settings, {})
+  const text = textOf(tree)
+  assert.match(text, /发现新版本 0\.2\.2-alpha\.2（当前 0\.2\.0-rc\.2）/, '升级入口常驻')
+  assert.match(text, /门禁已放行，但插件自述有问题（目标 0\.2\.2-alpha\.2）/)
+  assert.match(text, /该版本从未验证/)
+  assert.match(text, /插件自述已知不兼容/)
+  assert.match(text, /开 issue 记录这个不兼容/, '设置页同样能开 issue')
+  const upgrade = collect(tree, (node) => node.type === 'button' && textOf(node) === '升级')
+  assert.equal(upgrade.length, 1)
+  assert.notEqual(upgrade[0].props.disabled, true, '自述矩阵不许阻断升级')
+})
+
+test('过期缓存：自述矩阵（flagged）属于过期快照，同样不许铺开', async () => {
+  exported.resetStaleRecheck()
+  const held = new Promise(() => {})
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: statusAt({ ...STALE_CHECK, flagged: [DECLARED_BAD] }, '0.2.2-alpha.2'),
+    [API.checkRun]: () => held,
+  })
+  const text = textOf(await react.mount(Overlay, {}))
+  assert.doesNotMatch(text, /插件自述已知不兼容/, '过期快照里的自述结论同样不能当结论')
 })
 
 test('过期缓存：不把旧结论当结论，改用实时 installed，且每页最多一次 /check/run', async () => {
