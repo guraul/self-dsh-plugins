@@ -35,16 +35,19 @@ jobs:
         include:
           - dir: dsh-auto-upgrade
             install: true
+            fresh: true
             entry: |
               lib/index.js
               lib/client.js
           - dir: dsh-awake
             install: true
+            fresh: true
             entry: |
               lib/index.js
               lib/client.js
           - dir: dsh-external-discuss
             install: true
+            fresh: true
             entry: |
               lib/index.js
               lib/client.js
@@ -62,21 +65,25 @@ jobs:
               lib/client.js
           - dir: dsh-plugin-memx
             install: true
+            fresh: true
             entry: |
               lib/index.js
               lib/client.js
               lib/config.js
           - dir: dsh-plugin-product-subagents
             install: true
+            fresh: true
             entry: |
               lib/index.js
           - dir: dsh-prompt-optimizer
             install: true
+            fresh: true
             entry: |
               lib/index.js
               lib/client.js
           - dir: dsh-usage-panel
             install: true
+            fresh: true
             entry: |
               lib/index.js
               lib/client.js
@@ -125,8 +132,13 @@ jobs:
       # 做法：有 scripts.build 就在装好依赖后重建一遍，然后要求该目录在 git 里「零改动」；
       # 有改动说明提交上去的 lib/* 是过期的（或在 CI 里才被改写），直接判红。
       # 仓库根校验：本步骤 working-directory 是插件目录，故用 git -C "${GITHUB_WORKSPACE}"。
+      #
+      # ⚠️ 条件必须靠 matrix.fresh **显式**放行：matrix 里没声明的键是 null，
+      #    而 GHA 松散比较把 null == false 判为相等，过去写成 `matrix.fresh != false`
+      #    会让本步骤恒为假、在所有 job 里静默跳过（issue #104 修复）。
+      #    因此每个条目都要显式写 `fresh: true`；未声明即跳过，是刻意的安全默认。
       - name: 构建产物新鲜度（有 scripts.build 才跑）
-        if: steps.presence.outputs.exists == 'true' && matrix.install && matrix.fresh != false
+        if: steps.presence.outputs.exists == 'true' && matrix.install && matrix.fresh
         working-directory: ${{ matrix.dir }}
         run: |
           if node -e 'process.exit(require("./package.json").scripts && require("./package.json").scripts.build ? 0 : 1)'; then
