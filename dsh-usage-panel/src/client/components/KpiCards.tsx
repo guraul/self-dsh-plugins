@@ -5,19 +5,30 @@ import type { Locale } from '../../shared/format.ts'
 import { fmtTokens, pctOf, pctFull } from '../../shared/format.ts'
 import { hitRate } from '../../shared/usage.ts'
 import { useCountUp } from '../hooks.ts'
-import type { Overview } from '../../shared/contract.ts'
+import type { Overview, UsageTotals } from '../../shared/contract.ts'
+import { mergeTotals } from '../subagent-providers.ts'
 import * as React from 'react'
 
 interface KpiCardsProps {
   overview: Overview
   i18n: I18n
+  /**
+   * Real spend recorded on the external executor side (opencode / codebuddy).
+   * Folded into every total when present (issue #132): those calls never reach
+   * the DSH session log, so without this the KPI under-reports.
+   */
+  subagentTotals?: UsageTotals
 }
 
-export function KpiCards({ overview, i18n }: KpiCardsProps): JSX.Element {
+const EMPTY: UsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+
+export function KpiCards({ overview, i18n, subagentTotals }: KpiCardsProps): JSX.Element {
   const t = i18n.t
   const locale: Locale = i18n.locale
-  const allTime = overview.allTime || { totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, sessionCount: 0, byModel: [] }
-  const totals = allTime.totals || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+  const allTime = overview.allTime || { totals: EMPTY, sessionCount: 0, byModel: [] }
+  const base = allTime.totals || EMPTY
+  const extra = subagentTotals || EMPTY
+  const totals: UsageTotals = mergeTotals(base, extra)
   const total = totals.total || 0
   const inputTotal = totals.input + totals.cacheRead + totals.cacheWrite // billed input (v0.1.0)
   const top = allTime.byModel[0] || null
@@ -40,7 +51,10 @@ export function KpiCards({ overview, i18n }: KpiCardsProps): JSX.Element {
       <div className="dsw-ust-kpi">
         <div className="l">{t('kpi.total')}</div>
         <div className="v">{fmtTokens(animatedTotal, locale)}</div>
-        <div className="d">{t('kpi.total.detail', { input: fmtTokens(animatedInput, locale), output: fmtTokens(animatedOutput, locale) })}</div>
+        <div className="d">
+          {t('kpi.total.detail', { input: fmtTokens(animatedInput, locale), output: fmtTokens(animatedOutput, locale) })}
+          {extra.total > 0 ? ' · ' + t('kpi.total.subagent', { x: fmtTokens(extra.total, locale) }) : null}
+        </div>
       </div>
       <div className="dsw-ust-kpi">
         <div className="l">{t('kpi.sessions')}</div>

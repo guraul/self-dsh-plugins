@@ -18,6 +18,7 @@ import { SessionsCard } from './components/SessionsCard.tsx'
 import { SubagentsCard } from './components/SubagentsCard.tsx'
 import { SubagentProvidersCard } from './components/SubagentProvidersCard.tsx'
 import { rollupByRoot } from './session-rollup.ts'
+import { aggregateByExecutor, sumExecutorTotals } from './subagent-providers.ts'
 import { ProvidersCard } from './components/ProvidersCard.tsx'
 import { ModelDonut } from './components/ModelDonut.tsx'
 import { ExportMenu } from './components/ExportMenu.tsx'
@@ -109,6 +110,14 @@ export function StatsSection({ rpc, i18n: baseI18n }: StatsSectionProps): JSX.El
     return rollupByRoot(data.topSessions.map((s) => s.id), subagents.items)
   }, [data, subagents])
 
+  // Total real spend across every external executor (issue #132).
+  const subagentTotals = React.useMemo(() => {
+    if (!subagents) return undefined
+    const rows = aggregateByExecutor(subagents.items)
+    if (!rows.length) return undefined
+    return sumExecutorTotals(rows)
+  }, [subagents])
+
   const allTime = (data && data.allTime) || { totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, sessionCount: 0, byModel: [] }
   const allTimeTotal = allTime.totals.total || 0
   const recentByModel = (data && data.byModel) || []
@@ -147,7 +156,7 @@ export function StatsSection({ rpc, i18n: baseI18n }: StatsSectionProps): JSX.El
     const overview = data!
     body = (
       <>
-        <KpiCards overview={overview} i18n={i18n} />
+        <KpiCards overview={overview} i18n={i18n} subagentTotals={subagentTotals} />
         <Heatmap days={days} i18n={i18n} onTip={setHeatTip} />
         <BarChart days={days} byModel={recentByModel} i18n={i18n} onTip={setBarTip} />
         <SessionsCard sessions={overview.topSessions} i18n={i18n} rollups={rollups} />

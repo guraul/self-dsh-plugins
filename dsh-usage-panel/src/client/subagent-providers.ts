@@ -18,6 +18,22 @@ function zero(): UsageTotals {
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
 }
 
+/** Add two bucket sets (issue #132 folds external spend into the KPI). */
+export function mergeTotals(base: UsageTotals, extra: UsageTotals): UsageTotals {
+  return {
+    input: base.input + extra.input,
+    output: base.output + extra.output,
+    cacheRead: base.cacheRead + extra.cacheRead,
+    cacheWrite: base.cacheWrite + extra.cacheWrite,
+    total: base.total + extra.total,
+  }
+}
+
+/** Sum every executor row into one bucket set; empty input yields zeros. */
+export function sumExecutorTotals(rows: readonly ExecutorRollup[]): UsageTotals {
+  return rows.reduce<UsageTotals>((acc, row) => mergeTotals(acc, row.totals), zero())
+}
+
 /**
  * Group real external usage by executor, sorted by total desc.
  * `external === null` rows are skipped entirely.
