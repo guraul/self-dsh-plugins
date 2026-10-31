@@ -562,6 +562,20 @@ function time(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+function firstNumber(...values) {
+  for (const value of values) {
+    const n = toNumber(value);
+    if (n !== null) return n;
+  }
+  return null;
+}
+function objectOf(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
 async function readCodebuddySession(remoteId, cwd, options = {}) {
   const errors = [];
   if (!remoteId) return { hit: null, errors };
@@ -580,6 +594,8 @@ async function readCodebuddySession(remoteId, cwd, options = {}) {
     model: null,
     input: 0,
     output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
     calls: 0,
     credit: 0,
     hasCredit: false,
@@ -606,11 +622,18 @@ async function readCodebuddySession(remoteId, cwd, options = {}) {
       const usage = pd.usage;
       if (!usage || typeof usage !== "object" || Array.isArray(usage)) continue;
       const buckets = usage;
-      agg.input += num(buckets.inputTokens);
+      const rawUsage = objectOf(pd.rawUsage);
+      const details = Array.isArray(buckets.inputTokensDetails) ? objectOf(buckets.inputTokensDetails[0]) : null;
+      const promptTotal = num(buckets.inputTokens);
+      const cacheRead = firstNumber(rawUsage?.prompt_cache_hit_tokens, objectOf(rawUsage?.prompt_tokens_details)?.cached_tokens, details?.cached_tokens) ?? 0;
+      const cacheMiss = firstNumber(rawUsage?.prompt_cache_miss_tokens);
+      const uncachedInput = cacheMiss !== null ? cacheMiss : Math.max(0, promptTotal - cacheRead);
+      agg.input += uncachedInput;
+      agg.cacheRead += cacheRead;
+      agg.cacheWrite += firstNumber(rawUsage?.prompt_cache_write_tokens) ?? 0;
       agg.output += num(buckets.outputTokens);
       if (typeof pd.model === "string" && pd.model) agg.model = pd.model;
-      const rawUsage = pd.rawUsage;
-      if (rawUsage && typeof rawUsage === "object" && !Array.isArray(rawUsage)) {
+      if (rawUsage) {
         const credit = rawUsage.credit;
         const value = Number(credit);
         if (credit !== void 0 && credit !== null && Number.isFinite(value)) {
@@ -635,9 +658,9 @@ async function readCodebuddySession(remoteId, cwd, options = {}) {
   const totals2 = {
     input: agg.input,
     output: agg.output,
-    cacheRead: 0,
-    cacheWrite: 0,
-    total: agg.input + agg.output
+    cacheRead: agg.cacheRead,
+    cacheWrite: agg.cacheWrite,
+    total: agg.input + agg.output + agg.cacheRead + agg.cacheWrite
   };
   const hit = {
     executor: "codebuddy",
