@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # merge-pr.sh — squash 合并当前任务的 PR 并清理现场
 #
-# ⚠️ 人在环约定（见 docs/pipeline/README.md §一）：调用方必须先拿到用户对本次 review 的
-#    **明确同意**才运行本脚本。本脚本不自己询问、也不校验"是否已同意"——这是调用纪律。
+# 审核闸门（fail-closed）：合并前必须有审核记录（--review-record=<文件>），由
+#   dsh-subagents 校验判定、提交绑定、时效与高风险路径。要绕过必须**显式**声明：
+#   --no-review 或 DSH_REVIEWER=off——绕过会打印警告并写一条跳过审计（可查）。
+#   用户对本次 review 的明确同意仍是调用纪律（脚本不替用户做决定），但它不再是唯一闸门。
 #
 # 用法:
 #   cd <worktree> && scripts/pipeline/merge-pr.sh        # 在 worktree 内：自动识别当前分支的 PR
@@ -10,9 +12,12 @@
 #   scripts/pipeline/merge-pr.sh <PR号> --check-only      # 只跑到 CI 门槛为止（演练）：不合并、不清理
 #   scripts/pipeline/merge-pr.sh <PR号> --checks-file=<文件>
 #                                                        # 自测用：用文件内容替代 `gh pr checks` 原文
+#   scripts/pipeline/merge-pr.sh <PR号> --review-record=<文件>
+#                                                        # 审核记录（.dsh-web/reviews/<pr>-<sha>.json）
+#   scripts/pipeline/merge-pr.sh <PR号> --no-review        # 显式跳过审核闸门（留痕）
 #   scripts/pipeline/merge-pr.sh <PR号> --force           # CI 未过/未配置时仍合并（慎用）
 #
-# 行为: 定位 PR → CI checks 未过则拒绝 → gh pr merge --squash
+# 行为: 定位 PR → CI checks 未过则拒绝 → 审核闸门未过则拒绝 → gh pr merge --squash
 #       → 删远端分支 → 删本地分支 → 清理对应 worktree → 主工作区 fetch + merge --ff-only 快进
 # 幂等: PR 已合并（MERGED）时跳过合并步骤，仅继续清理现场并快进 main
 #
@@ -22,14 +27,17 @@
 source "$(dirname "$0")/lib.sh"
 require_gh
 
-FORCE=0; CHECK_ONLY=0; CHECKS_FILE=""; TARGET=""
+FORCE=0; CHECK_ONLY=0; CHECKS_FILE=""; TARGET=""; REVIEW_RECORD=""; NO_REVIEW=0
+if [[ -n "${DSH_REVIEWER+x}" ]] && [[ "${DSH_REVIEWER}" == "off" ]]; then NO_REVIEW=1; fi
 for a in "$@"; do
   case "${a}" in
     --force) FORCE=1 ;;
     --check-only) CHECK_ONLY=1 ;;
     --dry-run) CHECK_ONLY=1 ;;
     --checks-file=*) CHECKS_FILE="${a#--checks-file=}" ;;
-    -*) die "未知参数: ${a} （可用: --check-only / --checks-file=<文件> / --force）" ;;
+    --review-record=*) REVIEW_RECORD="${a#--review-record=}" ;;
+    --no-review) NO_REVIEW=1 ;;
+    -*) die "未知参数: ${a} （可用: --check-only / --checks-file=<文件> / --review-record=<文件> / --no-review / --force）" ;;
     *) TARGET="${a}" ;;
   esac
 done
@@ -183,8 +191,57 @@ else
   fi
 fi
 
+# —— 审核闸门 ——
+# 排在 --check-only 之前：演练模式恰恰最该验证闸门是否真的拦得住。
+# 判定、SHA 绑定、时效、高风险路径全部由 dsh-subagents 的校验器负责，本脚本只负责
+# 「拿不到记录就拒绝」和「显式跳过要留痕」两件事。
+review_skip_audit() {
+  local reason="$1"
+  DSH_ROOT="${REPO_ROOT}" SKIP_PR="${PR_NUM}" SKIP_REASON="${reason}" \
+    node --input-type=module -e '
+      const root = process.env.DSH_ROOT
+      try {
+        const { writeSkipAudit, reviewsDir } = await import(`${root}/dsh-subagents/lib/record.js`)
+        const file = writeSkipAudit(reviewsDir(root), {
+          pr: Number(process.env.SKIP_PR),
+          headSha: null,
+          reason: process.env.SKIP_REASON,
+        })
+        console.log(file)
+      } catch (error) {
+        console.error(`跳过审计写入失败: ${error.message}`)
+        process.exit(1)
+      }
+    ' 2>/dev/null
+}
+
+if [[ "${NO_REVIEW}" -eq 1 ]]; then
+  echo "⚠ 警告：审核闸门被显式跳过（--no-review 或 DSH_REVIEWER=off）" >&2
+  SKIP_FILE=$(review_skip_audit "用户显式跳过（--no-review / DSH_REVIEWER=off）") || SKIP_FILE=""
+  if [[ -n "${SKIP_FILE}" ]]; then
+    info "已写入跳过审计: ${SKIP_FILE}"
+  else
+    echo "⚠ 警告：跳过审计未能写入，本次绕过没有留痕" >&2
+  fi
+else
+  [[ -n "${REVIEW_RECORD}" ]] \
+    || die "审核闸门: 未提供 --review-record（确需跳过请显式加 --no-review）"
+  REVIEW_CLI="${REPO_ROOT}/dsh-subagents/lib/cli.js"
+  [[ -f "${REVIEW_CLI}" ]] || die "审核闸门: 找不到校验器 ${REVIEW_CLI}"
+  set +e
+  REVIEW_OUT=$(node "${REVIEW_CLI}" check --pr "${PR_NUM}" --record "${REVIEW_RECORD}" --root "${REPO_ROOT}" 2>&1)
+  REVIEW_RC=$?
+  set -e
+  printf '%s\n' "${REVIEW_OUT}" | sed 's/^/    │ /'
+  if [[ "${REVIEW_RC}" -ne 0 ]]; then
+    # 校验器的首行已经是 `审核闸门: …`，原样透出，不再套一层文案
+    die "$(printf '%s' "${REVIEW_OUT}" | head -1)"
+  fi
+  ok "审核闸门通过"
+fi
+
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
-  ok "演练模式（--check-only）：CI 门槛已通过，跳过合并与清理现场"
+  ok "演练模式（--check-only）：CI 门槛与审核闸门已通过，跳过合并与清理现场"
   exit 0
 fi
 
