@@ -54,6 +54,7 @@ window.__ModuleLoader__.load({
       "nav.subtitle": "\u53EA\u8BFB\u91CD\u7B97\u4F1A\u8BDD\u65E5\u5FD7 \xB7 \u6C38\u4E0D\u5199\u56DE",
       "kpi.total": "Token \u603B\u7528\u91CF",
       "kpi.total.detail": "\u8F93\u5165 {input} \xB7 \u8F93\u51FA {output}",
+      "kpi.total.subagent": "\u542B\u5B50\u4EE3\u7406\u5916\u90E8 {x}",
       "kpi.sessions": "\u603B\u4F1A\u8BDD\u6570\u91CF",
       "kpi.sessions.detail": "\u603B\u4F1A\u8BDD {total} \xB7 \u6709\u7528\u91CF\u4F1A\u8BDD\uFF1A\u4E3B {main} \xB7 \u5B50\u4EE3\u7406 {subagent}",
       "kpi.topModel": "\u6700\u5E38\u7528\u6A21\u578B",
@@ -137,6 +138,7 @@ window.__ModuleLoader__.load({
       "nav.subtitle": "Read-only session log stats \xB7 never writes back",
       "kpi.total": "Total tokens",
       "kpi.total.detail": "In {input} \xB7 Out {output}",
+      "kpi.total.subagent": "incl. {x} external subagents",
       "kpi.sessions": "Sessions",
       "kpi.sessions.detail": "Total {total} \xB7 with usage: main {main} \xB7 subagent {subagent}",
       "kpi.topModel": "Top model",
@@ -726,13 +728,53 @@ window.__ModuleLoader__.load({
       return /* @__PURE__ */ React.createElement("div", { className: "dsw-ust-tooltip show", style: { left: tip.left, top: tip.top } }, /* @__PURE__ */ React.createElement("div", { className: "dsw-ust-tooltip-title" }, tip.title), tip.lines.map((l, idx) => /* @__PURE__ */ React.createElement("div", { key: idx, className: "dsw-ust-tooltip-row" }, /* @__PURE__ */ React.createElement("i", { style: { background: l.color || "var(--dsw-alias-label-secondary)" } }), /* @__PURE__ */ React.createElement("span", { className: "dsw-ust-tooltip-label" }, l.label), /* @__PURE__ */ React.createElement("span", { className: "dsw-ust-tooltip-value" }, l.value))));
     }
 
+    // src/client/subagent-providers.ts
+    function zero() {
+      return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+    }
+    function mergeTotals(base, extra) {
+      return {
+        input: base.input + extra.input,
+        output: base.output + extra.output,
+        cacheRead: base.cacheRead + extra.cacheRead,
+        cacheWrite: base.cacheWrite + extra.cacheWrite,
+        total: base.total + extra.total
+      };
+    }
+    function sumExecutorTotals(rows) {
+      return rows.reduce((acc, row) => mergeTotals(acc, row.totals), zero());
+    }
+    function aggregateByExecutor(items) {
+      const map = /* @__PURE__ */ new Map();
+      for (const item of items) {
+        const ext = item.external;
+        if (!ext) continue;
+        let row = map.get(ext.executor);
+        if (!row) {
+          row = { executor: ext.executor, totals: zero(), sessions: 0, calls: 0 };
+          map.set(ext.executor, row);
+        }
+        row.totals.input += ext.totals.input;
+        row.totals.output += ext.totals.output;
+        row.totals.cacheRead += ext.totals.cacheRead;
+        row.totals.cacheWrite += ext.totals.cacheWrite;
+        row.totals.total += ext.totals.total;
+        row.sessions += 1;
+        row.calls += ext.calls;
+      }
+      return [...map.values()].sort((a, b) => b.totals.total - a.totals.total);
+    }
+
     // src/client/components/KpiCards.tsx
     var React2 = __toESM(require("react"), 1);
-    function KpiCards({ overview, i18n }) {
+    var EMPTY = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+    function KpiCards({ overview, i18n, subagentTotals }) {
       const t = i18n.t;
       const locale = i18n.locale;
-      const allTime = overview.allTime || { totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, sessionCount: 0, byModel: [] };
-      const totals = allTime.totals || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+      const allTime = overview.allTime || { totals: EMPTY, sessionCount: 0, byModel: [] };
+      const base = allTime.totals || EMPTY;
+      const extra = subagentTotals || EMPTY;
+      const totals = mergeTotals(base, extra);
       const total = totals.total || 0;
       const inputTotal = totals.input + totals.cacheRead + totals.cacheWrite;
       const top = allTime.byModel[0] || null;
@@ -743,7 +785,7 @@ window.__ModuleLoader__.load({
       const animatedOutput = useCountUp(totals.output, 900);
       const animatedSessions = useCountUp(allTime.sessionCount, 900);
       const animatedRate = useCountUp(rate === null ? 0 : rate * 100, 900);
-      return /* @__PURE__ */ React2.createElement("div", { className: "dsw-ust-kpis" }, /* @__PURE__ */ React2.createElement("div", { className: "dsw-ust-kpi" }, /* @__PURE__ */ React2.createElement("div", { className: "l" }, t("kpi.total")), /* @__PURE__ */ React2.createElement("div", { className: "v" }, fmtTokens(animatedTotal, locale)), /* @__PURE__ */ React2.createElement("div", { className: "d" }, t("kpi.total.detail", { input: fmtTokens(animatedInput, locale), output: fmtTokens(animatedOutput, locale) }))), /* @__PURE__ */ React2.createElement("div", { className: "dsw-ust-kpi" }, /* @__PURE__ */ React2.createElement("div", { className: "l" }, t("kpi.sessions")), /* @__PURE__ */ React2.createElement("div", { className: "v" }, String(Math.round(animatedSessions))), /* @__PURE__ */ React2.createElement("div", { className: "d" }, t("kpi.sessions.detail", {
+      return /* @__PURE__ */ React2.createElement("div", { className: "dsw-ust-kpis" }, /* @__PURE__ */ React2.createElement("div", { className: "dsw-ust-kpi" }, /* @__PURE__ */ React2.createElement("div", { className: "l" }, t("kpi.total")), /* @__PURE__ */ React2.createElement("div", { className: "v" }, fmtTokens(animatedTotal, locale)), /* @__PURE__ */ React2.createElement("div", { className: "d" }, t("kpi.total.detail", { input: fmtTokens(animatedInput, locale), output: fmtTokens(animatedOutput, locale) }), extra.total > 0 ? " \xB7 " + t("kpi.total.subagent", { x: fmtTokens(extra.total, locale) }) : null)), /* @__PURE__ */ React2.createElement("div", { className: "dsw-ust-kpi" }, /* @__PURE__ */ React2.createElement("div", { className: "l" }, t("kpi.sessions")), /* @__PURE__ */ React2.createElement("div", { className: "v" }, String(Math.round(animatedSessions))), /* @__PURE__ */ React2.createElement("div", { className: "d" }, t("kpi.sessions.detail", {
         total: coverage.sessionsTotal,
         main: coverage.usageSessionsMain,
         subagent: coverage.usageSessionsSubagent
@@ -985,31 +1027,6 @@ window.__ModuleLoader__.load({
         matched: coverage.matched,
         noExternal: coverage.noExternal
       })) : null, coverage && coverage.errors.length ? /* @__PURE__ */ React6.createElement("ul", { className: "dsw-ust-sub-errors" }, coverage.errors.slice(0, MAX_ERRORS).map((msg, i) => /* @__PURE__ */ React6.createElement("li", { key: i, title: msg }, msg))) : null, error && payload ? /* @__PURE__ */ React6.createElement("div", { className: "dsw-ust-sub-warn" }, t("subagents.error", { msg: error })) : null, body);
-    }
-
-    // src/client/subagent-providers.ts
-    function zero() {
-      return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
-    }
-    function aggregateByExecutor(items) {
-      const map = /* @__PURE__ */ new Map();
-      for (const item of items) {
-        const ext = item.external;
-        if (!ext) continue;
-        let row = map.get(ext.executor);
-        if (!row) {
-          row = { executor: ext.executor, totals: zero(), sessions: 0, calls: 0 };
-          map.set(ext.executor, row);
-        }
-        row.totals.input += ext.totals.input;
-        row.totals.output += ext.totals.output;
-        row.totals.cacheRead += ext.totals.cacheRead;
-        row.totals.cacheWrite += ext.totals.cacheWrite;
-        row.totals.total += ext.totals.total;
-        row.sessions += 1;
-        row.calls += ext.calls;
-      }
-      return [...map.values()].sort((a, b) => b.totals.total - a.totals.total);
     }
 
     // src/client/components/SubagentProvidersCard.tsx
@@ -1269,6 +1286,12 @@ window.__ModuleLoader__.load({
         if (!data || !subagents) return void 0;
         return rollupByRoot(data.topSessions.map((s) => s.id), subagents.items);
       }, [data, subagents]);
+      const subagentTotals = React11.useMemo(() => {
+        if (!subagents) return void 0;
+        const rows = aggregateByExecutor(subagents.items);
+        if (!rows.length) return void 0;
+        return sumExecutorTotals(rows);
+      }, [subagents]);
       const allTime = data && data.allTime || { totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, sessionCount: 0, byModel: [] };
       const allTimeTotal = allTime.totals.total || 0;
       const recentByModel = data && data.byModel || [];
@@ -1292,7 +1315,7 @@ window.__ModuleLoader__.load({
         body = /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-empty" }, /* @__PURE__ */ React11.createElement("div", { className: "dsw-ust-empty-title" }, t("empty.title")), /* @__PURE__ */ React11.createElement("div", null, t("empty.hint")));
       } else {
         const overview = data;
-        body = /* @__PURE__ */ React11.createElement(React11.Fragment, null, /* @__PURE__ */ React11.createElement(KpiCards, { overview, i18n }), /* @__PURE__ */ React11.createElement(Heatmap, { days, i18n, onTip: setHeatTip }), /* @__PURE__ */ React11.createElement(BarChart, { days, byModel: recentByModel, i18n, onTip: setBarTip }), /* @__PURE__ */ React11.createElement(SessionsCard, { sessions: overview.topSessions, i18n, rollups }), /* @__PURE__ */ React11.createElement(
+        body = /* @__PURE__ */ React11.createElement(React11.Fragment, null, /* @__PURE__ */ React11.createElement(KpiCards, { overview, i18n, subagentTotals }), /* @__PURE__ */ React11.createElement(Heatmap, { days, i18n, onTip: setHeatTip }), /* @__PURE__ */ React11.createElement(BarChart, { days, byModel: recentByModel, i18n, onTip: setBarTip }), /* @__PURE__ */ React11.createElement(SessionsCard, { sessions: overview.topSessions, i18n, rollups }), /* @__PURE__ */ React11.createElement(
           SubagentsCard,
           {
             payload: subagents,

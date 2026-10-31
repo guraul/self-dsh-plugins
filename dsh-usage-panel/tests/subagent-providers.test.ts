@@ -1,7 +1,7 @@
 // issue #129: per-executor rollup of subagent spend.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { aggregateByExecutor } from '../src/client/subagent-providers.ts'
+import { aggregateByExecutor, mergeTotals, sumExecutorTotals } from '../src/client/subagent-providers.ts'
 import type { ExecutorId, SubagentItem } from '../src/shared/contract.ts'
 
 function item(id: string, executor: ExecutorId | null, total: number, calls = 1): SubagentItem {
@@ -52,4 +52,19 @@ test('aggregateByExecutor: rows without an external record are excluded, never z
 
 test('aggregateByExecutor: empty input yields no rows', () => {
   assert.deepEqual(aggregateByExecutor([]), [])
+})
+
+// issue #132: the KPI folds external subagent spend into its all-time totals.
+test('mergeTotals: adds every bucket and recomputes the total', () => {
+  const merged = mergeTotals(
+    { input: 100, output: 10, cacheRead: 900, cacheWrite: 0, total: 1010 },
+    { input: 5, output: 2, cacheRead: 300, cacheWrite: 1, total: 308 },
+  )
+  assert.deepEqual(merged, { input: 105, output: 12, cacheRead: 1200, cacheWrite: 1, total: 1318 })
+})
+
+test('sumExecutorTotals: sums rows, empty input yields zeros', () => {
+  const rows = aggregateByExecutor([item('a', 'opencode', 100), item('b', 'codebuddy', 20)])
+  assert.equal(sumExecutorTotals(rows).total, 120)
+  assert.deepEqual(sumExecutorTotals([]), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 })
 })
