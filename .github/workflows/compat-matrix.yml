@@ -1,0 +1,165 @@
+# 兼容矩阵定期验证（issue #114）
+#
+# 让「未验证」不再靠人记得：每周对最新的 dsh 版本跑一遍 L1 装配验收（scripts/pipeline/compat-matrix.sh），
+# 把结果写进**一条滚动 issue**（固定标题，每次覆盖正文，不会越刷越多）。
+#
+# 明确不做（这是本 workflow 的边界）：
+#   * 不改任何插件的 dshReleases / dshDepth —— 写回矩阵必须人 review，见 docs/COMPATIBILITY.md
+#   * 不开 PR、不合并、不部署
+#   * 不碰真实 ~/.dsh（compat-matrix.sh 只用临时 DSH_HOME）
+#
+# 手动触发：Actions → compat-matrix → Run workflow（可指定版本；留空自动取 next 标签）
+name: compat-matrix
+
+on:
+  schedule:
+    # 每周一 03:00 UTC（= 北京 11:00）
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要验证的 dsh 版本（留空 = 自动取 next 标签）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: compat-matrix
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TITLE: '兼容矩阵定期验证（自动）'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: 决定要验证的版本
+        id: target
+        run: |
+          set -euo pipefail
+          v='${{ inputs.version }}'
+          if [ -z "${v}" ]; then
+            v="$(pnpm view @deepseek-ai/dsh dist-tags --json | node -e 'let s="";process.stdin.on("data",(d)=>s+=d).on("end",()=>{const t=JSON.parse(s);process.stdout.write(t.next||t.latest||"")})')"
+          fi
+          if [ -z "${v}" ]; then echo "::error::取不到 dsh 版本（dist-tags 里没有 next/latest）"; exit 1; fi
+          echo "version=${v}" >> "${GITHUB_OUTPUT}"
+          echo "验证目标：${v}"
+
+      - name: L1 装配验收（全插件，只读）
+        id: matrix
+        run: |
+          set +e
+          scripts/pipeline/compat-matrix.sh '${{ steps.target.outputs.version }}' --json \
+            > /tmp/matrix.json 2> /tmp/matrix.err
+          rc=$?
+          set -e
+          echo "rc=${rc}" >> "${GITHUB_OUTPUT}"
+          echo "---- stdout ----"; cat /tmp/matrix.json || true
+          echo "---- stderr ----"; cat /tmp/matrix.err || true
+          # 失败与否交给最后一步判定，这里永远退出 0，保证 issue 一定被更新
+          exit 0
+
+      - name: 渲染并更新滚动 issue
+        env:
+          TARGET: ${{ steps.target.outputs.version }}
+          RC: ${{ steps.matrix.outputs.rc }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          node - <<'JS' > /tmp/issue.md
+          const fs = require('fs')
+          const target = process.env.TARGET
+          const rc = process.env.RC
+          const runUrl = process.env.RUN_URL
+          const trigger = process.env.TRIGGER === 'schedule' ? '定时（每周一）' : '手动触发'
+
+          let rows = null
+          let error = ''
+          try {
+            rows = JSON.parse(fs.readFileSync('/tmp/matrix.json', 'utf8')).rows
+          } catch (e) {
+            error = fs.existsSync('/tmp/matrix.err') ? fs.readFileSync('/tmp/matrix.err', 'utf8').trim() : String(e)
+          }
+
+          const out = []
+          out.push('## 兼容矩阵定期验证（自动）')
+          out.push('')
+          out.push(`- 目标版本：\`${target}\``)
+          out.push(`- 触发方式：${trigger}`)
+          out.push(`- 运行记录：[${process.env.GITHUB_RUN_ID ?? ''}](${runUrl})`.replace('[', '[run '))
+          out.push('')
+
+          if (rows === null) {
+            out.push('### ❌ 验证没跑起来')
+            out.push('')
+            out.push('```text')
+            out.push((error || '（没有输出）').slice(0, 4000))
+            out.push('```')
+            out.push('')
+            out.push('> 常见原因：目标版本在 npm 上不存在；或 `compat-matrix.sh` 参数不合法。')
+            out.push('')
+          } else {
+            const failed = rows.filter((r) => r.assembly !== 'pass')
+            const unverified = rows.filter((r) => r.declared === null)
+            out.push(`### 结果：${rows.length - failed.length}/${rows.length} 装配成功${failed.length === 0 ? ' ✅' : ` ❌（${failed.length} 个失败）`}`)
+            out.push('')
+            out.push('| 插件目录 | 包名@版本 | 矩阵记录 | 记录深度 | 实测装配 | 建议 verdict | 漂移 |')
+            out.push('|---|---|---|---|---|---|---|')
+            for (const r of rows) {
+              out.push(`| ${r.dir} | ${r.name || '?'}@${r.version || '?'} | ${r.declared ?? '（无）'} | ${r.depth ?? '未记录'} | ${r.assembly} | ${r.suggest} | ${r.drift ?? '—'} |`)
+            }
+            out.push('')
+            if (unverified.length > 0) {
+              out.push('### 需要人回填的（矩阵里没有这个版本）')
+              out.push('')
+              for (const r of unverified) {
+                out.push(`- \`${r.dir}\`（\`${r.name}\`）：L1 实测 \`${r.suggest}\` → 建议在 \`dsh.compatibility.dshReleases\` 加 \`"${target}": "${r.suggest}"\`、\`dshDepth\` 加 \`"${target}": "L1"\``)
+              }
+              out.push('')
+            }
+            const stricter = rows.filter((r) => (r.drift ?? '').startsWith('记录更严'))
+            if (stricter.length > 0) {
+              out.push('### 记录比 L1 更严（不是错误）')
+              out.push('')
+              for (const r of stricter) out.push(`- \`${r.dir}\`：${r.drift}`)
+              out.push('')
+            }
+          }
+
+          out.push('---')
+          out.push('')
+          out.push('> 本 workflow **只读**：只跑装配验收，**不改任何插件的 `dshReleases` / `dshDepth`**。')
+          out.push('> 写回矩阵要人 review（见 [docs/COMPATIBILITY.md](../blob/main/docs/COMPATIBILITY.md)）。')
+          out.push(`> 由 \`.github/workflows/compat-matrix.yml\` 生成；每次运行覆盖本 issue 正文。`)
+          process.stdout.write(out.join('\n') + '\n')
+          JS
+
+          num="$(gh issue list --state open --limit 100 --json number,title \
+            --jq ".[] | select(.title == \"${TITLE}\") | .number" | head -1)"
+          if [ -n "${num}" ]; then
+            gh issue edit "${num}" --body-file /tmp/issue.md
+            echo "已更新 issue #${num}"
+          else
+            gh issue create --title "${TITLE}" --body-file /tmp/issue.md
+          fi
+
+      - name: 有插件装配失败则标红
+        if: steps.matrix.outputs.rc != '0'
+        run: |
+          echo "::error::有插件在 ${{ steps.target.outputs.version }} 上装配失败（详见滚动 issue）"
+          exit 1

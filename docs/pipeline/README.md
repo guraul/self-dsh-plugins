@@ -151,6 +151,21 @@ scripts/pipeline/compat-matrix.sh 0.2.2-alpha.2 --json                      # �
 | 版本预检 | 目标版本在 npm 上不存在 → 直接明确失败，不产生误导性表格 |
 | 退出码 | 0 = 全部装配成功（含「记录更严」）；1 = 有插件装配失败，或矩阵与实测真冲突 |
 
+### 定期验证（`.github/workflows/compat-matrix.yml`）
+
+「没人记得去跑 `compat-matrix.sh`」这件事由 CI 兜底（issue #114）：
+
+| 项 | 说明 |
+|---|---|
+| 触发 | 每周一 03:00 UTC（北京 11:00）；也可在 Actions 里 `Run workflow` 手动指定版本 |
+| 动作 | 对最新 `next` 版本跑一遍 `compat-matrix.sh --json`（L1 装配验收，全插件） |
+| 落点 | **一条滚动 issue**「兼容矩阵定期验证（自动）」——存在就覆盖正文，不会越刷越多 |
+| 边界 | **只读**：不改任何插件的 `dshReleases` / `dshDepth`，不开 PR、不部署 |
+| 红不红 | 有插件装配失败 → job 失败，但 issue 照常更新（先让人看到表） |
+
+issue 里会单列「需要人回填的」（`未验证→compatible` 的那批）与「记录比 L1 更严」的两类，
+按需回填矩阵后再把结论写进 [`COMPATIBILITY.md`](../COMPATIBILITY.md)。
+
 ### audit-subagents.mjs
 
 定时审计 product 子代理会话（issue #10）：**只读、确定性、不调模型**。用 launchd / cron 直接跑，不要挂到 DSH 的 schedule 提醒上（那会唤醒会话、花模型调用）。
