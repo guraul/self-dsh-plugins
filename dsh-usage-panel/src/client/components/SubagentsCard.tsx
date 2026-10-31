@@ -2,13 +2,12 @@
 // One row per delegated DSH subagent session, joined by the host with the
 // external executor's real usage. Cells stay "—" whenever no external record
 // was matched: a fabricated 0 would read as "ran and used nothing".
-import type { SubagentItem, SubagentsPayload } from '../../shared/contract.ts'
+import type { SubagentsPayload } from '../../shared/contract.ts'
 import { fmtTokens, formatDuration, formatLocalDateTime } from '../../shared/format.ts'
 import type { I18n } from '../locales.ts'
+import { selectRecentTop } from '../subagents-select.ts'
 import * as React from 'react'
 
-/** Rows rendered before the "expand" toggle (host already sorts desc). */
-const PAGE_SIZE = 20
 const MAX_ERRORS = 2
 
 interface SubagentsCardProps {
@@ -19,18 +18,10 @@ interface SubagentsCardProps {
   onRetry: () => void
 }
 
-function byRecent(a: SubagentItem, b: SubagentItem): number {
-  const left = a.startedAt ?? a.lastActive ?? Number.NEGATIVE_INFINITY
-  const right = b.startedAt ?? b.lastActive ?? Number.NEGATIVE_INFINITY
-  return right - left
-}
-
 export function SubagentsCard({ payload, error, loading, i18n, onRetry }: SubagentsCardProps): JSX.Element {
   const t = i18n.t
   const locale = i18n.locale
-  const [expanded, setExpanded] = React.useState(false)
-  const items = payload ? payload.items.slice().sort(byRecent) : []
-  const shown = expanded ? items : items.slice(0, PAGE_SIZE)
+  const shown = payload ? selectRecentTop(payload.items, payload.updatedAt) : []
   const coverage = payload ? payload.coverage : null
 
   let body: JSX.Element
@@ -45,7 +36,7 @@ export function SubagentsCard({ payload, error, loading, i18n, onRetry }: Subage
     ) : (
       <div className="dsw-ust-sub-state">{t('subagents.loading')}</div>
     )
-  } else if (!items.length) {
+  } else if (!shown.length) {
     body = <div className="dsw-ust-sub-state">{t('subagents.empty')}</div>
   } else {
     body = (
@@ -102,13 +93,6 @@ export function SubagentsCard({ payload, error, loading, i18n, onRetry }: Subage
             </tbody>
           </table>
         </div>
-        {items.length > PAGE_SIZE ? (
-          <div className="dsw-ust-sub-more">
-            <button className="dsw-ust-sub-morebtn" onClick={() => setExpanded(!expanded)}>
-              {expanded ? t('subagents.collapse') : t('subagents.expand')}
-            </button>
-          </div>
-        ) : null}
       </>
     )
   }
@@ -124,7 +108,7 @@ export function SubagentsCard({ payload, error, loading, i18n, onRetry }: Subage
       </div>
       {coverage ? (
         <div className="dsw-ust-sub-coverage">
-          {t('subagents.coverage', {
+          {t('subagents.window')} · {t('subagents.coverage', {
             total: coverage.total,
             matched: coverage.matched,
             noExternal: coverage.noExternal,
