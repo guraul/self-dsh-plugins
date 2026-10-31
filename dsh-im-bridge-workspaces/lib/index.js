@@ -10247,22 +10247,32 @@ function apply(ctx, config) {
 		}
 		/** 发一张审批卡片；卡片失败重试一次，再降级纯文本。 */
 		async function sendApprovalPrompt(entry, position) {
-			if (!await waitForReady(3e4)) throw new Error("企微连接未就绪");
+			if (!await waitForReady(3e4)) {
+				console.warn("[im-bridge] 审批卡片未发送：企微连接 30 秒内未就绪");
+				throw new Error("企微连接未就绪");
+			}
 			const minutes = approvalTimeoutMinutes();
 			const payload = {
 				msgtype: "template_card",
 				template_card: buildApprovalCard(entry, minutes)
 			};
+			/** 把异常压成一行，避免日志里出现整段堆栈。 */
+			const reason = (error) => error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 			try {
 				await ws.sendMessage(entry.chatTarget, payload);
-			} catch {
+				console.log(`[im-bridge] 审批卡片已发送 id=${entry.id} 目标=${entry.chatTarget}`);
+			} catch (first) {
+				console.warn(`[im-bridge] 审批卡片发送失败（将重试一次）: ${reason(first)}`);
 				try {
 					await ws.sendMessage(entry.chatTarget, payload);
-				} catch {
+					console.log(`[im-bridge] 审批卡片重试成功 id=${entry.id} 目标=${entry.chatTarget}`);
+				} catch (second) {
+					console.warn(`[im-bridge] 审批卡片重试失败（降级文本）: ${reason(second)}`);
 					await ws.sendMessage(entry.chatTarget, {
 						msgtype: "text",
 						text: { content: formatApprovalText(entry, position, minutes) }
 					});
+					console.log(`[im-bridge] 审批已降级为文本 id=${entry.id} 目标=${entry.chatTarget}`);
 				}
 			}
 			const timer = setTimeout(() => {
@@ -10331,6 +10341,7 @@ function apply(ctx, config) {
 				}
 			});
 			const onAbort = () => {
+				console.warn(`[im-bridge] 审批被中止（工具调用取消）id=${draft.id} tool=${request.toolName}`);
 				approvals.settle(draft.id, "rejected", "unavailable");
 				resolveRelay("rejected");
 			};
@@ -10446,6 +10457,7 @@ function apply(ctx, config) {
 				notifyChat(entry.chatTarget, approved ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`);
 			});
 		}));
+		installRootApprovalRelay();
 		ws.connect();
 		ctx.effect(() => () => {
 			try {
