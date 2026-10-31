@@ -31,4 +31,8 @@ export declare function weekdayIndexUTC(key: string): number;
 export declare function formatClock(ts: number, locale: Locale): string;
 /** Fraction 0..1 → percent string for the hit-rate card. */
 export declare function pctFull(v: number): string;
+/** Local-time "YYYY-MM-DD HH:mm" for the subagent table; "—" when unknown. */
+export declare function formatLocalDateTime(ts: number | null): string;
+/** Elapsed time between two epochs; "—" while the external run is open-ended. */
+export declare function formatDuration(startedAt: number | null, endedAt: number | null): string;
 export declare function isNonEmpty(b: Buckets | undefined | null): boolean;

@@ -98,6 +98,26 @@ export function pctFull(v: number): string {
   return ((v || 0) * 100).toFixed(1)
 }
 
+/** Local-time "YYYY-MM-DD HH:mm" for the subagent table; "—" when unknown. */
+export function formatLocalDateTime(ts: number | null): string {
+  if (ts === null || !Number.isFinite(ts)) return '—'
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return '—'
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes())
+}
+
+/** Elapsed time between two epochs; "—" while the external run is open-ended. */
+export function formatDuration(startedAt: number | null, endedAt: number | null): string {
+  if (startedAt === null || endedAt === null) return '—'
+  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return '—'
+  const ms = Math.max(0, endedAt - startedAt)
+  if (ms < 1000) return Math.round(ms) + 'ms'
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's'
+  if (ms < 3600000) return Math.floor(ms / 60000) + 'm' + String(Math.floor((ms % 60000) / 1000)).padStart(2, '0') + 's'
+  return Math.floor(ms / 3600000) + 'h' + String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0') + 'm'
+}
+
 export function isNonEmpty(b: Buckets | undefined | null): boolean {
   return !!b && (b.input > 0 || b.output > 0 || b.cacheRead > 0 || b.cacheWrite > 0)
 }

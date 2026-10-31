@@ -6,6 +6,8 @@ import {
   dateLabel,
   fmtCompact,
   fmtTokens,
+  formatDuration,
+  formatLocalDateTime,
   heatLevel,
   niceCeil,
   pctOf,
@@ -85,4 +87,24 @@ test('weekdayIndexUTC is Monday-first', () => {
   assert.equal(weekdayIndexUTC('2026-08-15'), 5)
   // 2026-08-17 is a Monday.
   assert.equal(weekdayIndexUTC('2026-08-17'), 0)
+})
+
+test('formatLocalDateTime renders local YYYY-MM-DD HH:mm, unknown as dash', () => {
+  // Built from local components so the assertion holds in any timezone.
+  const ts = new Date(2026, 7, 15, 9, 5, 0, 0).getTime()
+  assert.equal(formatLocalDateTime(ts), '2026-08-15 09:05')
+  assert.equal(formatLocalDateTime(null), '—')
+  assert.equal(formatLocalDateTime(Number.NaN), '—')
+})
+
+test('formatDuration covers ms/s/m/h and the open-ended case', () => {
+  assert.equal(formatDuration(1000, 1999), '999ms')
+  assert.equal(formatDuration(1000, 4500), '3.5s')
+  assert.equal(formatDuration(0, 65_000), '1m05s')
+  assert.equal(formatDuration(0, 3_725_000), '1h02m')
+  // No external end → never invent a duration.
+  assert.equal(formatDuration(1000, null), '—')
+  assert.equal(formatDuration(null, 2000), '—')
+  // Clock skew must not produce a negative label.
+  assert.equal(formatDuration(5000, 1000), '0ms')
 })

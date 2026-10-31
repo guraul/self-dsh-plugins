@@ -115,3 +115,19 @@ test('missing params leave placeholders intact (both paths)', () => {
   const i18n = createI18n(new FakeLocaleRuntime('en'))
   assert.equal(i18n.t('status.fresh'), 'Updated at {time} · UTC')
 })
+
+test('subagent keys exist in both dictionaries and interpolate', () => {
+  const zh = createI18n(new FakeLocaleRuntime('zh'))
+  assert.equal(zh.t('subagents.coverage', { total: 5, matched: 3, noExternal: 2 }), '共 5 个子代理 · 匹配 3 · 无外部记录 2')
+  assert.equal(zh.t('subagents.calls', { n: 4 }), '4 次调用')
+  assert.equal(zh.t('subagents.noExternal'), '无外部记录')
+  assert.equal(zh.t('subagents.expand'), '展开全部')
+  assert.equal(zh.t('subagents.collapse'), '显示更少')
+
+  const en = createI18n(new FakeLocaleRuntime('en'))
+  assert.equal(en.t('subagents.coverage', { total: 5, matched: 3, noExternal: 2 }), 'Total 5 subagents · matched 3 · no external record 2')
+  assert.equal(en.t('subagents.calls', { n: 1 }), '1 calls')
+  assert.equal(en.t('subagents.noExternal'), 'No external record')
+  assert.equal(en.t('subagents.expand'), 'Show all')
+  assert.equal(en.t('subagents.collapse'), 'Show less')
+})

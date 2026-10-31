@@ -7,10 +7,15 @@
 // freshness). Version bumps invalidate old caches instead of a hand-maintained
 // field whitelist.
 import type { RpcResultLike } from './ctx.ts'
-import type { Overview } from '../shared/contract.ts'
-import { OVERVIEW_VERSION, RPC_CHANNEL, RPC_OVERVIEW, type RpcResult } from '../shared/contract.ts'
+import type { Overview, SubagentsPayload } from '../shared/contract.ts'
+import { OVERVIEW_VERSION, RPC_CHANNEL, RPC_OVERVIEW, RPC_SUBAGENTS, type RpcResult } from '../shared/contract.ts'
 
 const CACHE_KEY = 'dsh-usage-panel:overview:v' + OVERVIEW_VERSION
+// Subagent payloads have their own lifecycle (slower external scans, separate
+// endpoint) and therefore their own versioned cache slot. OVERVIEW_VERSION is
+// deliberately untouched: the two payloads never invalidate each other.
+const SUBAGENTS_CACHE_KEY = 'dsh-usage-panel:subagents:v1'
+const SUBAGENTS_CACHE_VERSION = 1
 
 export interface CachedOverview {
   version: number
@@ -73,6 +78,64 @@ export async function callOverview(
   force: boolean,
 ): Promise<Overview> {
   const res = (await rpc.call(RPC_CHANNEL, RPC_OVERVIEW, { force: !!force })) as RpcResult<Overview>
+  if (res && res.ok) return res.value
+  const code = res && res.error ? res.error.code : 'internal'
+  const message = res && res.error ? res.error.message : 'unknown error'
+  const err = new Error(message) as Error & { code?: string }
+  err.code = code
+  throw err
+}
+
+// ── Subagent drill-down (independent cache + endpoint) ──────────────────────
+
+export interface CachedSubagents {
+  version: number
+  savedAt: number
+  payload: SubagentsPayload
+}
+
+export function loadCachedSubagents(): CachedSubagents | null {
+  try {
+    const raw = localStorage.getItem(SUBAGENTS_CACHE_KEY)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!isSubagentsUsable(parsed)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export function saveCachedSubagents(payload: SubagentsPayload): void {
+  try {
+    const record: CachedSubagents = { version: SUBAGENTS_CACHE_VERSION, savedAt: Date.now(), payload }
+    localStorage.setItem(SUBAGENTS_CACHE_KEY, JSON.stringify(record))
+  } catch {
+    // Storage full/blocked: the section still works, just without persistence.
+  }
+}
+
+/** Structural validation for the subagent cache slot (own version). */
+export function isSubagentsUsable(value: unknown): value is CachedSubagents {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  if (v.version !== SUBAGENTS_CACHE_VERSION) return false
+  const payload = v.payload as Record<string, unknown> | undefined
+  if (!payload || typeof payload !== 'object') return false
+  if (typeof payload.updatedAt !== 'number' || !Array.isArray(payload.items)) return false
+  const coverage = payload.coverage as Record<string, unknown> | undefined
+  if (!coverage || typeof coverage !== 'object') return false
+  if (typeof coverage.total !== 'number' || typeof coverage.matched !== 'number') return false
+  if (typeof coverage.noExternal !== 'number' || !Array.isArray(coverage.errors)) return false
+  return true
+}
+
+/** Call the subagents endpoint; rejects with the machine-readable code. */
+export async function callSubagents(
+  rpc: { call(channel: string, endpoint: string, payload?: unknown): Promise<RpcResultLike<unknown>> },
+  force: boolean,
+): Promise<SubagentsPayload> {
+  const res = (await rpc.call(RPC_CHANNEL, RPC_SUBAGENTS, { force: !!force })) as RpcResult<SubagentsPayload>
   if (res && res.ok) return res.value
   const code = res && res.error ? res.error.code : 'internal'
   const message = res && res.error ? res.error.message : 'unknown error'

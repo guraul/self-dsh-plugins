@@ -4,9 +4,9 @@
 // localStorage SWR cache makes a refresh render instantly (P1-⑨); the header
 // keeps the v0.1.0 refresh button and gains the export menu (P1-⑧).
 import { useCallback, useEffect, useState } from 'react'
-import type { Overview } from '../shared/contract.ts'
+import type { Overview, SubagentsPayload } from '../shared/contract.ts'
 import { formatClock } from '../shared/format.ts'
-import { callOverview, loadCached, saveCached } from './api.ts'
+import { callOverview, callSubagents, loadCached, loadCachedSubagents, saveCached, saveCachedSubagents } from './api.ts'
 import type { RpcLike } from './ctx.ts'
 import type { I18n } from './locales.ts'
 import { useI18n, useLatest, type Tip } from './hooks.ts'
@@ -15,6 +15,7 @@ import { KpiCards } from './components/KpiCards.tsx'
 import { Heatmap } from './components/Heatmap.tsx'
 import { BarChart } from './components/BarChart.tsx'
 import { SessionsCard } from './components/SessionsCard.tsx'
+import { SubagentsCard } from './components/SubagentsCard.tsx'
 import { ProvidersCard } from './components/ProvidersCard.tsx'
 import { ModelDonut } from './components/ModelDonut.tsx'
 import { ExportMenu } from './components/ExportMenu.tsx'
@@ -36,6 +37,9 @@ export function StatsSection({ rpc, i18n: baseI18n }: StatsSectionProps): JSX.El
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [freshness, setFreshness] = useState<Freshness>('loading')
+  const [subagents, setSubagents] = useState<SubagentsPayload | null>(null)
+  const [subagentsError, setSubagentsError] = useState<string | null>(null)
+  const [subagentsLoading, setSubagentsLoading] = useState(false)
   const [barTip, setBarTip] = useState<Tip | null>(null)
   const [donutTip, setDonutTip] = useState<Tip | null>(null)
   const [heatTip, setHeatTip] = useState<Tip | null>(null)
@@ -71,6 +75,30 @@ export function StatsSection({ rpc, i18n: baseI18n }: StatsSectionProps): JSX.El
     load(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load])
+
+  // Subagents load on their own axis: a slow/failed external scan must never
+  // delay or break the overview panels above.
+  const loadSubagents = useCallback(
+    (force: boolean) => {
+      setSubagentsLoading(true)
+      setSubagentsError(null)
+      callSubagents(rpc, force)
+        .then((res) => {
+          setSubagents(res)
+          saveCachedSubagents(res)
+        })
+        .catch((err) => setSubagentsError(String((err as Error)?.message ?? err)))
+        .then(() => setSubagentsLoading(false))
+    },
+    [rpc],
+  )
+
+  useEffect(() => {
+    const cached = loadCachedSubagents()
+    if (cached) setSubagents(cached.payload)
+    loadSubagents(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadSubagents])
 
   const allTime = (data && data.allTime) || { totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, sessionCount: 0, byModel: [] }
   const allTimeTotal = allTime.totals.total || 0
@@ -114,6 +142,13 @@ export function StatsSection({ rpc, i18n: baseI18n }: StatsSectionProps): JSX.El
         <Heatmap days={days} i18n={i18n} onTip={setHeatTip} />
         <BarChart days={days} byModel={recentByModel} i18n={i18n} onTip={setBarTip} />
         <SessionsCard sessions={overview.topSessions} i18n={i18n} />
+        <SubagentsCard
+          payload={subagents}
+          error={subagentsError}
+          loading={subagentsLoading}
+          i18n={i18n}
+          onRetry={() => loadSubagents(true)}
+        />
         <ProvidersCard providers={overview.providers} i18n={i18n} />
         <ModelDonut byModel={allTime.byModel} total={allTimeTotal} i18n={i18n} onTip={setDonutTip} />
       </>
@@ -142,7 +177,10 @@ export function StatsSection({ rpc, i18n: baseI18n }: StatsSectionProps): JSX.El
           {data ? <ExportMenu overview={data} i18n={i18n} /> : null}
           <button
             className="dsw-ust-refresh"
-            onClick={() => load(true)}
+            onClick={() => {
+              load(true)
+              loadSubagents(true)
+            }}
             disabled={loading}
             title={t('refresh.title')}
           >
