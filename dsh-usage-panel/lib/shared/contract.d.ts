@@ -129,6 +129,8 @@ export interface SubagentExternal {
 /** One DSH subagent session joined with its relay and external usage. */
 export interface SubagentItem {
     sessionId: string;
+    /** Parent session id from the header; null for rows whose header omitted it. */
+    parentSessionId: string | null;
     label: string | null;
     depth: number;
     startedAt: number | null;

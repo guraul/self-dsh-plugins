@@ -16,6 +16,8 @@ import { Heatmap } from './components/Heatmap.tsx'
 import { BarChart } from './components/BarChart.tsx'
 import { SessionsCard } from './components/SessionsCard.tsx'
 import { SubagentsCard } from './components/SubagentsCard.tsx'
+import { SubagentProvidersCard } from './components/SubagentProvidersCard.tsx'
+import { rollupByRoot } from './session-rollup.ts'
 import { ProvidersCard } from './components/ProvidersCard.tsx'
 import { ModelDonut } from './components/ModelDonut.tsx'
 import { ExportMenu } from './components/ExportMenu.tsx'
@@ -100,6 +102,13 @@ export function StatsSection({ rpc, i18n: baseI18n }: StatsSectionProps): JSX.El
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadSubagents])
 
+  // Root session id → summed descendant subagent spend. Recomputed only when
+  // either payload changes; both come from independent RPCs.
+  const rollups = React.useMemo(() => {
+    if (!data || !subagents) return undefined
+    return rollupByRoot(data.topSessions.map((s) => s.id), subagents.items)
+  }, [data, subagents])
+
   const allTime = (data && data.allTime) || { totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, sessionCount: 0, byModel: [] }
   const allTimeTotal = allTime.totals.total || 0
   const recentByModel = (data && data.byModel) || []
@@ -141,7 +150,7 @@ export function StatsSection({ rpc, i18n: baseI18n }: StatsSectionProps): JSX.El
         <KpiCards overview={overview} i18n={i18n} />
         <Heatmap days={days} i18n={i18n} onTip={setHeatTip} />
         <BarChart days={days} byModel={recentByModel} i18n={i18n} onTip={setBarTip} />
-        <SessionsCard sessions={overview.topSessions} i18n={i18n} />
+        <SessionsCard sessions={overview.topSessions} i18n={i18n} rollups={rollups} />
         <SubagentsCard
           payload={subagents}
           error={subagentsError}
@@ -149,6 +158,7 @@ export function StatsSection({ rpc, i18n: baseI18n }: StatsSectionProps): JSX.El
           i18n={i18n}
           onRetry={() => loadSubagents(true)}
         />
+        <SubagentProvidersCard items={subagents ? subagents.items : []} i18n={i18n} />
         <ProvidersCard providers={overview.providers} i18n={i18n} />
         <ModelDonut byModel={allTime.byModel} total={allTimeTotal} i18n={i18n} onTip={setDonutTip} />
       </>

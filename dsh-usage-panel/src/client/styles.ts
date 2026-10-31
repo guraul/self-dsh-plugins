@@ -108,6 +108,7 @@ export const CSS = [
   '.dsw-ust-stag{font-size:10px;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2);border-radius:4px;padding:0 5px;flex-shrink:0;line-height:16px}',
   '.dsw-ust-stag.sub{color:#8b5cf6;border-color:rgba(139,92,246,.45)}',
   '.dsw-ust-stokens{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}',
+  '.dsw-ust-ssub{color:var(--dsw-alias-label-tertiary);font-size:.92em;margin-left:.25em}',
   '.dsw-ust-prow{display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:12px;min-width:0}',
   '.dsw-ust-prow+.dsw-ust-prow{border-top:1px solid var(--dsw-alias-border-l1)}',
   '.dsw-ust-pbar{flex:1;height:6px;border-radius:3px;background:var(--dsw-alias-bg-layer-2);overflow:hidden;min-width:60px}',

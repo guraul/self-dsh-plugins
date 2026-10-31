@@ -1075,8 +1075,10 @@ async function collectSubagents(deps) {
       if (external.endedAt !== null) activeCandidates.push(external.endedAt);
     }
     const lastActive = activeCandidates.length > 0 ? Math.max(...activeCandidates) : null;
+    const parentSessionId = typeof header.parentSession === "string" ? String(header.parentSession) : null;
     items.push({
       sessionId,
+      parentSessionId,
       label,
       depth: Number(header.delegationDepth) || 0,
       startedAt,

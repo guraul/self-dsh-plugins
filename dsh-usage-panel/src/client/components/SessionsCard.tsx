@@ -5,14 +5,17 @@
 import type { SessionSummary } from '../../shared/contract.ts'
 import { fmtTokens } from '../../shared/format.ts'
 import type { I18n } from '../locales.ts'
+import type { SessionRollup } from '../session-rollup.ts'
 import * as React from 'react'
 
 interface SessionsCardProps {
   sessions: SessionSummary[]
   i18n: I18n
+  /** Root session id → summed descendant subagent spend (issue #130). */
+  rollups?: Map<string, SessionRollup>
 }
 
-export function SessionsCard({ sessions, i18n }: SessionsCardProps): JSX.Element {
+export function SessionsCard({ sessions, i18n, rollups }: SessionsCardProps): JSX.Element {
   const t = i18n.t
   const locale = i18n.locale
   if (!sessions.length) return <div />
@@ -40,7 +43,21 @@ export function SessionsCard({ sessions, i18n }: SessionsCardProps): JSX.Element
             </span>
             <span className={'dsw-ust-stag' + (s.depth > 0 ? ' sub' : '')}>{s.depth > 0 ? t('sessions.subagent') : t('sessions.main')}</span>
             <span className="dsw-ust-smeta">{date}</span>
-            <span className="dsw-ust-stokens">{fmtTokens(s.totals.total, locale)}</span>
+            <span className="dsw-ust-stokens">
+              {(() => {
+                const rollup = rollups ? rollups.get(s.id) : undefined
+                const own = s.totals.total
+                if (!rollup || rollup.subagentCount === 0) return fmtTokens(own, locale)
+                return (
+                  <>
+                    {fmtTokens(own + rollup.subagentTotals.total, locale)}
+                    <span className="dsw-ust-ssub" title={t('sessions.withSubagents', { n: rollup.subagentCount })}>
+                      {' +'} {fmtTokens(rollup.subagentTotals.total, locale)}
+                    </span>
+                  </>
+                )
+              })()}
+            </span>
           </div>
         )
       })}

@@ -309,8 +309,13 @@ export async function collectSubagents(deps: SubagentDeps): Promise<SubagentsPay
     }
     const lastActive = activeCandidates.length > 0 ? Math.max(...activeCandidates) : null
 
+    const parentSessionId =
+      typeof (header as { parentSession?: unknown }).parentSession === 'string'
+        ? String((header as { parentSession?: unknown }).parentSession)
+        : null
     items.push({
       sessionId,
+      parentSessionId,
       label,
       depth: Number(header.delegationDepth) || 0,
       startedAt,
