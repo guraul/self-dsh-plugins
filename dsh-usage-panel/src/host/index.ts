@@ -15,8 +15,18 @@ import type { SessionQueryEngine, SessionRecord } from '@deepseek-ai/dsh-session
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-projection'
 import type { SessionProjectionCache } from '@deepseek-ai/dsh-session-projection-cache'
-import { RPC_OVERVIEW, RPC_PATH, type CoverageStats, type Overview, type RpcResult } from '../shared/contract.ts'
+import {
+  RPC_OVERVIEW,
+  RPC_PATH,
+  RPC_SUBAGENTS,
+  RPC_SUBAGENTS_PATH,
+  type CoverageStats,
+  type Overview,
+  type RpcResult,
+  type SubagentsPayload,
+} from '../shared/contract.ts'
 import { emptyAggregate, emptyOverview, finalizeOverview, mergeSessionValue, rankSessions } from './aggregate.ts'
+import { collectSubagents } from './external/collect.ts'
 import { usagePanelProjectionDefinition } from './projection-unit.ts'
 import { scanFallback } from './scan.ts'
 import type { HostConnection, HostLlm, HostWorkspaceRegistry } from './types.ts'
@@ -249,6 +259,47 @@ export function apply(ctx: Context): void {
       },
     })
 
+  // Dedicated subagent endpoint: the external stores are large, so this route
+  // has its own cache and never participates in the overview's rescan loop.
+  const disposeSubagentsRpc =
+    connection &&
+    connection.fetch.register({
+      path: RPC_SUBAGENTS_PATH,
+      methods: ['POST'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        const message = (await request.json().catch(() => undefined)) as
+          | { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
+          | undefined
+        if (!message || message.type !== 'client-request' || typeof message.rpcId !== 'string') {
+          return new Response('bad request', { status: 400 })
+        }
+        const respond = (result: RpcResult<SubagentsPayload>) =>
+          Response.json({ type: 'server-response', rpcId: message.rpcId, result })
+        if (message.method !== RPC_SUBAGENTS) {
+          return respond({
+            ok: false,
+            error: { code: 'bad-request', message: 'unknown endpoint: ' + String(message.method), details: { issues: [] } },
+          })
+        }
+        if (!sq) {
+          return respond({
+            ok: false,
+            error: { code: 'service-unavailable', message: 'sessionQuery unavailable', details: {} },
+          })
+        }
+        return respond(
+          await collectSubagents({ sq }).then(
+            (value): RpcResult<SubagentsPayload> => ({ ok: true, value }),
+            (err): RpcResult<SubagentsPayload> => ({
+              ok: false,
+              error: { code: 'internal', message: String((err as Error)?.message ?? err), details: {} },
+            }),
+          ),
+        )
+      },
+    })
+
   // Warm up the moment the plugin loads.
   startScan().then((o) => {
     console.log(
@@ -271,5 +322,6 @@ export function apply(ctx: Context): void {
     if (disposeUnit) disposeUnit()
     if (stopTimer) stopTimer()
     if (disposeRpc) disposeRpc()
+    if (disposeSubagentsRpc) disposeSubagentsRpc()
   })
 }

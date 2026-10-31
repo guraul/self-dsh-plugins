@@ -9,6 +9,8 @@
 export const RPC_CHANNEL = '/api'
 export const RPC_OVERVIEW = 'usage-stats/overview'
 export const RPC_PATH = '/api/usage-stats/overview'
+export const RPC_SUBAGENTS = 'usage-stats/subagents'
+export const RPC_SUBAGENTS_PATH = '/api/usage-stats/subagents'
 
 /** Machine-readable error codes — the host never returns human prose. */
 export type ErrorCode = 'internal' | 'bad-request' | 'scan-failed' | 'service-unavailable'
@@ -126,3 +128,45 @@ export interface Overview {
 }
 
 export const OVERVIEW_VERSION = 3
+
+// ── Subagent drill-down (separate endpoint; external scans are slow) ─────────
+
+/** Who actually executed a delegated subagent session. */
+export type ExecutorId = 'opencode' | 'codebuddy' | 'acp' | 'unknown'
+
+/** Real usage recorded on the external executor side (never fabricated). */
+export interface SubagentExternal {
+  executor: ExecutorId
+  remoteId: string
+  model: string | null
+  totals: UsageTotals
+  calls: number
+  startedAt: number
+  endedAt: number | null
+  credit?: number
+  source: 'opencode-db' | 'codebuddy-jsonl'
+}
+
+/** One DSH subagent session joined with its relay and external usage. */
+export interface SubagentItem {
+  sessionId: string
+  label: string | null
+  depth: number
+  startedAt: number | null
+  lastActive: number | null
+  relay: { model: string | null; totals: UsageTotals }
+  external: SubagentExternal | null
+}
+
+/** Honest join-coverage diagnostics for the subagent table. */
+export interface SubagentsPayload {
+  items: SubagentItem[]
+  coverage: {
+    total: number
+    matched: number
+    noExternal: number
+    registryEntries: number
+    errors: string[]
+  }
+  updatedAt: number
+}

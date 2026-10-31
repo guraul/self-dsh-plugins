@@ -1,6 +1,8 @@
 // src/shared/contract.ts
 var RPC_OVERVIEW = "usage-stats/overview";
 var RPC_PATH = "/api/usage-stats/overview";
+var RPC_SUBAGENTS = "usage-stats/subagents";
+var RPC_SUBAGENTS_PATH = "/api/usage-stats/subagents";
 
 // src/shared/usage.ts
 var HEAT_DAYS = 182;
@@ -21,15 +23,15 @@ function sortedModels(map) {
   }).sort((a, b) => b.total - a.total);
 }
 function totalsFromModels(models) {
-  const totals = emptyTotals();
+  const totals2 = emptyTotals();
   for (const item of models) {
-    totals.input += item.input;
-    totals.output += item.output;
-    totals.cacheRead += item.cacheRead;
-    totals.cacheWrite += item.cacheWrite;
-    totals.total += item.total;
+    totals2.input += item.input;
+    totals2.output += item.output;
+    totals2.cacheRead += item.cacheRead;
+    totals2.cacheWrite += item.cacheWrite;
+    totals2.total += item.total;
   }
-  return totals;
+  return totals2;
 }
 function dayKeyUTC(ts) {
   const d = new Date(ts);
@@ -52,12 +54,12 @@ function buildDayWindow(byDay, now) {
   for (let i = HEAT_DAYS - 1; i >= 0; i--) {
     const d = new Date(Date.UTC(todayDate.getUTCFullYear(), todayDate.getUTCMonth(), todayDate.getUTCDate() - i));
     const key = keyOfDateUTC(d);
-    const record = byDay[key];
+    const record2 = byDay[key];
     const models = {};
     let total = 0;
-    if (record) {
-      for (const model of Object.keys(record)) {
-        const b = record[model];
+    if (record2) {
+      for (const model of Object.keys(record2)) {
+        const b = record2[model];
         models[model] = totalsFrom(b);
         total += models[model].total;
       }
@@ -153,16 +155,16 @@ function addIntoDay(byDay, day, model, b) {
 function isCounted(state, event) {
   return state.seedEnd === null || event.seq >= state.seedEnd;
 }
-function absorbUsage(ep, b, model, provider, time) {
-  const day = dayKeyUTC(time);
+function absorbUsage(ep, b, model, provider, time2) {
+  const day = dayKeyUTC(time2);
   return {
     ...ep,
     totals: add(ep.totals, b),
     byModel: addInto(ep.byModel, model, b),
     byDay: addIntoDay(ep.byDay, day, model, b),
     byProvider: addInto(ep.byProvider, provider, b),
-    firstTime: ep.firstTime === null ? time : Math.min(ep.firstTime, time),
-    lastTime: ep.lastTime === null ? time : Math.max(ep.lastTime, time)
+    firstTime: ep.firstTime === null ? time2 : Math.min(ep.firstTime, time2),
+    lastTime: ep.lastTime === null ? time2 : Math.max(ep.lastTime, time2)
   };
 }
 function commitStep(state, key) {
@@ -348,17 +350,17 @@ function flattenEpochs(epochs) {
   return out;
 }
 function recentOf(epochs, cutoffKey) {
-  const totals = { ...EMPTY };
+  const totals2 = { ...EMPTY };
   const byModel = {};
   for (const ep of epochs) {
     for (const day of Object.keys(ep.byDay)) {
       if (day < cutoffKey) continue;
       for (const model of Object.keys(ep.byDay[day])) {
         const b = ep.byDay[day][model];
-        totals.input += b.input;
-        totals.output += b.output;
-        totals.cacheRead += b.cacheRead;
-        totals.cacheWrite += b.cacheWrite;
+        totals2.input += b.input;
+        totals2.output += b.output;
+        totals2.cacheRead += b.cacheRead;
+        totals2.cacheWrite += b.cacheWrite;
         const cur = byModel[model];
         byModel[model] = cur ? {
           input: cur.input + b.input,
@@ -369,7 +371,7 @@ function recentOf(epochs, cutoffKey) {
       }
     }
   }
-  return { totals, byModel };
+  return { totals: totals2, byModel };
 }
 
 // src/host/aggregate.ts
@@ -397,15 +399,15 @@ function mergeSessionValue(a, value, sessionId, now, depth = 0, inheritedEventCo
   const epochs = selectEpochs(value, inheritedEventCount);
   const flat = flattenEpochs(epochs);
   const recent = recentOf(epochs, cutoffKey);
-  const totals = totalsFrom(flat.totals);
+  const totals2 = totalsFrom(flat.totals);
   const next = {
     ...a,
     allTimeTotals: {
-      input: a.allTimeTotals.input + totals.input,
-      output: a.allTimeTotals.output + totals.output,
-      cacheRead: a.allTimeTotals.cacheRead + totals.cacheRead,
-      cacheWrite: a.allTimeTotals.cacheWrite + totals.cacheWrite,
-      total: a.allTimeTotals.total + totals.total
+      input: a.allTimeTotals.input + totals2.input,
+      output: a.allTimeTotals.output + totals2.output,
+      cacheRead: a.allTimeTotals.cacheRead + totals2.cacheRead,
+      cacheWrite: a.allTimeTotals.cacheWrite + totals2.cacheWrite,
+      total: a.allTimeTotals.total + totals2.total
     },
     recentTotals: {
       input: a.recentTotals.input + recent.totals.input,
@@ -449,10 +451,10 @@ function mergeSessionValue(a, value, sessionId, now, depth = 0, inheritedEventCo
   if (hasRecentUsage && countsAsMain) {
     next.recentSessionCount += 1;
   }
-  if (totals.total > 0) {
+  if (totals2.total > 0) {
     if (depth > 0) next.usageSessionsSubagent += 1;
     else if (countsAsMain) next.usageSessionsMain += 1;
-    next.sessions.push({ id: sessionId, totals, lastActive: flat.lastTime ?? 0, depth });
+    next.sessions.push({ id: sessionId, totals: totals2, lastActive: flat.lastTime ?? 0, depth });
   }
   return next;
 }
@@ -527,6 +529,529 @@ function emptyOverview(now) {
     titles: /* @__PURE__ */ new Map(),
     providerNames: {}
   });
+}
+
+// src/host/external/collect.ts
+import { readFile as readFile2, stat } from "node:fs/promises";
+import os4 from "node:os";
+import path4 from "node:path";
+
+// src/host/external/codebuddy.ts
+import { createReadStream } from "node:fs";
+import { access } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import readline from "node:readline";
+function cwdSlug(cwd) {
+  return cwd.replace(/\\/g, "/").replace(/\//g, "-").replace(/^-+/, "");
+}
+function defaultCodebuddyProjectsDir() {
+  return path.join(os.homedir(), ".codebuddy", "projects");
+}
+function codebuddyTranscriptPath(projectsDir, cwd, remoteId) {
+  return path.join(projectsDir, cwdSlug(cwd), remoteId + ".jsonl");
+}
+function messageOf(err) {
+  return String(err?.message ?? err);
+}
+function num(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function time(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+async function readCodebuddySession(remoteId, cwd, options = {}) {
+  const errors = [];
+  if (!remoteId) return { hit: null, errors };
+  if (!cwd) {
+    errors.push("codebuddy: no cwd for remote " + remoteId + " (cannot locate transcript)");
+    return { hit: null, errors };
+  }
+  const projectsDir = options.projectsDir ?? defaultCodebuddyProjectsDir();
+  const filePath = codebuddyTranscriptPath(projectsDir, cwd, remoteId);
+  try {
+    await access(filePath);
+  } catch {
+    return { hit: null, errors };
+  }
+  const agg = {
+    model: null,
+    input: 0,
+    output: 0,
+    calls: 0,
+    credit: 0,
+    hasCredit: false,
+    startedAt: null,
+    endedAt: null
+  };
+  const stream = createReadStream(filePath, { encoding: "utf8" });
+  const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of lines) {
+      if (!line.trim()) continue;
+      let record2;
+      try {
+        record2 = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!record2 || typeof record2 !== "object" || Array.isArray(record2)) continue;
+      const row = record2;
+      if (row.type !== "message" || row.role !== "assistant") continue;
+      const providerData = row.providerData;
+      if (!providerData || typeof providerData !== "object" || Array.isArray(providerData)) continue;
+      const pd = providerData;
+      const usage = pd.usage;
+      if (!usage || typeof usage !== "object" || Array.isArray(usage)) continue;
+      const buckets = usage;
+      agg.input += num(buckets.inputTokens);
+      agg.output += num(buckets.outputTokens);
+      if (typeof pd.model === "string" && pd.model) agg.model = pd.model;
+      const rawUsage = pd.rawUsage;
+      if (rawUsage && typeof rawUsage === "object" && !Array.isArray(rawUsage)) {
+        const credit = rawUsage.credit;
+        const value = Number(credit);
+        if (credit !== void 0 && credit !== null && Number.isFinite(value)) {
+          agg.credit += value;
+          agg.hasCredit = true;
+        }
+      }
+      const ts = time(row.timestamp);
+      if (ts !== null) {
+        agg.startedAt = agg.startedAt === null ? ts : Math.min(agg.startedAt, ts);
+        agg.endedAt = agg.endedAt === null ? ts : Math.max(agg.endedAt, ts);
+      }
+      agg.calls += 1;
+    }
+  } catch (err) {
+    errors.push("codebuddy: read " + filePath + ": " + messageOf(err));
+  } finally {
+    lines.close();
+    stream.destroy();
+  }
+  if (agg.calls === 0 || agg.startedAt === null) return { hit: null, errors };
+  const totals2 = {
+    input: agg.input,
+    output: agg.output,
+    cacheRead: 0,
+    cacheWrite: 0,
+    total: agg.input + agg.output
+  };
+  const hit = {
+    executor: "codebuddy",
+    remoteId,
+    model: agg.model,
+    totals: totals2,
+    calls: agg.calls,
+    startedAt: agg.startedAt,
+    endedAt: agg.endedAt,
+    source: "codebuddy-jsonl"
+  };
+  if (agg.hasCredit) hit.credit = agg.credit;
+  return { hit, errors };
+}
+
+// src/host/external/opencode.ts
+import { readdir } from "node:fs/promises";
+import os2 from "node:os";
+import path2 from "node:path";
+import { DatabaseSync } from "node:sqlite";
+var COLUMNS = "id, model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created, time_updated";
+function messageOf2(err) {
+  return String(err?.message ?? err);
+}
+function num2(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function timeOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function totalsOf(input, output, cacheRead, cacheWrite) {
+  return { input, output, cacheRead, cacheWrite, total: input + output + cacheRead + cacheWrite };
+}
+function parseOpencodeModel(raw) {
+  if (typeof raw !== "string") return null;
+  const text = raw.trim();
+  if (!text) return null;
+  if (text.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const id = parsed.id;
+        if (typeof id === "string" && id) return id;
+        return null;
+      }
+    } catch {
+    }
+  }
+  return text;
+}
+async function defaultOpencodeDbPaths() {
+  const home = os2.homedir();
+  const paths = [path2.join(home, ".local", "share", "opencode", "opencode.db")];
+  const backupsDir = path2.join(home, "backups");
+  try {
+    const entries = await readdir(backupsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith("opencode-sessions-")) continue;
+      paths.push(path2.join(backupsDir, entry.name, "opencode.db"));
+    }
+  } catch {
+  }
+  return paths;
+}
+function queryRows(db, table, ids) {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  const statement = db.prepare("SELECT " + COLUMNS + " FROM " + table + " WHERE id IN (" + placeholders + ")");
+  const rows = statement.all(...ids);
+  return rows;
+}
+function isMissingTable(err) {
+  return /no such table/i.test(messageOf2(err));
+}
+function countCalls(db, table, id) {
+  if (table === "session_v2") {
+    try {
+      const row = db.prepare("SELECT count(*) AS c FROM session_message WHERE session_id = ? AND type = 'assistant'").get(id);
+      return num2(row?.c);
+    } catch {
+    }
+  }
+  try {
+    const row = db.prepare("SELECT count(*) AS c FROM message WHERE session_id = ? AND json_extract(data, '$.role') = 'assistant'").get(id);
+    return num2(row?.c);
+  } catch {
+    return 1;
+  }
+}
+function toExternal(db, table, row) {
+  const remoteId = typeof row.id === "string" ? row.id : "";
+  if (!remoteId) return null;
+  const input = num2(row.tokens_input);
+  const output = num2(row.tokens_output);
+  const cacheRead = num2(row.tokens_cache_read);
+  const cacheWrite = num2(row.tokens_cache_write);
+  const startedAt = timeOrNull(row.time_created);
+  if (startedAt === null) return null;
+  return {
+    executor: "opencode",
+    remoteId,
+    model: parseOpencodeModel(row.model),
+    totals: totalsOf(input, output, cacheRead, cacheWrite),
+    calls: countCalls(db, table, remoteId),
+    startedAt,
+    endedAt: timeOrNull(row.time_updated),
+    source: "opencode-db"
+  };
+}
+async function readOpencodeSessions(remoteIds, options = {}) {
+  const hits = /* @__PURE__ */ new Map();
+  const errors = [];
+  const wanted = [...new Set(remoteIds.filter((id) => typeof id === "string" && id.length > 0))];
+  if (wanted.length === 0) return { hits, errors };
+  const dbPaths = options.dbPaths ?? await defaultOpencodeDbPaths();
+  for (const dbPath of dbPaths) {
+    const pending = wanted.filter((id) => !hits.has(id));
+    if (pending.length === 0) break;
+    let db;
+    try {
+      db = new DatabaseSync(dbPath, { readOnly: true });
+    } catch (err) {
+      errors.push("opencode: cannot open " + dbPath + ": " + messageOf2(err));
+      continue;
+    }
+    try {
+      for (const table of ["session_v2", "session"]) {
+        const ids = table === "session_v2" ? pending : wanted.filter((id) => !hits.has(id));
+        if (ids.length === 0) continue;
+        let rows;
+        try {
+          rows = queryRows(db, table, ids);
+        } catch (err) {
+          if (!isMissingTable(err)) errors.push("opencode: query " + table + " in " + dbPath + ": " + messageOf2(err));
+          continue;
+        }
+        for (const row of rows) {
+          const external = toExternal(db, table, row);
+          if (external && !hits.has(external.remoteId)) hits.set(external.remoteId, external);
+        }
+      }
+    } catch (err) {
+      errors.push("opencode: scan " + dbPath + ": " + messageOf2(err));
+    } finally {
+      try {
+        db.close();
+      } catch {
+      }
+    }
+  }
+  return { hits, errors };
+}
+
+// src/host/external/registry.ts
+import { readFile } from "node:fs/promises";
+import os3 from "node:os";
+import path3 from "node:path";
+function normalizeSessionId(id) {
+  return String(id ?? "").replace(/^session-/, "");
+}
+function defaultRegistryPath() {
+  const home = process.env.DSH_HOME || path3.join(os3.homedir(), ".dsh");
+  return path3.join(home, "product-subagents-registry.json");
+}
+function messageOf3(err) {
+  return String(err?.message ?? err);
+}
+async function loadRegistry(filePath = defaultRegistryPath()) {
+  const errors = [];
+  let raw;
+  try {
+    raw = await readFile(filePath, "utf8");
+  } catch (err) {
+    errors.push("registry: cannot read " + filePath + ": " + messageOf3(err));
+    return { entries: /* @__PURE__ */ new Map(), errors };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    errors.push("registry: invalid JSON in " + filePath + ": " + messageOf3(err));
+    return { entries: /* @__PURE__ */ new Map(), errors };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    errors.push("registry: root is not an object in " + filePath);
+    return { entries: /* @__PURE__ */ new Map(), errors };
+  }
+  const entries = /* @__PURE__ */ new Map();
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const record2 = value;
+    const remoteId = typeof record2.remoteId === "string" ? record2.remoteId.trim() : "";
+    if (!remoteId) continue;
+    const id = normalizeSessionId(key);
+    if (!id) continue;
+    entries.set(id, {
+      product: typeof record2.product === "string" && record2.product ? record2.product : "unknown",
+      remoteId,
+      cwd: typeof record2.cwd === "string" ? record2.cwd : "",
+      updatedAt: typeof record2.updatedAt === "number" && Number.isFinite(record2.updatedAt) ? record2.updatedAt : 0
+    });
+  }
+  return { entries, errors };
+}
+
+// src/host/external/collect.ts
+var CACHE_TTL_MS = 6e4;
+var LABEL_MAX = 80;
+var cache = null;
+function defaultProjCacheDir() {
+  const home = process.env.DSH_HOME || path4.join(os4.homedir(), ".dsh");
+  return path4.join(home, "storages", "session_projcache", "sessions");
+}
+function num3(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function timeOrNull2(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function totals(input, output, cacheRead, cacheWrite) {
+  return { input, output, cacheRead, cacheWrite, total: input + output + cacheRead + cacheWrite };
+}
+function executorOf(product) {
+  if (product === "opencode" || product === "codebuddy" || product === "acp") return product;
+  return "unknown";
+}
+function record(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+async function readProjCache(dir, sessionId) {
+  const filePath = path4.join(dir, sessionId + ".json");
+  let raw;
+  try {
+    raw = await readFile2(filePath, "utf8");
+  } catch {
+    return null;
+  }
+  let root;
+  try {
+    root = record(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+  const rows = record(record(root?.record)?.rows);
+  if (!rows) return null;
+  const subagent = record(record(rows.subagent)?.val);
+  const label = typeof subagent?.label === "string" && subagent.label ? subagent.label : null;
+  let model = null;
+  let relay = emptyTotals();
+  let firstTime = null;
+  let lastTime = null;
+  const usagePanel = record(record(rows.usagePanel)?.val);
+  const current = record(usagePanel?.current);
+  if (current) {
+    const currentTotals = record(current.totals);
+    if (currentTotals) {
+      const b = {
+        input: num3(currentTotals.input),
+        output: num3(currentTotals.output),
+        cacheRead: num3(currentTotals.cacheRead),
+        cacheWrite: num3(currentTotals.cacheWrite)
+      };
+      relay = { ...b, total: b.input + b.output + b.cacheRead + b.cacheWrite };
+    }
+    firstTime = timeOrNull2(current.firstTime);
+    lastTime = timeOrNull2(current.lastTime);
+    if (typeof usagePanel?.currentModel === "string" && usagePanel.currentModel) model = usagePanel.currentModel;
+  }
+  if (model === null) {
+    const lastUsed = record(record(record(rows.modelSelection)?.val)?.lastUsed);
+    if (lastUsed && typeof lastUsed.model === "string" && lastUsed.model) model = lastUsed.model;
+  }
+  if (relay.total === 0) {
+    const tu = record(record(record(rows.tokenUsage)?.val)?.totals);
+    if (tu) {
+      relay = totals(
+        num3(tu.uncachedInputTokens),
+        num3(tu.outputTokens),
+        num3(tu.cacheReadTokens),
+        num3(tu.cacheWriteTokens)
+      );
+    }
+  }
+  return { label, model, totals: relay, firstTime, lastTime };
+}
+async function titleLabel(sq, sessionId) {
+  try {
+    const snapshot = await sq.readTitle(sessionId);
+    const title = snapshot && typeof snapshot.title === "string" ? snapshot.title : "";
+    return title ? title.slice(0, LABEL_MAX) : null;
+  } catch {
+    return null;
+  }
+}
+async function signaturePart(filePath) {
+  try {
+    const info = await stat(filePath);
+    return filePath + ":" + info.mtimeMs + ":" + info.size;
+  } catch {
+    return filePath + ":-";
+  }
+}
+function codebuddyKey(cwd, remoteId) {
+  return cwd + "\0" + remoteId;
+}
+async function collectSubagents(deps) {
+  const now = deps.now ?? Date.now();
+  const ttl = deps.ttlMs ?? CACHE_TTL_MS;
+  const registryPath = deps.registryPath ?? defaultRegistryPath();
+  const projCacheDir = deps.projCacheDir ?? defaultProjCacheDir();
+  const codebuddyProjectsDir = deps.codebuddyProjectsDir ?? defaultCodebuddyProjectsDir();
+  const dbPaths = deps.opencodeDbPaths ?? await defaultOpencodeDbPaths();
+  const signature = (await Promise.all([
+    signaturePart(registryPath),
+    signaturePart(projCacheDir),
+    signaturePart(codebuddyProjectsDir),
+    ...dbPaths.map((dbPath) => signaturePart(dbPath))
+  ])).join("|");
+  if (cache && cache.key === signature && now - cache.at < ttl) return cache.payload;
+  const sessions = await deps.sq.listSessions();
+  const { entries, errors: registryErrors } = await loadRegistry(registryPath);
+  const errors = [...registryErrors];
+  const subagents = sessions.filter((rec) => Number(rec?.header?.delegationDepth) > 0);
+  const registryOf = (sessionId) => entries.get(normalizeSessionId(sessionId));
+  const opencodeIds = [];
+  const codebuddyTasks = /* @__PURE__ */ new Map();
+  for (const rec of subagents) {
+    const entry = registryOf(String(rec.header.id));
+    if (!entry) continue;
+    if (entry.product === "opencode" || entry.product === "acp") opencodeIds.push(entry.remoteId);
+    if (entry.product === "codebuddy") {
+      const key = codebuddyKey(entry.cwd, entry.remoteId);
+      if (!codebuddyTasks.has(key)) {
+        codebuddyTasks.set(key, readCodebuddySession(entry.remoteId, entry.cwd, { projectsDir: codebuddyProjectsDir }));
+      }
+    }
+  }
+  const codebuddyEntries = [...codebuddyTasks.entries()];
+  const [opencode, codebuddyResults] = await Promise.all([
+    readOpencodeSessions(opencodeIds, { dbPaths }),
+    Promise.all(codebuddyEntries.map(async ([key, pending]) => [key, await pending]))
+  ]);
+  errors.push(...opencode.errors);
+  const codebuddyHits = /* @__PURE__ */ new Map();
+  for (const [key, result] of codebuddyResults) {
+    errors.push(...result.errors);
+    if (result.hit) codebuddyHits.set(key, result.hit);
+  }
+  function externalOf(entry) {
+    if (!entry) return null;
+    if (entry.product === "opencode" || entry.product === "acp") {
+      const hit = opencode.hits.get(entry.remoteId);
+      return hit ? { ...hit, executor: executorOf(entry.product) } : null;
+    }
+    if (entry.product === "codebuddy") {
+      return codebuddyHits.get(codebuddyKey(entry.cwd, entry.remoteId)) ?? null;
+    }
+    return null;
+  }
+  const items = [];
+  for (const rec of subagents) {
+    const header = rec.header;
+    const sessionId = String(header.id);
+    const entry = registryOf(sessionId);
+    const proj = await readProjCache(projCacheDir, normalizeSessionId(sessionId));
+    let label = proj?.label ?? null;
+    if (!label) label = await titleLabel(deps.sq, sessionId);
+    const external = externalOf(entry);
+    const startCandidates = [];
+    if (timeOrNull2(header.createdAt) !== null) startCandidates.push(Number(header.createdAt));
+    if (proj?.firstTime !== null && proj?.firstTime !== void 0) startCandidates.push(proj.firstTime);
+    if (external) startCandidates.push(external.startedAt);
+    const startedAt = startCandidates.length > 0 ? Math.min(...startCandidates) : null;
+    const activeCandidates = [];
+    if (timeOrNull2(header.createdAt) !== null) activeCandidates.push(Number(header.createdAt));
+    if (proj?.lastTime !== null && proj?.lastTime !== void 0) activeCandidates.push(proj.lastTime);
+    if (external) {
+      activeCandidates.push(external.startedAt);
+      if (external.endedAt !== null) activeCandidates.push(external.endedAt);
+    }
+    const lastActive = activeCandidates.length > 0 ? Math.max(...activeCandidates) : null;
+    items.push({
+      sessionId,
+      label,
+      depth: Number(header.delegationDepth) || 0,
+      startedAt,
+      lastActive,
+      relay: { model: proj?.model ?? null, totals: proj?.totals ?? emptyTotals() },
+      external
+    });
+  }
+  items.sort((a, b) => {
+    const left = a.startedAt ?? Number.NEGATIVE_INFINITY;
+    const right = b.startedAt ?? Number.NEGATIVE_INFINITY;
+    return right - left;
+  });
+  const matched = items.reduce((count, item) => count + (item.external ? 1 : 0), 0);
+  const payload = {
+    items,
+    coverage: {
+      total: items.length,
+      matched,
+      noExternal: items.length - matched,
+      registryEntries: entries.size,
+      errors
+    },
+    updatedAt: now
+  };
+  cache = { key: signature, at: now, payload };
+  return payload;
 }
 
 // src/host/projection-unit.ts
@@ -697,7 +1222,7 @@ function apply(ctx) {
       providerNames = Object.fromEntries((infos || []).map((p) => [p.id, p.name]));
     }).catch((err) => console.warn(tag, "listProviders failed:", String(err?.message ?? err)));
   }
-  let cache = null;
+  let cache2 = null;
   let inflight = null;
   let disposed = false;
   function logFailure(message) {
@@ -779,7 +1304,7 @@ function apply(ctx) {
     });
   }
   async function scan(now) {
-    if (disposed) return cache ? cache.payload : emptyOverview(now);
+    if (disposed) return cache2 ? cache2.payload : emptyOverview(now);
     if (mode === "none") {
       console.log(tag, "sessionQuery unavailable; returning empty overview");
       return emptyOverview(now);
@@ -789,10 +1314,10 @@ function apply(ctx) {
     return scanFallback({ sq, providerNames, logFailure, isArchived: (id) => archivedSet().has(id) }, now);
   }
   function startScan() {
-    if (disposed) return Promise.resolve(cache ? cache.payload : emptyOverview(Date.now()));
+    if (disposed) return Promise.resolve(cache2 ? cache2.payload : emptyOverview(Date.now()));
     if (inflight) return inflight;
     const run = scan(Date.now()).then((payload) => {
-      if (!disposed) cache = { at: Date.now(), payload };
+      if (!disposed) cache2 = { at: Date.now(), payload };
       return payload;
     });
     inflight = run;
@@ -804,10 +1329,10 @@ function apply(ctx) {
   }
   function overview(args) {
     const force = !!(args && args.force);
-    if (!force && cache) {
-      if (Date.now() - cache.at < STALE_MS) return Promise.resolve(cache.payload);
+    if (!force && cache2) {
+      if (Date.now() - cache2.at < STALE_MS) return Promise.resolve(cache2.payload);
       startScan();
-      return Promise.resolve(Object.assign({}, cache.payload, { stale: true }));
+      return Promise.resolve(Object.assign({}, cache2.payload, { stale: true }));
     }
     return startScan();
   }
@@ -838,6 +1363,39 @@ function apply(ctx) {
       );
     }
   });
+  const disposeSubagentsRpc = connection && connection.fetch.register({
+    path: RPC_SUBAGENTS_PATH,
+    methods: ["POST"],
+    requestBody: "buffered",
+    fetch: async (request) => {
+      const message = await request.json().catch(() => void 0);
+      if (!message || message.type !== "client-request" || typeof message.rpcId !== "string") {
+        return new Response("bad request", { status: 400 });
+      }
+      const respond = (result) => Response.json({ type: "server-response", rpcId: message.rpcId, result });
+      if (message.method !== RPC_SUBAGENTS) {
+        return respond({
+          ok: false,
+          error: { code: "bad-request", message: "unknown endpoint: " + String(message.method), details: { issues: [] } }
+        });
+      }
+      if (!sq) {
+        return respond({
+          ok: false,
+          error: { code: "service-unavailable", message: "sessionQuery unavailable", details: {} }
+        });
+      }
+      return respond(
+        await collectSubagents({ sq }).then(
+          (value) => ({ ok: true, value }),
+          (err) => ({
+            ok: false,
+            error: { code: "internal", message: String(err?.message ?? err), details: {} }
+          })
+        )
+      );
+    }
+  });
   startScan().then((o) => {
     console.log(
       tag,
@@ -856,6 +1414,7 @@ function apply(ctx) {
     if (disposeUnit) disposeUnit();
     if (stopTimer) stopTimer();
     if (disposeRpc) disposeRpc();
+    if (disposeSubagentsRpc) disposeSubagentsRpc();
   });
 }
 export {
