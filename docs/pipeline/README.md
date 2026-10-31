@@ -144,7 +144,8 @@ scripts/pipeline/compat-matrix.sh 0.2.2-alpha.2 --json                      # �
 | 机制 | 同 `install-check.sh`：每个插件一个临时 `DSH_HOME` + `pnpm dlx @deepseek-ai/dsh@<目标版本> plugin add` + `--dump-config` grep 包名 |
 | 与 install-check 的区别 | install-check 只验**当前已装**版本、只给 pass/fail；本脚本验**任意目标版本**，并把结果与插件 `package.json` 的 `dsh.compatibility.dshReleases[<目标版本>]` **并排**输出 |
 | 只验 L1 | 判据只有「能否装配」。`pass` **不代表业务链路可用**，输出末尾会再提醒一次 |
-| 漂移三分类 | ① 无记录 → `未验证→<建议值>`；② 矩阵 `incompatible` 但 L1 通过 → **「记录更严」**（可能是 L3 类型检查等更深层结论，例：`dsh-im-bridge` 的 `TS2554`，**不是错误**）；③ 矩阵 `compatible` 但 L1 失败 → **⚠️ 真冲突**，退出码 1 |
+| 漂移三分类 | ① 无记录 → `未验证→<建议值>`；② 矩阵 `incompatible` 但 L1 通过 → **「记录更严」**（文案带上矩阵记录的深度，例：「矩阵 L3 记不兼容，本脚本只到 L1」；`dsh-im-bridge` 的 `TS2554` 就是这种，**不是错误**）；③ 矩阵 `compatible` 但 L1 失败 → **⚠️ 真冲突**，退出码 1 |
+| 记录深度 | 读插件的 `dsh.compatibility.dshDepth[<目标版本>]`（L1/L2/L3/L4，定义见 [COMPATIBILITY.md](../COMPATIBILITY.md)），表格里单列「记录深度」；没有就写「未记录」，**不虚报** |
 | ⚠️ 只读 | **绝不**自动改写任何插件的 `dshReleases`。写回矩阵是人的决定（要 review），见 [COMPATIBILITY.md](../COMPATIBILITY.md) |
 | 需构建的插件 | 检测到 `scripts.build` 会提示先 `pnpm --dir <插件> run build:host` + `build:client`（本脚本不构建） |
 | 版本预检 | 目标版本在 npm 上不存在 → 直接明确失败，不产生误导性表格 |

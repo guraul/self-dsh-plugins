@@ -105,19 +105,21 @@ read_meta() {
       const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
       const releases = (p.dsh && p.dsh.compatibility && p.dsh.compatibility.dshReleases) || {};
       const declared = Object.prototype.hasOwnProperty.call(releases, target) ? String(releases[target]) : "";
+      const depths = (p.dsh && p.dsh.compatibility && p.dsh.compatibility.dshDepth) || {};
+      const depth = Object.prototype.hasOwnProperty.call(depths, target) ? String(depths[target]) : "";
       const scripts = p.scripts || {};
-      process.stdout.write([p.name || "", p.version || "", declared, scripts.build ? "1" : "0"].join("|"));
+      process.stdout.write([p.name || "", p.version || "", declared, depth, scripts.build ? "1" : "0"].join("|"));
     } catch (e) {
-      process.stdout.write("|||");
+      process.stdout.write("||||");
     }
-  ' "$1" "${TARGET_VERSION}" 2>/dev/null || printf '|||'
+  ' "$1" "${TARGET_VERSION}" 2>/dev/null || printf '||||'
 }
 
 check_one() {
   local dir="$1"
   local abs="${REPO_ROOT}/${dir}"
   local pkg="${abs}/package.json"
-  local meta name version declared needs_build
+  local meta name version declared depth needs_build
   local assembly suggest drift
 
   if [[ ! -f "${pkg}" ]]; then
@@ -128,7 +130,7 @@ check_one() {
   fi
 
   meta="$(read_meta "${pkg}")"
-  IFS='|' read -r name version declared needs_build <<<"${meta}"
+  IFS='|' read -r name version declared depth needs_build <<<"${meta}"
   [[ -n "${name}" ]] || { printf '%s\t\t\t\tfail\tincompatible\t\n' "${dir}" >>"${ROWS}"; FAILED=$((FAILED + 1)); return 0; }
 
   if [[ -n "${needs_build}" && "${needs_build}" == "1" && "${JSON}" -eq 0 ]]; then
@@ -154,19 +156,23 @@ check_one() {
   elif [[ "${declared}" == "${suggest}" ]]; then
     drift=""
   elif [[ "${declared}" == "incompatible" && "${suggest}" == "compatible" ]]; then
-    drift="记录更严（L1 通过，但矩阵记不兼容，可能是 L3 等更深层结论）"
+    if [[ -n "${depth}" ]]; then
+      drift="记录更严（矩阵 ${depth} 记不兼容，本脚本只到 L1）"
+    else
+      drift="记录更严（矩阵记不兼容但未记深度，本脚本只到 L1）"
+    fi
     STRICTER=$((STRICTER + 1))
   else
     drift="⚠️ 记录与实测冲突"
     DRIFT=$((DRIFT + 1))
   fi
 
-  printf '%s|%s|%s|%s|%s|%s|%s\n' "${dir}" "${name}" "${version}" "${declared}" "${assembly}" "${suggest}" "${drift}" >>"${ROWS}"
+  printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "${dir}" "${name}" "${version}" "${declared}" "${depth}" "${assembly}" "${suggest}" "${drift}" >>"${ROWS}"
 
   if [[ "${JSON}" -eq 0 ]]; then
     local mark_txt
     if [[ "${assembly}" == "pass" ]]; then mark_txt="✓ 装配成功"; else mark_txt="✗ 装配失败"; fi
-    echo "  ${mark_txt}  ${dir}（${name}@${version}）  矩阵记录: ${declared:-无}"
+    echo "  ${mark_txt}  ${dir}（${name}@${version}）  矩阵记录: ${declared:-无}${depth:+（深度 ${depth}）}"
     if [[ -n "${drift}" ]]; then echo "      ⚠ ${drift}（记录 ${declared:-（无）} / L1 实测 ${suggest}）"; fi
   fi
   return 0
@@ -180,8 +186,8 @@ if [[ "${JSON}" -eq 1 ]]; then
   node -e '
     const fs = require("fs");
     const rows = fs.readFileSync(process.argv[1], "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => {
-      const [dir, name, version, declared, assembly, suggest, drift] = l.split("|");
-      return { dir, name, version, declared: declared || null, assembly, suggest, drift: drift || null };
+      const [dir, name, version, declared, depth, assembly, suggest, drift] = l.split("|");
+      return { dir, name, version, declared: declared || null, depth: depth || null, assembly, suggest, drift: drift || null };
     });
     process.stdout.write(JSON.stringify({ target: process.argv[2], installed: process.argv[3], rows }, null, 2) + "\n");
   ' "${ROWS}" "${TARGET_VERSION}" "${INSTALLED}"
@@ -190,12 +196,12 @@ if [[ "${JSON}" -eq 1 ]]; then
 fi
 
 echo ""
-echo "| 插件目录 | 包名@版本 | 矩阵记录 | 实测装配 | 建议 verdict | 漂移 |"
-echo "|---|---|---|---|---|---|"
-while IFS='|' read -r dir name version declared assembly suggest drift; do
+echo "| 插件目录 | 包名@版本 | 矩阵记录 | 记录深度 | 实测装配 | 建议 verdict | 漂移 |"
+echo "|---|---|---|---|---|---|---|"
+while IFS='|' read -r dir name version declared depth assembly suggest drift; do
   [[ -n "${dir}" ]] || continue
-  printf '| %s | %s@%s | %s | %s | %s | %s |\n' \
-    "${dir}" "${name:-?}" "${version:-?}" "${declared:-（无）}" "${assembly}" "${suggest}" "${drift:-—}"
+  printf '| %s | %s@%s | %s | %s | %s | %s | %s |\n' \
+    "${dir}" "${name:-?}" "${version:-?}" "${declared:-（无）}" "${depth:-未记录}" "${assembly}" "${suggest}" "${drift:-—}"
 done <"${ROWS}"
 
 echo ""
