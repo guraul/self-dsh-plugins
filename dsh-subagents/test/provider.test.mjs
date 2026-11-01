@@ -37,7 +37,7 @@ test('productArgv 按产品拼参数', () => {
   })
   assert.deepEqual(productArgv('codebuddy', { model: 'codebuddy/glm-5.3', task: 't' }), {
     bin: 'codebuddy',
-    args: ['-p', '--model', 'codebuddy/glm-5.3', 't'],
+    args: ['-p', '--output-format', 'json', '--model', 'codebuddy/glm-5.3', 't'],
   })
   assert.deepEqual(productArgv('opencode', { task: 't' }).args, ['run', 't'])
 })
@@ -184,7 +184,12 @@ test('productArgv 按角色权限附加 CLI 参数', () => {
 
 test('permissionArgs 缺省不附加参数', () => {
   assert.deepEqual(productArgv('opencode', { task: 't' }).args, ['run', 't'])
-  assert.deepEqual(productArgv('codebuddy', { task: 't', permissionMode: 'default' }).args, ['-p', 't'])
+  assert.deepEqual(productArgv('codebuddy', { task: 't', permissionMode: 'default' }).args, [
+    '-p',
+    '--output-format',
+    'json',
+    't',
+  ])
 })
 
 test('createProductProvider 支持配置二进制路径', async () => {
@@ -216,4 +221,53 @@ test('buildReviewPrompt 要求不要请求确认', async () => {
     role: { instructions: '你是审核方' },
   })
   assert.match(prompt, /不要请求确认/)
+})
+
+test('activationSpec 把 model 放进 request（PR13 事故回归）', async () => {
+  const { activationSpec } = await import('../lib/tools/delegate.js')
+  const spec = activationSpec({
+    provider: 'codebuddy',
+    role: { instructions: 'x' },
+    task: 't',
+    agent: { id: 'p' },
+    signal: new AbortController().signal,
+    model: 'codebuddy/glm-5.3',
+  })
+  assert.equal(spec.request.model, 'codebuddy/glm-5.3')
+})
+
+test('reportedModels 解析 modelUsage，normalizeModelName 去前缀', async () => {
+  const { normalizeModelName, reportedModels } = await import('../lib/provider.js')
+  const stdout = JSON.stringify({ type: 'result', result: 'ok', modelUsage: { 'glm-5.3': {} } })
+  assert.deepEqual(reportedModels(stdout), ['glm-5.3'])
+  assert.deepEqual(reportedModels('plain text'), [])
+  assert.equal(normalizeModelName('codebuddy/glm-5.3'), 'glm-5.3')
+  assert.equal(normalizeModelName('glm-5.3'), 'glm-5.3')
+})
+
+test('实际模型与请求不一致 -> E_UNAVAILABLE 停止（不降级）', async () => {
+  const provider = createProductProvider({
+    product: 'codebuddy',
+    spawnImpl: () =>
+      fakeChild({
+        stdout: JSON.stringify({ type: 'result', result: 'ok', modelUsage: { 'hy4-preview': {} } }) + '\n',
+      }),
+  })
+  const handle = await provider.start({ prompt: 'x', model: 'codebuddy/glm-5.3' })
+  await assert.rejects(handle.result, (error) => {
+    assert.equal(error.code, 'E_UNAVAILABLE')
+    assert.match(error.message, /模型不一致/)
+    return true
+  })
+})
+
+test('实际模型与请求一致 -> 正常返回', async () => {
+  const provider = createProductProvider({
+    product: 'codebuddy',
+    spawnImpl: () =>
+      fakeChild({ stdout: JSON.stringify({ type: 'result', result: 'ok', modelUsage: { 'glm-5.3': {} } }) + '\n' }),
+  })
+  const handle = await provider.start({ prompt: 'x', model: 'codebuddy/glm-5.3' })
+  const settled = await handle.result
+  assert.equal(settled.output[0].text, 'ok')
 })
