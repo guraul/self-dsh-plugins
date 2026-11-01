@@ -73,7 +73,9 @@ export function createProductProvider({ product, timeoutMs = 300000, env = proce
       const { bin, args } = productArgv(product, { model, task })
       const cwd = request?.parent?.cwd ?? request?.cwd ?? process.cwd()
 
-      const child = spawnImpl(bin, args, { cwd, env })
+      // stdin 必须是 ignore：`opencode run` 在 stdin 为「未关闭的管道」时会等输入，
+      // 表现为永远不返回（实测：默认 stdio 卡死，ignore 后 2 秒返回）。
+      const child = spawnImpl(bin, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = ''
       let stderr = ''
       child.stdout?.on('data', (chunk) => {
@@ -88,7 +90,13 @@ export function createProductProvider({ product, timeoutMs = 300000, env = proce
       const result = new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           child.kill('SIGTERM')
-          reject(new ContractError('E_TIMEOUT', `${product} 超过 ${timeoutMs}ms 未返回`))
+          const detail = String(stderr).trim().split('\n').slice(-3).join(' ')
+          reject(
+            new ContractError(
+              'E_TIMEOUT',
+              `${product} 超过 ${timeoutMs}ms 未返回${detail ? `；stderr: ${detail}` : ''}`,
+            ),
+          )
         }, timeoutMs)
         child.on('error', (error) => {
           clearTimeout(timer)
