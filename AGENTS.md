@@ -69,11 +69,13 @@
 1. **全仓库只允许根目录一份 `AGENTS.md`。** 任何子目录**不得**再新增 `AGENTS.md` / `CLAUDE.md`。
    插件级说明一律写进 [`docs/plugins/`](./docs/plugins/README.md)。
 2. **包管理器只用 pnpm**：见 `~/.dsh/AGENTS.md` §3；本仓库脚本 / CI / 文档一律照此写。
-3. **所有改动走 pipeline**：流程纪律见 `~/.dsh/AGENTS.md` §7。本仓脚本：
+3. **所有改动走 pipeline**：流程纪律见 `~/.dsh/AGENTS.md` §7（第 6 条人在环、第 7 条绕过闸门）。本仓脚本：
    开 issue → `scripts/pipeline/new-task.sh <号>` → 在 worktree 里开发 →
-   `scripts/pipeline/open-pr.sh` → **拿到用户对 review 的明确同意**后 `scripts/pipeline/merge-pr.sh`。
-   worktree 与分支命名契约、清理纪律见
-   [`docs/pipeline/README.md`](./docs/pipeline/README.md)。
+   `scripts/pipeline/open-pr.sh` → 审核方出判定（`APPROVE` 且未命中高风险则直接合并）→
+   `scripts/pipeline/merge-pr.sh --review-record=<记录>`。
+   **本仓有审核闸门**：`merge-pr.sh` 默认要求 `--review-record`；绕过（`--no-review`）的规则与留痕要求见全局 §7 第 7 条。
+   worktree 与分支命名契约、清理纪律、审核循环细节见
+   [`docs/pipeline/README.md`](./docs/pipeline/README.md) 与 [`docs/pipeline/review-loop.md`](./docs/pipeline/review-loop.md)。
 4. **subagent 委派约定**：通用规则见 `~/.dsh/AGENTS.md` §8 / §9（跨项目单一真源）；本条只写本仓特有部分。
    - **本仓特有**：
      - 门禁：`node --test` + `node scripts/lint.js`；CI 见 `.github/workflows/`。
