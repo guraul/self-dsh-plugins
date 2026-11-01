@@ -16,6 +16,16 @@ import { registerDelegateTool } from './tools/delegate.js'
 export const name = 'subagents'
 export const inject = ['subagents', 'tools']
 
+/**
+ * 工具与 provider 共用的参数。抽成独立导出是为了让单测能直接断言
+ * 「传给工具的 roles 是 Map」——PR6 就是在这里把 `{ roles, skipped }` 整个传下去，
+ * 导致 `product_delegate` 静默未注册。
+ */
+export function resolveOptions(config = {}) {
+  const { roles } = loadRoles(config.rolesDir)
+  return { roles, maxDepth: config.maxDepth ?? 3, products: config.products }
+}
+
 export async function apply(ctx, config = {}) {
   const products = Array.isArray(config.products) && config.products.length > 0
     ? config.products
@@ -36,8 +46,9 @@ export async function apply(ctx, config = {}) {
     }
   }
 
+  const { roles, maxDepth } = resolveOptions(config)
   try {
-    await registerDelegateTool(ctx, { roles: loadRoles(config.rolesDir), maxDepth: config.maxDepth ?? 3 })
+    await registerDelegateTool(ctx, { roles, maxDepth })
   } catch (error) {
     // 拿不到 @deepseek-ai/dsh-tools 时不能让整个 profile 起不来：provider 已经注册，
     // 没有工具只是「不能委派」，应当降级并大声说明。
