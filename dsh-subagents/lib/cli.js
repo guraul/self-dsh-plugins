@@ -38,7 +38,8 @@ import {
 const USAGE = `用法:
   dsh-subagents prepare --pr <号> [--out <文件>] [--root <仓库根>]
   dsh-subagents prompt  --request <文件> [--out <文件>] [--role <角色>]  # 渲染审核提示词
-  dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>] [--root <仓库根>]
+  dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>]
+                        [--round <1..3>] [--policy-version <版本>] [--root <仓库根>]
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
   dsh-subagents gate    --pr <号> [--record <文件>] [--head-sha <sha>] [--root <仓库根>]
                         [--no-review --reason <说明>]   # 跨仓共用闸门（合并脚本调用）
@@ -127,6 +128,27 @@ function cmdPrompt(flags) {
   return 0
 }
 
+/**
+ * 记录「这次按哪版闸门规则判的」。闸门在共享包 @guraul/dsh-pipeline 里，
+ * 所以取本仓 tools/ 下安装的产物版本；取不到就写 unknown（不猜）。
+ */
+function detectPolicyVersion(rootDir) {
+  const candidates = [
+    resolve(rootDir, 'tools/node_modules/dsh-pipeline/package.json'),
+    resolve(rootDir, 'dsh-pipeline/package.json'),
+  ]
+  for (const file of candidates) {
+    if (!existsSync(file)) continue
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8'))
+      if (typeof parsed.version === 'string') return parsed.version
+    } catch {
+      // 读到坏文件就继续找下一个，不因为一个损坏文件改变判定
+    }
+  }
+  return 'unknown'
+}
+
 function cmdRecord(flags) {
   if (!flags.request || !flags.response) throw fail('E_BUDGET', '缺少 --request 或 --response')
   const request = JSON.parse(readFileSync(flags.request, 'utf8')).request
@@ -190,8 +212,16 @@ function cmdRecord(flags) {
   const checked = validateResult(result)
   if (!checked.ok) throw new ContractError('E_PARSE', `结果不合 schema: ${checked.errors.join('; ')}`)
 
+  // round 由控制面计数（reviewer 自己不该知道第几轮）；越界直接拒绝
+  const round = Number(flags.round ?? 1)
+  if (!Number.isInteger(round) || round < 1 || round > 3) {
+    throw fail('E_BUDGET', `--round 必须是 1..3 的整数，收到 ${flags.round}`)
+  }
+
   const record = {
     schemaVersion: 1,
+    policyVersion: flags['policy-version'] ?? detectPolicyVersion(root(flags)),
+    round,
     pr: request.pr,
     ...result,
     request: {
@@ -351,8 +381,16 @@ function cmdReview(flags) {
   const checked = validateResult(result)
   if (!checked.ok) throw new ContractError('E_PARSE', `结果不合 schema: ${checked.errors.join('; ')}`)
 
+  // round 由控制面计数（reviewer 自己不该知道第几轮）；越界直接拒绝
+  const round = Number(flags.round ?? 1)
+  if (!Number.isInteger(round) || round < 1 || round > 3) {
+    throw fail('E_BUDGET', `--round 必须是 1..3 的整数，收到 ${flags.round}`)
+  }
+
   const record = {
     schemaVersion: 1,
+    policyVersion: flags['policy-version'] ?? detectPolicyVersion(root(flags)),
+    round,
     pr: request.pr,
     ...result,
     request: { issue: request.issue.number, diffChars: request.diff.length, maxChars: request.budget.maxChars },
