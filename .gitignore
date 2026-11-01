@@ -23,6 +23,10 @@
 /.dsh/*
 !/.dsh/pipeline.json
 
+# 工具依赖目录：只放行清单与锁文件，node_modules 仍忽略
+!/tools/
+/tools/node_modules/
+
 # —— 运维脚本与 LaunchAgent ——
 !/upgrade-dsh.sh
 !/dsh-web-stop.sh
