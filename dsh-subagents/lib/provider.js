@@ -14,7 +14,12 @@ export const PRODUCTS = {
     bin: 'opencode',
     // 一次性调用；opencode 侧没有 plan 模式的全文检索负担，300s 够用
     defaultTimeoutMs: 300000,
-    argv: ({ model, task }) => ['run', ...(model ? ['--model', model] : []), task],
+    argv: ({ model, task, sessionId }) => [
+      'run',
+      ...sessionArgs('opencode', sessionId),
+      ...(model ? ['--model', model] : []),
+      task,
+    ],
     // plan 是 opencode 内置的只读 agent：能读仓库、不能写。
     permissionArgs: { readonly: ['--agent', 'plan'], default: [], full: ['--auto'] },
   },
@@ -23,7 +28,14 @@ export const PRODUCTS = {
     // plan 模式会去读仓库核对，5k+ diff 的审核实测超过 300s，给到 600s
     defaultTimeoutMs: 600000,
     // json 输出里带 modelUsage，可以用来核对「实际用的模型」
-    argv: ({ model, task }) => ['-p', '--output-format', 'json', ...(model ? ['--model', model] : []), task],
+    argv: ({ model, task, sessionId }) => [
+      '-p',
+      '--output-format',
+      'json',
+      ...sessionArgs('codebuddy', sessionId),
+      ...(model ? ['--model', model] : []),
+      task,
+    ],
     // default 不附加参数：保持与旧行为一致，只在显式 readonly / full 时才改变权限
     permissionArgs: {
       readonly: ['--permission-mode', 'plan'],
@@ -31,6 +43,48 @@ export const PRODUCTS = {
       full: ['--permission-mode', 'auto'],
     },
   },
+}
+
+/** 每个产品最近一次的会话 id：续接时若调用方没给，就用它。 */
+const LAST_SESSION = new Map()
+
+export function rememberSession(product, sessionId) {
+  if (!product || !sessionId) return
+  LAST_SESSION.set(product, sessionId)
+}
+
+export function lastSession(product) {
+  return LAST_SESSION.get(product) ?? null
+}
+
+/** 续接参数：codebuddy 用 --resume，opencode 用 --session。 */
+export function sessionArgs(product, sessionId) {
+  if (!sessionId) return []
+  if (!PRODUCTS[product]) {
+    throw new ContractError('E_UNAVAILABLE', `未支持的 product: ${product}`)
+  }
+  return product === 'codebuddy' ? ['--resume', sessionId] : ['--session', sessionId]
+}
+
+/**
+ * 从 CLI 输出里取会话 id：codebuddy 在 json 信封的 `session_id`，
+ * opencode 在事件流的 `sessionID`。取不到返回 null（不猜）。
+ */
+export function extractSessionId(product, stdout) {
+  const lines = String(stdout ?? '').split('\n')
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('{')) continue
+    let parsed
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (product === 'codebuddy' && typeof parsed.session_id === 'string') return parsed.session_id
+    if (product === 'opencode' && typeof parsed.sessionID === 'string') return parsed.sessionID
+  }
+  return null
 }
 
 /** 形态 B 的默认超时（按产品区分）；配置可覆盖。 */
@@ -52,13 +106,13 @@ export function providerName(product) {
   return `product-subagents:${product}`
 }
 
-export function productArgv(product, { model, task, permissionMode }) {
+export function productArgv(product, { model, task, permissionMode, sessionId }) {
   const spec = PRODUCTS[product]
   if (!spec) throw new ContractError('E_UNAVAILABLE', `未支持的 product: ${product}`)
   if (!task) throw new ContractError('E_UNAVAILABLE', '委派任务不能为空')
   return {
     bin: spec.bin,
-    args: [...spec.argv({ model, task }), ...permissionArgs(product, permissionMode)],
+    args: [...spec.argv({ model, task, sessionId }), ...permissionArgs(product, permissionMode)],
   }
 }
 
@@ -137,7 +191,12 @@ export function createProductProvider({ product, bin, timeoutMs, env = process.e
       const started = Date.now()
       const task = requestTask(request)
       const model = request?.model ?? request?.productSettings?.model
-      const command = productArgv(product, { model, task, permissionMode: request?.permissionMode })
+      const command = productArgv(product, {
+        model,
+        task,
+        permissionMode: request?.permissionMode,
+        sessionId: request?.sessionId,
+      })
       const args = command.args
       // 配置里给的二进制优先（codebuddy 在本机是 shim，不在 PATH 上）
       const executable = bin ?? command.bin
@@ -183,7 +242,13 @@ export function createProductProvider({ product, bin, timeoutMs, env = process.e
               reject(error)
               return
             }
-            resolve({ output: [{ type: 'text', text: extractText(stdout) }], stopReason: 'end' })
+            const sessionId = extractSessionId(product, stdout)
+            rememberSession(product, sessionId)
+            resolve({
+              output: [{ type: 'text', text: extractText(stdout) }],
+              stopReason: 'end',
+              ...(sessionId ? { sessionId } : {}),
+            })
             return
           }
           const detail = String(stderr).trim().split('\n').slice(-2).join(' ')

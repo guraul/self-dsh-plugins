@@ -78,6 +78,24 @@ reviewer 必须输出恰好一行：
 | SHA 与请求不符 | `ESCALATE` + `E_SHA_MISMATCH` |
 | diff 里出现该随机标记 | `ESCALATE` + `E_PARSE`（判定行可能来自被审内容） |
 
+## 续接（路线 a：复用 CLI 自己的会话）
+
+`product_delegate` 结束时如果拿到了会话 id，会在输出末尾附一行：
+
+```
+[delegate-session: <id>]
+```
+
+拿这个 id 调 `product_continue`，就能在**同一个远端会话**里追问，上下文不丢：
+
+```js
+product_continue({ task: '把刚才那条 finding 补成测试', session: '<id>' })
+```
+
+- `session` 省略时用**该产品最近一次**委派（同产品并发时别省略）；
+- 产品差异：`codebuddy` 必须已有会话（`--resume` 不存在的 id 会报 `No conversation found`）；`opencode --session <id>` 可以指定 id 新建；
+- 续接失败不自动重开会话——那等于偷偷换了一次上下文。
+
 ## findings 块
 
 reviewer 要在判定行之前输出一个 json 代码块，`record` 会把它提取成记录里的 `findings` / `evidence`：

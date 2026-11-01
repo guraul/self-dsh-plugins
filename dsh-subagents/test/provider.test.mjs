@@ -287,3 +287,51 @@ test('buildReviewPrompt 要求先读 diff 再读仓库', async () => {
   })
   assert.match(prompt, /先通读 diff/)
 })
+
+test('sessionArgs 按产品给续接参数', async () => {
+  const { sessionArgs } = await import('../lib/provider.js')
+  assert.deepEqual(sessionArgs('codebuddy', 'abc'), ['--resume', 'abc'])
+  assert.deepEqual(sessionArgs('opencode', 'abc'), ['--session', 'abc'])
+  assert.deepEqual(sessionArgs('codebuddy', null), [])
+})
+
+test('extractSessionId 从各自输出里取会话 id', async () => {
+  const { extractSessionId } = await import('../lib/provider.js')
+  const buddy = JSON.stringify({ type: 'result', result: 'ok', session_id: 'sid-1' })
+  assert.equal(extractSessionId('codebuddy', buddy), 'sid-1')
+  const open = JSON.stringify({ type: 'text', sessionID: 'ses_2', part: { text: 'ok' } })
+  assert.equal(extractSessionId('opencode', open), 'ses_2')
+  assert.equal(extractSessionId('codebuddy', 'plain'), null)
+  assert.equal(extractSessionId('opencode', '{"type":"x"}'), null)
+})
+
+test('productArgv 带 sessionId 时拼续接参数且不影响权限参数', async () => {
+  const { productArgv } = await import('../lib/provider.js')
+  const buddy = productArgv('codebuddy', { task: 't', sessionId: 'sid-1', permissionMode: 'readonly' })
+  assert.ok(buddy.args.includes('--resume'))
+  assert.ok(buddy.args.includes('sid-1'))
+  assert.deepEqual(buddy.args.slice(-2), ['--permission-mode', 'plan'])
+  const open = productArgv('opencode', { task: 't', sessionId: 'ses_2' })
+  assert.deepEqual(open.args.slice(0, 3), ['run', '--session', 'ses_2'])
+})
+
+test('运行结束后记住最近一次会话并附带 sessionId', async () => {
+  const { createProductProvider, lastSession } = await import('../lib/provider.js')
+  const provider = createProductProvider({
+    product: 'codebuddy',
+    spawnImpl: () =>
+      fakeChild({
+        stdout: JSON.stringify({ type: 'result', result: 'ok', session_id: 'sid-9', modelUsage: { 'glm-5.3-flash': {} } }) + '\n',
+      }),
+  })
+  const handle = await provider.start({ prompt: 'x', model: 'codebuddy/glm-5.3-flash' })
+  const settled = await handle.result
+  assert.equal(settled.sessionId, 'sid-9')
+  assert.equal(lastSession('codebuddy'), 'sid-9')
+})
+
+test('sessionArgs 对未知产品报错而不是猜', async () => {
+  const { sessionArgs } = await import('../lib/provider.js')
+  assert.throws(() => sessionArgs('nope', 'id'), /未支持的 product/)
+  assert.deepEqual(sessionArgs('nope', null), [])
+})
