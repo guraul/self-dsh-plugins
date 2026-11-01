@@ -24,10 +24,12 @@ test('shanghaiDay: 按北京时区切日（UTC 15:59 → 次日 23:59 仍属当�
   assert.equal(shanghaiDay(Date.parse('2026-10-29T16:00:00Z')), '2026-10-30');
 });
 
-test('batchRows: 按 source 分组且每批不超过上限', () => {
+test('batchRows: 按 (source, usage_date) 分组且每批不超过上限', () => {
   const rows = [];
-  for (let i = 0; i < MAX_BATCH_ROWS + 10; i += 1) rows.push({ source: 'dsh', total_tokens: 1 });
-  rows.push({ source: 'codebuddy', total_tokens: 1 });
+  for (let i = 0; i < MAX_BATCH_ROWS + 10; i += 1) {
+    rows.push({ source: 'dsh', usage_date: '2026-10-31', total_tokens: 1 });
+  }
+  rows.push({ source: 'codebuddy', usage_date: '2026-10-31', total_tokens: 1 });
 
   const batches = batchRows(rows);
   assert.equal(batches.length, 3);
@@ -35,6 +37,22 @@ test('batchRows: 按 source 分组且每批不超过上限', () => {
   assert.equal(batches[0].rows.length, MAX_BATCH_ROWS);
   assert.equal(batches[1].rows.length, 10);
   assert.equal(batches[2].rows.length, 1);
+});
+
+test('batchRows: 同一次运行里两天的数据被拆成两批，各自带自己的日期', () => {
+  const rows = [
+    { source: 'dsh', usage_date: '2026-10-30', total_tokens: 1 },
+    { source: 'dsh', usage_date: '2026-10-31', total_tokens: 1 },
+    { source: 'dsh', usage_date: '2026-10-30', total_tokens: 1 },
+    { source: 'codebuddy', usage_date: '2026-10-30', total_tokens: 1 },
+  ];
+  const batches = batchRows(rows);
+  assert.equal(batches.length, 3);
+  const labels = batches.map((b) => `${b.source}@${b.usage_date}:${b.rows.length}`).sort();
+  assert.deepEqual(labels, ['codebuddy@2026-10-30:1', 'dsh@2026-10-30:2', 'dsh@2026-10-31:1']);
+  for (const batch of batches) {
+    for (const row of batch.rows) assert.equal(row.usage_date, batch.usage_date);
+  }
 });
 
 test('parseEnvFile: 忽略注释与空行，剥引号', () => {
