@@ -114,6 +114,14 @@
 
 判定与 SHA 写在同一行，是为了让「回显提交」与「给出判定」在物理上不可分离。
 
+**findings 块**：reviewer 还要在判定行之前输出一个 ```json 代码块，供 `record` 提取明细：
+
+```json
+{"findings":[{"severity":"blocker","file":"lib/cli.js","line":120,"message":"应报 E_PARSE"}],"evidence":["lib/cli.js:118-124"]}
+```
+
+优先级：先解析这个块（`lib/findings.js` 的 `extractFindings`），没有或格式不合法时用 `record --findings <文件>` 兜底；两者都没有不算失败——结论仍有效，只是没有明细。这样「格式没跟上」不会让一次审核整体作废。
+
 ### 5.2 `ReviewResult`
 
 单一真源：`dsh-subagents/schema/review-result.json`（文档引用它、代码读它、单测断言它）。
