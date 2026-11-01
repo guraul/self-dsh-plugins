@@ -224,3 +224,16 @@ jobs:
 
       - name: audit-subagents 单测（含内置 --self-test）
         run: node --test scripts/pipeline/audit-subagents.test.mjs
+
+      # token 用量采集脚本（scripts/token-sync）：语法 + 单测。
+      # 只跑纯函数与 fixture，不读真实用户数据、不发网络请求。
+      - name: token-sync 语法检查
+        run: |
+          node --check scripts/token-sync/collect.mjs
+          node --check scripts/token-sync/upload.mjs
+          node --check scripts/token-sync/sources/dsh.mjs
+          node --check scripts/token-sync/sources/codebuddy.mjs
+          node --check scripts/token-sync/sources/opencode.mjs
+
+      - name: token-sync 单测
+        run: node --test scripts/token-sync/token-sync.test.mjs
