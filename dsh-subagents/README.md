@@ -29,6 +29,7 @@ node lib/cli.js prepare --pr 116 --out /tmp/req.json
 # 2. 把 /tmp/req.json 里的 request 交给 reviewer，拿回文本响应
 
 # 3. 解析响应、校验 schema、判高风险、落记录
+#    （reviewer 输出里的 ```json 块会被提取成 findings；没有块时可用 --findings 兜底）
 node lib/cli.js record --request /tmp/req.json --response /tmp/res.txt --model codebuddy/glm-5.3
 
 # 4. 一条命令跑完（形态 B，一次性调用）

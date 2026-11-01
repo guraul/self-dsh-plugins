@@ -17,6 +17,7 @@ import {
 } from './contract.js'
 import { buildReviewPrompt, prepareRequest } from './request.js'
 import { renderCard } from './card.js'
+import { extractFindings } from './findings.js'
 import { renderComment } from './comment.js'
 import { runProvider } from './bridge-cli.js'
 import { getRole, loadRoles } from './roles.js'
@@ -34,7 +35,7 @@ import {
 
 const USAGE = `用法:
   dsh-subagents prepare --pr <号> [--out <文件>] [--root <仓库根>]
-  dsh-subagents record  --request <文件> --response <文件> [--provider <名>] [--model <名>] [--root <仓库根>]
+  dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>] [--root <仓库根>]
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
   dsh-subagents review  --pr <号> --form <b> --model <名> [--provider <名>] [--root <仓库根>]
   dsh-subagents log     --trace <traceId> [--root <仓库根>]
@@ -132,12 +133,26 @@ function cmdRecord(flags) {
     diff: request.diff,
   })
 
+  // findings 优先取 reviewer 输出的 ```json 代码块；没有则用 --findings 兜底。
+  // 两者都没有不算失败——审核结论仍然有效，只是没有明细。
+  const block = extractFindings(raw)
+  let findings = []
+  let evidence = []
+  if (block) {
+    findings = block.findings
+    evidence = block.evidence
+  } else if (flags.findings) {
+    const fallback = JSON.parse(readFileSync(flags.findings, 'utf8'))
+    findings = Array.isArray(fallback.findings) ? fallback.findings : []
+    evidence = Array.isArray(fallback.evidence) ? fallback.evidence : []
+  }
+
   const result = {
     verdict: policy.hit ? 'ESCALATE' : parsed.verdict,
     head_sha: request.head_sha,
     nonce: request.nonce,
-    findings: [],
-    evidence: policy.hit ? policy.reasons : (parsed.message ? [parsed.message] : []),
+    findings,
+    evidence: [...(policy.hit ? policy.reasons : []), ...evidence, ...(parsed.message ? [parsed.message] : [])],
     form: meta.form,
     model: meta.model,
     durationMs: meta.durationMs,
