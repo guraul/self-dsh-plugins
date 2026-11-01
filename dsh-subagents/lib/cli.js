@@ -142,6 +142,16 @@ function cmdRecheck(flags) {
   if (!flags.request || !flags.previous) throw fail('E_BUDGET', '缺少 --request 或 --previous')
   const request = JSON.parse(readFileSync(flags.request, 'utf8')).request
   const previous = readRecord(flags.previous)
+  // 传错记录会渲染出「上一轮判了 REJECT」的假任务书，这三条必须先过
+  if (previous.verdict !== 'REJECT') {
+    throw fail('E_BUDGET', `--previous 的判定是 ${previous.verdict}，只有 REJECT 才需要复审`)
+  }
+  if (Number(previous.pr) !== Number(request.pr)) {
+    throw fail('E_BUDGET', `--previous 属于 PR #${previous.pr}，与 --request 的 PR #${request.pr} 不符`)
+  }
+  if (previous.head_sha === request.head_sha) {
+    throw fail('E_BUDGET', '新请求的 head 与上一轮相同——没有新提交就不该复审')
+  }
   const text = renderRecheckTask({ request, previous })
   if (flags.out) {
     writeFileSync(flags.out, text, 'utf8')
