@@ -50,6 +50,8 @@ scripts/pipeline/merge-pr.sh 116 --review-record=.dsh-web/reviews/116-<sha>.json
 node lib/cli.js prompt  --request .tmp/review/116/request.json     # 单独渲染提示词
 node lib/cli.js review  --pr 116 --form b --provider codebuddy --model codebuddy/glm-5.3-flash
 node lib/cli.js check   --pr 116 --record .dsh-web/reviews/116-<sha>.json
+node lib/cli.js gate    --pr 116 --root <仓库根> --head-sha <sha> --record <记录>   # 跨仓共用闸门
+node lib/cli.js gate    --pr 116 --root <仓库根> --no-review --reason "用户同意"     # 跳过并写审计
 node lib/cli.js log     --trace 20261031T121500Z-a1b2c3d4
 node lib/cli.js card    --input .tmp/review/116/card.json
 node lib/cli.js comment --record .dsh-web/reviews/116-<sha>.json --round 2

@@ -200,6 +200,19 @@ scripts/pipeline/compat-matrix.sh 0.2.2-alpha.2 --json                      # �
 issue 里会单列「需要人回填的」（`未验证→compatible` 的那批）与「记录比 L1 更严」的两类，
 按需回填矩阵后再把结论写进 [`COMPATIBILITY.md`](../COMPATIBILITY.md)。
 
+### gate（跨仓共用审核闸门）
+
+```bash
+node ~/workspace/self-dsh-plugins/dsh-subagents/lib/cli.js gate \
+  --pr <号> --root <仓库根> --head-sha <sha> --record <.dsh-web/reviews/…json>
+
+# 跳过（留痕由 gate 自己写，不靠调用方的脚本）
+node ~/workspace/self-dsh-plugins/dsh-subagents/lib/cli.js gate \
+  --pr <号> --root <仓库根> --no-review --reason "用户当场同意"
+```
+
+**为什么要它**：闸门判定（记录存在、判定 `APPROVE`、提交绑定、时效、高风险）只该有一份实现。其他仓的 `merge-pr.sh` 调这个命令即可，不必复制逻辑；`--no-review` 的跳过审计也由它写，避免各仓各写一套。
+
 ### review.sh
 
 ```bash
