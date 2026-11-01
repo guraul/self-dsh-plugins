@@ -68,6 +68,36 @@ pnpm install
 **不因缺 json 块而 `ESCALATE`**：那会把一次已经通过的审核退回人工，代价大于收益。
 **不退回形态 A**：退回同族模型等于把「独立视角」这个唯一价值悄悄换掉。
 
+## 三点五、一期收尾清单
+
+### 已完成
+
+| 项 | 证据 |
+|---|---|
+| 契约（判定行 / schema / 错误码） | `dsh-subagents/lib/contract.js` + `schema/review-result.json`，单测覆盖四种判定行异常与注入 |
+| 审核记录与闸门 | `.dsh-web/reviews/`（主工作区）、`merge-pr.sh --review-record` fail-closed、跳过审计 |
+| 角色层与委派 | `roles/{executor,reviewer}.json`、`product_delegate`（一次性）、权限映射（readonly→plan / full→auto） |
+| 形态 B 闭环 | `prepare → reviewer(B) → record → comment → review → merge` 全自动，PR #161 实测 |
+| 模型防降级 | codebuddy 自报 `modelUsage`，与请求不一致即 `E_UNAVAILABLE` |
+| 机器账号 | `dsh-bot-guraul` + `GH_CONFIG_DIR` 隔离，评论与 review 状态由它提交 |
+
+### 未做（及为什么现在不做）
+
+| 项 | 为什么现在不做 |
+|---|---|
+| `product_submit` / `product_wait`（续接） | 需要会话状态机与事件流，约 900 行；当前任务卡都是「一次性修一处/合一次」，没有追问需求 |
+| opencode 侧模型校验 | CLI 输出不含模型信息，无法自证；只能依赖「未知模型硬失败」 |
+| 形态 C（网页清言） | 依赖 REQ-002 的桥接，尚未实现 |
+| 分片审核 | 需要先定义多份判定的合成规则 |
+| reviewer 跑 Bash | plan 模式屏蔽命令执行；放开等于给它执行权，先不开 |
+
+### 已知限制
+
+1. **reviewer 不能跑测试**：plan 模式只读，它只能静态核对。它会在结论里如实说明这一点。
+2. **B 的任务卡必须内联**：codebuddy 读不到 `/tmp`。
+3. **两个 provider 不能同时挂载**：provider 名相同。
+4. **一期没有续接**：委派交出去就收不回来追问。
+
 ## 四、一期缺口（明确不交付）
 
 | 缺口 | 影响 | 补的时机 |

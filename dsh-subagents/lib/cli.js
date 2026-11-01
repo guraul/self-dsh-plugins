@@ -239,7 +239,7 @@ function cmdReview(flags) {
   if ((flags.form || 'b') !== 'b') {
     throw fail(
       'E_UNAVAILABLE',
-      'CLI 只支持 --form b：形态 A 需要会话内的父 agent，请由控制面用 subagent 工具发起（不要在这里假装能跑）',
+      'CLI 只支持 --form b：形态 A 需要会话内的父 agent，请由控制面用 subagent 工具发起',
     )
   }
   const dir = reviewsDir(root(flags))
