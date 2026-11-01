@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/guraul/self-dsh-plugins/dsh_subagents/schema/review-record.json",
+  "title": "ReviewRecord",
+  "description": "落盘的审核记录：判定结果（见 review-result.json）加记录外壳。外壳字段解释「什么时候、按哪版规则、第几轮、针对哪个 PR」。",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "policyVersion",
+    "round",
+    "pr",
+    "createdAt",
+    "verdict",
+    "head_sha"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "记录结构版本；闸门只接受认识的结构"
+    },
+    "policyVersion": {
+      "type": "string",
+      "description": "这次判定按哪版闸门规则做的（共享包版本；取不到写 unknown）"
+    },
+    "round": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3,
+      "description": "第几轮审核，由控制面计数"
+    },
+    "pr": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "request": {
+      "type": "object",
+      "description": "本次审核的输入摘要（issue 号、diff 规模）"
+    },
+    "policy": {
+      "type": "object",
+      "description": "高风险判定：{hit, reasons}"
+    },
+    "verdict": {
+      "enum": [
+        "APPROVE",
+        "REJECT",
+        "ESCALATE"
+      ]
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    }
+  }
+}

@@ -359,3 +359,28 @@ test('record 的 --round 越界时拒绝', () => {
   assert.equal(out.code, 2)
   assert.match(out.stderr, /--round 必须是 1\.\.3/)
 })
+
+test('record 记录含 schemaVersion，且 policyVersion 取不到时写 unknown', () => {
+  const { root, dir } = sandbox()
+  const req = join(root, 'req.json')
+  writeFileSync(req, JSON.stringify({ request: { pr: 11, head_sha: SHA, nonce: NONCE, diff: 'x', files: [], issue: { number: 1 }, budget: { maxChars: 100 } } }))
+  const res = join(root, 'res.txt')
+  writeFileSync(res, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
+  const out = run(['record', '--request', req, '--response', res, '--root', root])
+  assert.equal(out.code, 0, out.stderr)
+  const saved = JSON.parse(readFileSync(join(dir, `11-${SHA}.json`), 'utf8'))
+  assert.equal(saved.schemaVersion, 1)
+  assert.equal(saved.round, 1)
+  assert.equal(saved.policyVersion, 'unknown')
+})
+
+test('record 的 --round 不带值时报错，不静默当 1', () => {
+  const { root } = sandbox()
+  const req = join(root, 'req.json')
+  writeFileSync(req, JSON.stringify({ request: { pr: 12, head_sha: SHA, nonce: NONCE, diff: 'x', files: [], issue: { number: 1 }, budget: { maxChars: 100 } } }))
+  const res = join(root, 'res.txt')
+  writeFileSync(res, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
+  const out = run(['record', '--request', req, '--response', res, '--round', '--root', root])
+  assert.equal(out.code, 2)
+  assert.match(out.stderr, /--round 需要一个值/)
+})

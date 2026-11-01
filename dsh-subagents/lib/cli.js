@@ -213,9 +213,16 @@ function cmdRecord(flags) {
   if (!checked.ok) throw new ContractError('E_PARSE', `结果不合 schema: ${checked.errors.join('; ')}`)
 
   // round 由控制面计数（reviewer 自己不该知道第几轮）；越界直接拒绝
+  // 裸 --round（不带值）会被 parseArgv 置为 true，Number(true)===1 会静默放行
+  if (flags.round !== undefined && typeof flags.round !== 'string') {
+    throw fail('E_BUDGET', '--round 需要一个值（1..3）')
+  }
   const round = Number(flags.round ?? 1)
   if (!Number.isInteger(round) || round < 1 || round > 3) {
     throw fail('E_BUDGET', `--round 必须是 1..3 的整数，收到 ${flags.round}`)
+  }
+  if (flags['policy-version'] !== undefined && typeof flags['policy-version'] !== 'string') {
+    throw fail('E_BUDGET', '--policy-version 需要一个值')
   }
 
   const record = {
@@ -382,9 +389,16 @@ function cmdReview(flags) {
   if (!checked.ok) throw new ContractError('E_PARSE', `结果不合 schema: ${checked.errors.join('; ')}`)
 
   // round 由控制面计数（reviewer 自己不该知道第几轮）；越界直接拒绝
+  // 裸 --round（不带值）会被 parseArgv 置为 true，Number(true)===1 会静默放行
+  if (flags.round !== undefined && typeof flags.round !== 'string') {
+    throw fail('E_BUDGET', '--round 需要一个值（1..3）')
+  }
   const round = Number(flags.round ?? 1)
   if (!Number.isInteger(round) || round < 1 || round > 3) {
     throw fail('E_BUDGET', `--round 必须是 1..3 的整数，收到 ${flags.round}`)
+  }
+  if (flags['policy-version'] !== undefined && typeof flags['policy-version'] !== 'string') {
+    throw fail('E_BUDGET', '--policy-version 需要一个值')
   }
 
   const record = {
