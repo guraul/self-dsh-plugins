@@ -52,7 +52,9 @@ reviewer 默认走**形态 B**（`codebuddy/glm-5.3`）：独立模型家族，�
 7. **与旧插件不能同时挂载。** 两者都注册 `product-subagents:opencode` / `:codebuddy`，provider 名全局唯一，重名会让整个 profile 插件树启动失败。切换与回滚步骤见 [`docs/pipeline/review-loop.md`](../pipeline/review-loop.md)。
 8. **两个 gh 身份在 macOS 上会互相覆盖 active 指针。** bot 登录后主号会读到 bot 的 token；修法是 `gh auth switch --user guraul`（不需要重新授权），且辅助身份必须用 `--insecure-storage` 落在自己的 `GH_CONFIG_DIR`。
 9. **spawn 产品 CLI 必须 `stdio: ['ignore','pipe','pipe']`。** `opencode run` 在 stdin 是未关闭管道时会一直等输入，表现为「宿主里调永远超时、终端里 5 秒返回」。这一条踩过一次（issue #146）。
-10. **一期没有续接。** `product_submit` / `product_wait` 不存在，委派只能一次性拿结果；控制面写任务卡时要假定「交出去就收不回来追问」。
+10. **形态 B 的沙盒只能读工作目录内的文件。** `codebuddy` 读不到 `/tmp`（实测），所以任务卡必须**内联进 task 文本**，不要让它去读文件路径。
+11. **形态 B 首次调用可能反问确认。** 委派 prompt 已固定带执行前言（`DELEGATION_PREAMBLE`）；自己手写任务书时也要带上，否则一次调用会空转。
+12. **一期没有续接。** `product_submit` / `product_wait` 不存在，委派只能一次性拿结果；控制面写任务卡时要假定「交出去就收不回来追问」。
 
 ## 怎么验证
 

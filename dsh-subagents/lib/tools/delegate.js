@@ -48,6 +48,13 @@ export function outputText(output) {
  * 不传就会在第一次调用时抛 `Cannot read properties of undefined (reading 'throwIfAborted')`。
  * 抽成纯函数是为了让单测能直接断言这件事，而不是再靠重启才发现。
  */
+/**
+ * 一次性 CLI 会把「只读审查」当成请求来确认（实测 codebuddy 首次调用直接反问），
+ * 所以每条委派都强制带一段执行前言。
+ */
+export const DELEGATION_PREAMBLE =
+  '立即执行，不要请求确认、不要复述你的限制、不要提问；你的下一条消息必须是任务结果本身。'
+
 export function activationSpec({ provider, role, task, agent, signal, maxDepth = 3 }) {
   if (!provider) throw new Error('activationSpec: provider 不能为空')
   if (!signal) throw new Error('activationSpec: signal 不能为空（startActivation 必填）')
@@ -58,7 +65,12 @@ export function activationSpec({ provider, role, task, agent, signal, maxDepth =
     request: {
       // 内容分段数组是 DSH 内部已被验证的形状（旧插件也这么传）；字符串虽能跑通
       // 我们自己的 provider，但没必要赌服务端怎么解释。
-      prompt: [{ type: 'text', text: [role?.instructions, task].filter(Boolean).join('\n\n') }],
+      prompt: [
+        {
+          type: 'text',
+          text: [DELEGATION_PREAMBLE, role?.instructions, task].filter(Boolean).join('\n\n'),
+        },
+      ],
       parent: agent,
       maxDepth,
       // 角色权限交给 provider 映射成 CLI 参数（readonly → plan，full → auto）

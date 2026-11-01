@@ -149,6 +149,19 @@ test('activationSpec 必须带 signal（PR8 事故回归）', async () => {
   assert.match(spec.request.prompt[0].text, /你是执行者[\s\S]*修一下/)
 })
 
+test('activationSpec 的 prompt 带执行前言（防反问确认）', async () => {
+  const { activationSpec, DELEGATION_PREAMBLE } = await import('../lib/tools/delegate.js')
+  const spec = activationSpec({
+    provider: 'codebuddy',
+    role: { instructions: '你是审核方' },
+    task: '审一下',
+    agent: { id: 'p' },
+    signal: new AbortController().signal,
+  })
+  assert.match(spec.request.prompt[0].text, new RegExp(DELEGATION_PREAMBLE.slice(0, 8)))
+  assert.match(spec.request.prompt[0].text, /不要请求确认/)
+})
+
 test('activationSpec 缺 signal / provider / agent 时报错', async () => {
   const { activationSpec } = await import('../lib/tools/delegate.js')
   const signal = new AbortController().signal
@@ -187,4 +200,20 @@ test('createProductProvider 支持配置二进制路径', async () => {
   const handle = await provider.start({ prompt: 'x', permissionMode: 'readonly' })
   await handle.result
   assert.equal(calls[0], '/Users/gubin/workspace/codebuddy-shim.py')
+})
+
+test('buildReviewPrompt 要求不要请求确认', async () => {
+  const { buildReviewPrompt } = await import('../lib/request.js')
+  const prompt = buildReviewPrompt({
+    request: {
+      pr: 1,
+      head_sha: 'a'.repeat(40),
+      nonce: 'ABCDEFGH2345',
+      files: ['a.js'],
+      diff: '<<<D>>>',
+      issue: { body: 'b' },
+    },
+    role: { instructions: '你是审核方' },
+  })
+  assert.match(prompt, /不要请求确认/)
 })
