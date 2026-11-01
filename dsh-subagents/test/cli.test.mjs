@@ -172,7 +172,7 @@ test('roles 列出两个内置角色', () => {
   const out = run(['roles'])
   assert.equal(out.code, 0)
   assert.match(out.stdout, /^reviewer\treadonly\treview-result/m)
-  assert.match(out.stdout, /^executor\tdefault\ttext/m)
+  assert.match(out.stdout, /^executor\tfull\ttext/m, 'executor 必须能改能跑（full），否则 CLI 非交互模式会拒绝执行')
 })
 
 test('未知子命令 -> 2', () => {

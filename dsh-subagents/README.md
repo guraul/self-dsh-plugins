@@ -80,6 +80,17 @@ reviewer 必须输出恰好一行：
 | SHA 与请求不符 | `ESCALATE` + `E_SHA_MISMATCH` |
 | diff 里出现该随机标记 | `ESCALATE` + `E_PARSE`（判定行可能来自被审内容） |
 
+## 跨仓委派要带 `cwd`
+
+CLI 的子进程沙箱以工作目录为界。派任务给另一个仓时**必须**传 `cwd`，否则它只看得到当前仓：
+
+```js
+product_delegate({ role: 'executor', provider: 'codebuddy', model: 'deepseek-v4.1-flash',
+                   cwd: '/Users/gubin/workspace/agent-mobile', task: '…' })
+```
+
+`executor` 角色的权限是 `full`（能改能跑）；`reviewer` 是 `readonly`（只能读）。
+
 ## 续接（路线 a：复用 CLI 自己的会话）
 
 `product_delegate` 结束时如果拿到了会话 id，会在输出末尾附一行：

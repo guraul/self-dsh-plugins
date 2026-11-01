@@ -56,7 +56,17 @@ export function outputText(output) {
 export const DELEGATION_PREAMBLE =
   '立即执行，不要请求确认、不要复述你的限制、不要提问；你的下一条消息必须是任务结果本身。'
 
-export function activationSpec({ provider, role, task, agent, signal, model, sessionId, maxDepth = 3 }) {
+export function activationSpec({
+  provider,
+  role,
+  task,
+  agent,
+  signal,
+  model,
+  sessionId,
+  cwd,
+  maxDepth = 3,
+}) {
   if (!provider) throw new Error('activationSpec: provider 不能为空')
   if (!signal) throw new Error('activationSpec: signal 不能为空（startActivation 必填）')
   if (!agent) throw new Error('activationSpec: agent 不能为空（子代理的父 agent）')
@@ -74,6 +84,8 @@ export function activationSpec({ provider, role, task, agent, signal, model, ses
       ],
       parent: agent,
       maxDepth,
+      // CLI 子进程的沙箱以 cwd 为界：跨仓任务必须显式给，否则看不到目标仓
+      ...(cwd ? { cwd } : {}),
       // model 必须放进 request：provider 从请求里取，取不到就不会给 CLI 传 --model，
       // 上一次 reviewer 就是这样静默跑到了 codebuddy 的默认模型。
       ...(model ? { model } : {}),
@@ -110,6 +122,7 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
           description: '产品 CLI，缺省用角色声明的 provider；两者都没有则报错。',
         },
         model: { type: 'string', description: '产品侧模型标识；缺省用 CLIZ 自身默认值。' },
+        cwd: { type: 'string', description: '子进程工作目录（跨仓任务必填，否则沙箱只看得到当前仓）。' },
         task: { type: 'string', required: true, description: '交给产品 CLI 的任务正文。' },
       },
       output: {
@@ -130,6 +143,7 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
             agent: exec.agent,
             signal: exec.signal,
             model: args.model,
+            cwd: args.cwd,
             maxDepth,
           }),
         )
@@ -160,6 +174,7 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
         role: { type: 'string', enum: roleIds.length > 0 ? roleIds : ['executor'], description: '角色 id。' },
         provider: { type: 'string', description: '产品 CLI，缺省用角色声明的 provider。' },
         model: { type: 'string', description: '产品侧模型标识。' },
+        cwd: { type: 'string', description: '子进程工作目录（跨仓续接时必填）。' },
       },
       output: {
         schema: OUTPUT_SCHEMA,
@@ -187,6 +202,7 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
             signal: exec.signal,
             model: args.model,
             sessionId,
+            cwd: args.cwd,
             maxDepth,
           }),
         )
