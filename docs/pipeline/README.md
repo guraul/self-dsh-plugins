@@ -36,6 +36,20 @@
 
 **身份分离**：PR 由主账号开与合并；PR comment 与 review 状态由**机器账号**（`dsh-bot-guraul`，`GH_CONFIG_DIR=~/.config/gh-reviewer`）提交——GitHub 不允许同一账号 approve 自己的 PR。
 
+### 审核循环与控制面的权力
+
+控制面对 reviewer 的判定**只从严、不从宽**：
+
+| reviewer 给的 | 控制面能做什么 | 不能做什么 |
+|---|---|---|
+| `APPROVE` | 契约校验后放行；命中高风险 / 证据为空 / findings 含 `blocker` → **升级为 `ESCALATE`** | 不能自己再读代码找问题 |
+| `REJECT` | 落地拒绝（comment + `CHANGES_REQUESTED`）→ 委派 executor 修复 | **不能推翻**、不能放行；觉得误报只能交给人 |
+| `ESCALATE` | 直接停，叫人 | 不能自行改判 |
+
+三条机械检查（不需要懂代码）：判定行 / SHA / schema 合规、命中高风险路径、自相矛盾（APPROVE 但 findings 有 `blocker` 或 evidence 为空）。
+
+**循环规则**：一轮 = reviewer 审一次；上限 3 轮，由控制面计数并写进 comment 与任务卡；第 3 轮仍 `REQUEST_CHANGES` → 停止循环，交给人。
+
 **合并后没有部署**：本仓库没有服务器、没有 rsync / ssh / systemd、没有线上 curl 验证。合并的唯一后果是 main 前进一格、CI 重跑一遍。
 
 规则：pipeline 只服务本仓库自己的插件（清单以 `lib.sh` 的 `PLUGIN_DIRS` 为准）；插件是 `link:` 到本机 DSH profile 的，不走发布流程。

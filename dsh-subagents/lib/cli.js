@@ -16,6 +16,8 @@ import {
   validateResult,
 } from './contract.js'
 import { buildReviewPrompt, prepareRequest } from './request.js'
+import { renderCard } from './card.js'
+import { renderComment } from './comment.js'
 import { runProvider } from './bridge-cli.js'
 import { getRole, loadRoles } from './roles.js'
 import {
@@ -36,6 +38,8 @@ const USAGE = `用法:
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
   dsh-subagents review  --pr <号> --form <b> --model <名> [--provider <名>] [--root <仓库根>]
   dsh-subagents log     --trace <traceId> [--root <仓库根>]
+  dsh-subagents card    --input <文件> [--out <文件>]     # 任务卡（纯文本）
+  dsh-subagents comment --record <文件> --round <n> [--out <文件>]  # PR comment（纯文本）
   dsh-subagents roles   [--roles-dir <目录>]
 
 退出码: 0 通过 / 1 拒绝（闸门或判定不是 APPROVE）/ 2 参数或环境错误`
@@ -281,6 +285,31 @@ function cmdReview(flags) {
   return record.verdict === 'APPROVE' ? 0 : 1
 }
 
+function cmdCard(flags) {
+  if (!flags.input) throw fail('E_BUDGET', '缺少 --input')
+  const text = renderCard(JSON.parse(readFileSync(flags.input, 'utf8')))
+  if (flags.out) {
+    writeFileSync(flags.out, text, 'utf8')
+    process.stdout.write(`已写入 ${flags.out}\n`)
+    return 0
+  }
+  process.stdout.write(text)
+  return 0
+}
+
+function cmdComment(flags) {
+  if (!flags.record) throw fail('E_BUDGET', '缺少 --record')
+  const round = Number(flags.round ?? 1)
+  const text = renderComment({ result: readRecord(flags.record), round })
+  if (flags.out) {
+    writeFileSync(flags.out, text, 'utf8')
+    process.stdout.write(`已写入 ${flags.out}\n`)
+    return 0
+  }
+  process.stdout.write(text)
+  return 0
+}
+
 function cmdLog(flags) {
   if (!flags.trace) throw fail('E_BUDGET', '缺少 --trace')
   const hits = findByTrace(reviewsDir(root(flags)), flags.trace)
@@ -312,6 +341,8 @@ const COMMANDS = {
   check: cmdCheck,
   review: cmdReview,
   log: cmdLog,
+  card: cmdCard,
+  comment: cmdComment,
   roles: cmdRoles,
 }
 

@@ -38,6 +38,10 @@ node lib/cli.js check --pr 116 --record .dsh-web/reviews/116-<sha>.json
 
 # 6. 按 traceId 反查
 node lib/cli.js log --trace 20261031T121500Z-a1b2c3d4
+
+# 7. 生成任务卡与 PR comment（纯文本，不碰网络）
+node lib/cli.js card --input /tmp/card.json
+node lib/cli.js comment --record .dsh-web/reviews/116-<sha>.json --round 2
 ```
 
 退出码：`0` 通过 / `1` 拒绝（闸门不过或判定不是 `APPROVE`）/ `2` 参数或环境错误。
