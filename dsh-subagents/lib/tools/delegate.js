@@ -5,7 +5,7 @@
  * 之所以还留这个工具名，是为了让 `audit-subagents.mjs` 与既有文档里的调用方式
  * 不失效——改名的代价远大于收益，正名留到续接补齐之后。
  */
-import { providerName } from '../provider.js'
+import { lastSession, providerName } from '../provider.js'
 
 let defineToolImpl
 
@@ -55,7 +55,7 @@ export function outputText(output) {
 export const DELEGATION_PREAMBLE =
   '立即执行，不要请求确认、不要复述你的限制、不要提问；你的下一条消息必须是任务结果本身。'
 
-export function activationSpec({ provider, role, task, agent, signal, model, maxDepth = 3 }) {
+export function activationSpec({ provider, role, task, agent, signal, model, sessionId, maxDepth = 3 }) {
   if (!provider) throw new Error('activationSpec: provider 不能为空')
   if (!signal) throw new Error('activationSpec: signal 不能为空（startActivation 必填）')
   if (!agent) throw new Error('activationSpec: agent 不能为空（子代理的父 agent）')
@@ -76,6 +76,8 @@ export function activationSpec({ provider, role, task, agent, signal, model, max
       // model 必须放进 request：provider 从请求里取，取不到就不会给 CLI 传 --model，
       // 上一次 reviewer 就是这样静默跑到了 codebuddy 的默认模型。
       ...(model ? { model } : {}),
+      // 续接：同一个远端会话再问一次（路线 a，复用 CLI 自己的会话）
+      ...(sessionId ? { sessionId } : {}),
       // 角色权限交给 provider 映射成 CLI 参数（readonly → plan，full → auto）
       permissionMode: role?.permissionMode ?? 'default',
     },
@@ -95,7 +97,7 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
       name: 'product_delegate',
       description:
         '把一个自包含的任务交给外部产品 CLI（opencode / codebuddy）同步执行，返回最终回答。' +
-        '角色决定权限模式与附加指令；一期是一次性执行，不能续接、不能追问。',
+        '角色决定权限模式与附加指令。需要追问时用返回里的 [delegate-session: <id>] 调 product_continue。',
       parameters: {
         role: {
           type: 'string',
@@ -131,12 +133,68 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
           }),
         )
         const settled = await handle.result
+        const sessionId = settled?.sessionId ?? lastSession(provider)
+        const text = outputText(settled?.output)
+        return {
+          output: sessionId ? `${text}\n\n[delegate-session: ${sessionId}]` : text,
+          stopReason: settled?.stopReason ?? 'end',
+          role: role.id,
+          provider,
+          permissionMode: role.permissionMode,
+        }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'product_continue',
+      description:
+        '续接上一次委派：把追问发给同一个远端会话，保留它的上下文。' +
+        'session 用 product_delegate 输出末尾的 [delegate-session: <id>]；不传则用该产品最近一次。',
+      parameters: {
+        task: { type: 'string', required: true, description: '追问正文。' },
+        session: { type: 'string', description: '会话 id；缺省用该产品最近一次委派。' },
+        role: { type: 'string', enum: roleIds.length > 0 ? roleIds : ['executor'], description: '角色 id。' },
+        provider: { type: 'string', description: '产品 CLI，缺省用角色声明的 provider。' },
+        model: { type: 'string', description: '产品侧模型标识。' },
+      },
+      output: {
+        schema: OUTPUT_SCHEMA,
+        render: (_args, value) => [{ type: 'text', text: String(value.output ?? '') }],
+      },
+      async execute(args, exec) {
+        const role = roles.get(args.role || 'executor')
+        if (!role) throw new Error(`product_continue: 未知角色 "${args.role}"`)
+        const provider = args.provider || role.provider
+        if (!provider) throw new Error(`product_continue: 未指定 provider，角色 "${role.id}" 也没钉 provider`)
+
+        const sessionId = args.session || lastSession(provider)
+        if (!sessionId) {
+          throw new Error(
+            'product_continue: 没有可续接的会话（先调 product_delegate，或显式传 session）',
+          )
+        }
+
+        const handle = await ctx.subagents.startActivation(
+          activationSpec({
+            provider,
+            role,
+            task: args.task,
+            agent: exec.agent,
+            signal: exec.signal,
+            model: args.model,
+            sessionId,
+            maxDepth,
+          }),
+        )
+        const settled = await handle.result
         return {
           output: outputText(settled?.output),
           stopReason: settled?.stopReason ?? 'end',
           role: role.id,
           provider,
-          permissionMode: role.permissionMode,
+          sessionId,
         }
       },
     }),
