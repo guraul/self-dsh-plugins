@@ -426,3 +426,33 @@ test('recheck：传错记录时拒绝（非 REJECT / PR 不符 / head 未变）'
   assert.match(run(['recheck', '--request', req, '--previous', mk({ pr: 8 })]).stderr, /不符/)
   assert.match(run(['recheck', '--request', req, '--previous', mk({ head_sha: SHA })]).stderr, /没有新提交/)
 })
+
+test('adjudicate：给 ESCALATE 留处置，不覆盖原判定', () => {
+  const { dir } = sandbox()
+  const file = join(dir, `7-${SHA}.json`)
+  writeFileSync(
+    file,
+    JSON.stringify({ schemaVersion: 1, policyVersion: '0.1.0', round: 1, pr: 7, verdict: 'ESCALATE', head_sha: SHA, findings: [], evidence: [], createdAt: new Date().toISOString(), errorCode: 'E_POLICY' }),
+  )
+  const out = run(['adjudicate', '--record', file, '--decision', 'merge', '--by', 'guraul', '--reason', '改的是流程文档，已人工看过'])
+  assert.equal(out.code, 0, out.stderr)
+  assert.match(out.stdout, /人工处置/)
+  assert.match(out.stdout, /放行合并/)
+  const saved = JSON.parse(readFileSync(file, 'utf8'))
+  assert.equal(saved.verdict, 'ESCALATE', '原判定不能被覆盖')
+  assert.equal(saved.adjudication.decision, 'merge')
+  assert.equal(saved.adjudication.by, 'guraul')
+})
+
+test('adjudicate：非 ESCALATE / 重复处置 / 缺参数都拒绝', () => {
+  const { dir } = sandbox()
+  const ok = join(dir, `8-${SHA}.json`)
+  writeFileSync(ok, JSON.stringify({ schemaVersion: 1, policyVersion: '0.1.0', round: 1, pr: 8, verdict: 'APPROVE', head_sha: SHA, findings: [], evidence: [], createdAt: new Date().toISOString() }))
+  assert.match(run(['adjudicate', '--record', ok, '--decision', 'merge', '--by', 'x', '--reason', 'y']).stderr, /只有 ESCALATE/)
+
+  const esc = join(dir, `9-${SHA}.json`)
+  writeFileSync(esc, JSON.stringify({ schemaVersion: 1, policyVersion: '0.1.0', round: 1, pr: 9, verdict: 'ESCALATE', head_sha: SHA, findings: [], evidence: [], createdAt: new Date().toISOString() }))
+  assert.equal(run(['adjudicate', '--record', esc, '--decision', 'merge', '--by', 'x', '--reason', 'y']).code, 0)
+  assert.match(run(['adjudicate', '--record', esc, '--decision', 'abandon', '--by', 'z', '--reason', 'w']).stderr, /已被 .* 处置过/)
+  assert.match(run(['adjudicate', '--record', esc, '--decision', 'nope', '--by', 'x', '--reason', 'y']).stderr, /只能是 merge 或 abandon/)
+})
