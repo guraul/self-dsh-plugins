@@ -12,12 +12,16 @@ import { ContractError } from './contract.js'
 export const PRODUCTS = {
   opencode: {
     bin: 'opencode',
+    // 一次性调用；opencode 侧没有 plan 模式的全文检索负担，300s 够用
+    defaultTimeoutMs: 300000,
     argv: ({ model, task }) => ['run', ...(model ? ['--model', model] : []), task],
     // plan 是 opencode 内置的只读 agent：能读仓库、不能写。
     permissionArgs: { readonly: ['--agent', 'plan'], default: [], full: ['--auto'] },
   },
   codebuddy: {
     bin: 'codebuddy',
+    // plan 模式会去读仓库核对，5k+ diff 的审核实测超过 300s，给到 600s
+    defaultTimeoutMs: 600000,
     // json 输出里带 modelUsage，可以用来核对「实际用的模型」
     argv: ({ model, task }) => ['-p', '--output-format', 'json', ...(model ? ['--model', model] : []), task],
     // default 不附加参数：保持与旧行为一致，只在显式 readonly / full 时才改变权限
@@ -27,6 +31,13 @@ export const PRODUCTS = {
       full: ['--permission-mode', 'auto'],
     },
   },
+}
+
+/** 形态 B 的默认超时（按产品区分）；配置可覆盖。 */
+export function defaultTimeout(product) {
+  const spec = PRODUCTS[product]
+  if (!spec) throw new ContractError('E_UNAVAILABLE', `未支持的 product: ${product}`)
+  return spec.defaultTimeoutMs ?? 300000
 }
 
 /** 角色权限 → CLI 参数。不传权限时按 default（不附加任何参数）。 */
@@ -113,8 +124,10 @@ function requestTask(request) {
 /**
  * @param {{ product: string, timeoutMs?: number, env?: object, spawnImpl?: Function }} options
  */
-export function createProductProvider({ product, bin, timeoutMs = 300000, env = process.env, spawnImpl = spawn }) {
+export function createProductProvider({ product, bin, timeoutMs, env = process.env, spawnImpl = spawn }) {
+  const budgetMs = timeoutMs ?? defaultTimeout(product)
   let seq = 0
+
   return {
     name: providerName(product),
     inheritsParentContext: false,
@@ -151,10 +164,10 @@ export function createProductProvider({ product, bin, timeoutMs = 300000, env = 
           reject(
             new ContractError(
               'E_TIMEOUT',
-              `${product} 超过 ${timeoutMs}ms 未返回${detail ? `；stderr: ${detail}` : ''}`,
+              `${product} 超过 ${budgetMs}ms 未返回${detail ? `；stderr: ${detail}` : ''}`,
             ),
           )
-        }, timeoutMs)
+        }, budgetMs)
         child.on('error', (error) => {
           clearTimeout(timer)
           reject(new ContractError('E_UNAVAILABLE', `${executable} 启动失败: ${error.message}`))
