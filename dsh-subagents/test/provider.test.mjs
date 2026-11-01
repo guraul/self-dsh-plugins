@@ -114,3 +114,30 @@ test('outputText 兼容字符串与分段数组', () => {
   assert.equal(outputText([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]), 'a\nb')
   assert.equal(outputText(undefined), '')
 })
+
+test('activationSpec 必须带 signal（PR8 事故回归）', async () => {
+  const { activationSpec } = await import('../lib/tools/delegate.js')
+  const controller = new AbortController()
+  const spec = activationSpec({
+    provider: 'opencode',
+    role: { instructions: '你是执行者' },
+    task: '修一下',
+    agent: { id: 'parent' },
+    signal: controller.signal,
+    maxDepth: 2,
+  })
+  assert.equal(spec.provider, 'product-subagents:opencode')
+  assert.equal(spec.signal, controller.signal)
+  assert.equal(spec.request.parent.id, 'parent')
+  assert.equal(spec.request.maxDepth, 2)
+  assert.match(spec.request.prompt, /你是执行者[\s\S]*修一下/)
+})
+
+test('activationSpec 缺 signal / provider / agent 时报错', async () => {
+  const { activationSpec } = await import('../lib/tools/delegate.js')
+  const signal = new AbortController().signal
+  const base = { provider: 'opencode', role: {}, task: 't', agent: { id: 'p' }, signal }
+  assert.throws(() => activationSpec({ ...base, signal: undefined }), /signal 不能为空/)
+  assert.throws(() => activationSpec({ ...base, provider: '' }), /provider 不能为空/)
+  assert.throws(() => activationSpec({ ...base, agent: undefined }), /agent 不能为空/)
+})
