@@ -1,0 +1,99 @@
+/**
+ * `product_delegate`：把任务交给一个 product CLI，同步等结果。
+ *
+ * 与旧插件的差别：一期只有一次性执行（没有 background / submit / wait）。
+ * 之所以还留这个工具名，是为了让 `audit-subagents.mjs` 与既有文档里的调用方式
+ * 不失效——改名的代价远大于收益，正名留到续接补齐之后。
+ */
+import { providerName } from '../provider.js'
+
+let defineToolImpl
+
+async function getDefineTool() {
+  if (!defineToolImpl) {
+    const mod = await import('@deepseek-ai/dsh-tools')
+    defineToolImpl = mod.defineTool ?? mod.default?.defineTool
+  }
+  if (!defineToolImpl) throw new Error('@deepseek-ai/dsh-tools 未提供 defineTool')
+  return defineToolImpl
+}
+
+const OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    output: { type: 'string', description: '产品 CLI 的最终回答' },
+    stopReason: { type: 'string', description: '结束原因' },
+    role: { type: 'string', description: '解析后的角色 id' },
+    provider: { type: 'string', description: '实际使用的产品 CLI' },
+    permissionMode: { type: 'string', description: '角色声明的权限模式' },
+  },
+}
+
+/** provider 返回的 output 可能是 {type:'text',text} 数组，也可能是纯字符串。 */
+export function outputText(output) {
+  if (typeof output === 'string') return output
+  if (!Array.isArray(output)) return ''
+  return output
+    .map((part) => (typeof part === 'string' ? part : part?.text ?? ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
+/**
+ * @param {any} ctx 插件上下文
+ * @param {{ roles: Map<string, object>, maxDepth?: number }} options
+ */
+export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
+  const defineTool = await getDefineTool()
+  const roleIds = [...roles.keys()]
+
+  ctx.tools.register(
+    defineTool({
+      name: 'product_delegate',
+      description:
+        '把一个自包含的任务交给外部产品 CLI（opencode / codebuddy）同步执行，返回最终回答。' +
+        '角色决定权限模式与附加指令；一期是一次性执行，不能续接、不能追问。',
+      parameters: {
+        role: {
+          type: 'string',
+          enum: roleIds.length > 0 ? roleIds : ['executor'],
+          description: '角色 id（product_roles 可列出）。缺省 executor。',
+        },
+        provider: {
+          type: 'string',
+          description: '产品 CLI，缺省用角色声明的 provider；两者都没有则报错。',
+        },
+        model: { type: 'string', description: '产品侧模型标识；缺省用 CLIZ 自身默认值。' },
+        task: { type: 'string', required: true, description: '交给产品 CLI 的任务正文。' },
+      },
+      output: {
+        schema: OUTPUT_SCHEMA,
+        render: (_args, value) => [{ type: 'text', text: String(value.output ?? '') }],
+      },
+      async execute(args, exec) {
+        const role = roles.get(args.role || 'executor')
+        if (!role) throw new Error(`product_delegate: 未知角色 "${args.role}"`)
+        const provider = args.provider || role.provider
+        if (!provider) throw new Error(`product_delegate: 未指定 provider，角色 "${role.id}" 也没钉 provider`)
+
+        const handle = await ctx.subagents.startActivation({
+          provider: providerName(provider),
+          request: {
+            prompt: [role.instructions, args.task].filter(Boolean).join('\n\n'),
+            parent: exec.agent,
+            maxDepth,
+          },
+        })
+        const settled = await handle.result
+        return {
+          output: outputText(settled?.output),
+          stopReason: settled?.stopReason ?? 'end',
+          role: role.id,
+          provider,
+          permissionMode: role.permissionMode,
+        }
+      },
+    }),
+  )
+}

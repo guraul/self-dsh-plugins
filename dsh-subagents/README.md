@@ -7,8 +7,9 @@
 
 三种形态共享同一份判定契约，所以上层调用方不需要知道背后差多少。
 
-> 状态：**PR2（骨架）**。角色层、契约层、记录层与 CLI 已可用；宿主侧能力（注册
-> `product-subagents:*` provider、审核 HTTP 路由）在 PR4 补齐，本包当前不挂真实 profile。
+> 状态：契约层、角色层、记录层、CLI 与 **executor 委派**（`product_delegate`，一次性）已就绪。
+> 与旧插件 `dsh-plugin-product-subagents` 不能同时挂载（provider 重名），切换步骤见
+> [`docs/pipeline/review-loop.md`](../docs/pipeline/review-loop.md)。一期不含续接。
 
 ## 安装
 
@@ -69,8 +70,8 @@ reviewer 必须输出恰好一行：
 
 ## 已知限制（诚实清单）
 
-- **只有形态 B，且是一次性调用**：不移植 ACP 会话，因此没有「续接」；executor 的
-  委派实现要等 PR4。
+- **只有形态 B，且是一次性调用**：不移植 ACP 会话，因此没有「续接」（`product_submit` / `product_wait` 不存在）。
+- **与旧插件不能同时挂载**：provider 名相同，重名会让 profile 插件树启动失败。
 - **不分片**：diff 超过预算直接 `E_BUDGET`，交回人工。分片的合成规则（全过才算过 /
   多数 / 任一否决）是新的判定语义，一期不做。
 - **不自动换模型**：`review` 必须显式给 `--model`；模型不可用就失败，不降级。
