@@ -283,3 +283,9 @@ test('record: --findings 缺 findings 数组时报错', () => {
   assert.equal(out.code, 2)
   assert.match(out.stderr, /缺少 findings 数组/)
 })
+
+test('review --form a 给出可操作指引', () => {
+  const out = run(['review', '--pr', '1', '--form', 'a'])
+  assert.equal(out.code, 2)
+  assert.match(out.stderr, /请由控制面用 subagent 工具发起/)
+})
