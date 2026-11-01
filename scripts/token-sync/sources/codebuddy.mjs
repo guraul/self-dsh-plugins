@@ -136,7 +136,29 @@ export async function collectCodebuddy(opts = {}) {
     }
   }
 
-  return { rows, errors, stats: { files: files.length, calls } };
+  // 必须在这里就按主键聚合：服务端 UPSERT 是「覆盖」语义，
+  // 同一个 traceId 的多条调用如果逐行上传，后一行会把前一行覆盖掉（实测丢 96%）。
+  // 主键 = (usage_date, source, provider, model, session_id)，provider 固定 codebuddy。
+  const merged = new Map();
+  for (const row of rows) {
+    const key = [row.usage_date, row.model, row.session_id].join('\u0000');
+    const prev = merged.get(key);
+    if (!prev) {
+      merged.set(key, { ...row });
+      continue;
+    }
+    prev.calls += row.calls;
+    prev.input_tokens += row.input_tokens;
+    prev.output_tokens += row.output_tokens;
+    prev.reasoning_tokens += row.reasoning_tokens;
+    prev.cache_read += row.cache_read;
+    prev.cache_write += row.cache_write;
+    prev.total_tokens = prev.input_tokens + prev.output_tokens + prev.reasoning_tokens + prev.cache_read + prev.cache_write;
+    prev.first_at = Math.min(prev.first_at || Infinity, row.first_at || Infinity) || 0;
+    prev.last_at = Math.max(prev.last_at || 0, row.last_at || 0);
+  }
+
+  return { rows: [...merged.values()], errors, stats: { files: files.length, calls, aggregated: merged.size } };
 }
 
 function filenameOf(file) {
