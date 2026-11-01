@@ -4,7 +4,7 @@
  *
  * 判定与合并分离是这里的硬约束：CLI 只产出记录，不执行合并。
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import {
@@ -17,6 +17,7 @@ import {
 } from './contract.js'
 import { buildReviewPrompt, prepareRequest } from './request.js'
 import { renderCard } from './card.js'
+import { safeInline } from './comment.js'
 import { extractFindings, normalizeEvidence, normalizeFinding } from './findings.js'
 import { ghCommands, parseRemoteUrl, publishPlan } from './publish.js'
 import { renderComment } from './comment.js'
@@ -39,6 +40,7 @@ const USAGE = `用法:
   dsh-subagents prepare --pr <号> [--out <文件>] [--root <仓库根>]
   dsh-subagents prompt  --request <文件> [--out <文件>] [--role <角色>]  # 渲染审核提示词
   dsh-subagents recheck --request <新请求> --previous <上一轮记录> [--out <文件>]
+                                                        # 渲染「同一会话复审」的任务书
   dsh-subagents adjudicate --record <文件> --decision <merge|abandon> --by <人> --reason <文本>
                                                         # 给 ESCALATE 的判定留下人为处置
                                                         # 渲染「同一会话复审」的任务书
@@ -150,8 +152,12 @@ function cmdAdjudicate(flags) {
   if (decision !== 'merge' && decision !== 'abandon') {
     throw fail('E_BUDGET', `--decision 只能是 merge 或 abandon，收到 ${decision ?? '(空)'}`)
   }
-  if (!flags.by) throw fail('E_BUDGET', '缺少 --by（谁做的决定）')
-  if (!flags.reason) throw fail('E_BUDGET', '缺少 --reason（为什么这么决定）')
+  if (typeof flags.by !== 'string' || flags.by.length === 0) {
+    throw fail('E_BUDGET', '--by 需要一个值（谁做的决定）')
+  }
+  if (typeof flags.reason !== 'string' || flags.reason.length === 0) {
+    throw fail('E_BUDGET', '--reason 需要一个值（为什么这么决定）')
+  }
 
   const record = readRecord(flags.record)
   if (record.verdict !== 'ESCALATE') {
@@ -167,14 +173,17 @@ function cmdAdjudicate(flags) {
     reason: String(flags.reason),
     at: new Date().toISOString(),
   }
-  writeFileSync(flags.record, `${JSON.stringify(record, null, 2)}\n`, 'utf8')
+  // 原子写：记录里是审计证据，写到一半断电不能把它毁掉
+  const tmpFile = `${flags.record}.tmp`
+  writeFileSync(tmpFile, `${JSON.stringify(record, null, 2)}\n`, 'utf8')
+  renameSync(tmpFile, flags.record)
 
   const lines = [
     '## 人工处置',
     '',
     `- **判定**：${record.verdict}（${record.errorCode ?? '无错误码'}）→ **${decision === 'merge' ? '放行合并' : '放弃'}**`,
-    `- **由**：${record.adjudication.by}`,
-    `- **理由**：${record.adjudication.reason}`,
+    `- **由**：${safeInline(record.adjudication.by)}`,
+    `- **理由**：${safeInline(record.adjudication.reason)}`,
     `- **时间**：${record.adjudication.at}`,
     '',
     '原判定保持不变；这条只记录人为什么推翻了它。',
