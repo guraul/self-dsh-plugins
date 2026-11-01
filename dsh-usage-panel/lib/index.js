@@ -689,6 +689,126 @@ async function readCodebuddySession(remoteId, cwd, options = {}) {
   return { hit, errors };
 }
 
+// src/host/external/homebase.ts
+import https from "node:https";
+import http from "node:http";
+import { URL } from "node:url";
+var DEFAULT_TIMEOUT_MS = 8e3;
+function homebaseConfigFromEnv(env = process.env) {
+  const raw = (env.DSH_USAGE_PANEL_DATA_SOURCE ?? "").trim().toLowerCase();
+  const url = (env.DSH_USAGE_PANEL_HOMEBASE_URL ?? "").trim();
+  const token = (env.DSH_USAGE_PANEL_HOMEBASE_TOKEN ?? "").trim();
+  const ca = (env.DSH_USAGE_PANEL_HOMEBASE_CA ?? "").trim() || null;
+  const timeoutMs = Number(env.DSH_USAGE_PANEL_HOMEBASE_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
+  const source = raw === "homebase" && url && token ? "homebase" : "local";
+  return { source, url, token, ca, timeoutMs };
+}
+function num2(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function requestJson(config, path5) {
+  return new Promise((resolve, reject) => {
+    let url;
+    try {
+      url = new URL(path5, config.url);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const isHttps = url.protocol === "https:";
+    const lib = isHttps ? https : http;
+    const req = lib.request(
+      {
+        method: "GET",
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname + url.search,
+        headers: { "x-internal-token": config.token },
+        timeout: config.timeoutMs,
+        ...isHttps && config.ca ? { ca: config.ca } : {}
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const status = res.statusCode ?? 0;
+          const text = Buffer.concat(chunks).toString("utf8");
+          if (status < 200 || status >= 300) {
+            reject(new Error(`homebase ${status}: ${text.slice(0, 200)}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(text));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+    req.on("timeout", () => req.destroy(new Error("homebase timeout")));
+    req.on("error", reject);
+    req.end();
+  });
+}
+function foldHomebaseRows(rows) {
+  const bySession = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    if (!row || typeof row.session_id !== "string" || !row.session_id) continue;
+    const cur = bySession.get(row.session_id) ?? {
+      totals: emptyTotals(),
+      calls: 0,
+      first: 0,
+      last: 0,
+      byModel: /* @__PURE__ */ new Map()
+    };
+    cur.totals.input += num2(row.input_tokens);
+    cur.totals.output += num2(row.output_tokens);
+    cur.totals.cacheRead += num2(row.cache_read);
+    cur.totals.cacheWrite += num2(row.cache_write);
+    cur.totals.total += num2(row.total_tokens);
+    cur.calls += num2(row.calls);
+    const first = num2(row.first_at);
+    const last = num2(row.last_at);
+    if (first > 0) cur.first = cur.first === 0 ? first : Math.min(cur.first, first);
+    if (last > 0) cur.last = Math.max(cur.last, last);
+    if (row.model) cur.byModel.set(row.model, (cur.byModel.get(row.model) ?? 0) + num2(row.total_tokens));
+    bySession.set(row.session_id, cur);
+  }
+  const out = /* @__PURE__ */ new Map();
+  for (const [sessionId, agg] of bySession) {
+    let model = null;
+    let best = -1;
+    for (const [name2, tokens] of agg.byModel) {
+      if (tokens > best) {
+        best = tokens;
+        model = name2;
+      }
+    }
+    out.set(sessionId, {
+      executor: "opencode",
+      remoteId: sessionId,
+      model,
+      totals: agg.totals,
+      calls: agg.calls,
+      startedAt: agg.first,
+      endedAt: agg.last || null,
+      source: "opencode-db"
+    });
+  }
+  return out;
+}
+async function fetchHomebaseUsage(config, opts = {}) {
+  if (config.source !== "homebase") throw new Error("homebase source not enabled");
+  if (!config.url || !config.token) throw new Error("homebase url/token missing");
+  const limit = Math.min(Math.max(opts.limit ?? 2e3, 1), 2e3);
+  const payload = await requestJson(
+    config,
+    `/api/internal/token-usage/query?source=opencode&group_by=all&limit=${limit}`
+  );
+  return foldHomebaseRows(payload?.rows ?? []);
+}
+
 // src/host/external/opencode.ts
 import { readdir } from "node:fs/promises";
 import os2 from "node:os";
@@ -698,7 +818,7 @@ var COLUMNS = "id, model, tokens_input, tokens_output, tokens_cache_read, tokens
 function messageOf2(err) {
   return String(err?.message ?? err);
 }
-function num2(value) {
+function num3(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
@@ -754,13 +874,13 @@ function countCalls(db, table, id) {
   if (table === "session_v2") {
     try {
       const row = db.prepare("SELECT count(*) AS c FROM session_message WHERE session_id = ? AND type = 'assistant'").get(id);
-      return num2(row?.c);
+      return num3(row?.c);
     } catch {
     }
   }
   try {
     const row = db.prepare("SELECT count(*) AS c FROM message WHERE session_id = ? AND json_extract(data, '$.role') = 'assistant'").get(id);
-    return num2(row?.c);
+    return num3(row?.c);
   } catch {
     return 1;
   }
@@ -768,10 +888,10 @@ function countCalls(db, table, id) {
 function toExternal(db, table, row) {
   const remoteId = typeof row.id === "string" ? row.id : "";
   if (!remoteId) return null;
-  const input = num2(row.tokens_input);
-  const output = num2(row.tokens_output);
-  const cacheRead = num2(row.tokens_cache_read);
-  const cacheWrite = num2(row.tokens_cache_write);
+  const input = num3(row.tokens_input);
+  const output = num3(row.tokens_output);
+  const cacheRead = num3(row.tokens_cache_read);
+  const cacheWrite = num3(row.tokens_cache_write);
   const startedAt = timeOrNull(row.time_created);
   if (startedAt === null) return null;
   return {
@@ -905,7 +1025,7 @@ function defaultProjCacheDir() {
   const home = process.env.DSH_HOME || path4.join(os4.homedir(), ".dsh");
   return path4.join(home, "storages", "session_projcache", "sessions");
 }
-function num3(value) {
+function num4(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
@@ -954,10 +1074,10 @@ async function readProjCache(dir, sessionId) {
     const currentTotals = record(current.totals);
     if (currentTotals) {
       const b = {
-        input: num3(currentTotals.input),
-        output: num3(currentTotals.output),
-        cacheRead: num3(currentTotals.cacheRead),
-        cacheWrite: num3(currentTotals.cacheWrite)
+        input: num4(currentTotals.input),
+        output: num4(currentTotals.output),
+        cacheRead: num4(currentTotals.cacheRead),
+        cacheWrite: num4(currentTotals.cacheWrite)
       };
       relay = { ...b, total: b.input + b.output + b.cacheRead + b.cacheWrite };
     }
@@ -973,10 +1093,10 @@ async function readProjCache(dir, sessionId) {
     const tu = record(record(record(rows.tokenUsage)?.val)?.totals);
     if (tu) {
       relay = totals(
-        num3(tu.uncachedInputTokens),
-        num3(tu.outputTokens),
-        num3(tu.cacheReadTokens),
-        num3(tu.cacheWriteTokens)
+        num4(tu.uncachedInputTokens),
+        num4(tu.outputTokens),
+        num4(tu.cacheReadTokens),
+        num4(tu.cacheWriteTokens)
       );
     }
   }
@@ -1036,13 +1156,22 @@ async function collectSubagents(deps) {
       }
     }
   }
+  let homebaseHits = null;
+  if (deps.externalSource === "homebase" && deps.homebaseConfig) {
+    try {
+      homebaseHits = await fetchHomebaseUsage(deps.homebaseConfig);
+    } catch (error) {
+      errors.push(`homebase: ${String(error?.message ?? error)}\uFF08\u5DF2\u56DE\u9000\u672C\u5730\u8BFB\u53D6\uFF09`);
+    }
+  }
   const codebuddyEntries = [...codebuddyTasks.entries()];
   const [opencode, codebuddyResults, projCaches] = await Promise.all([
-    readOpencodeSessions(opencodeIds, { dbPaths }),
+    homebaseHits ? Promise.resolve({ hits: /* @__PURE__ */ new Map(), errors: [] }) : readOpencodeSessions(opencodeIds, { dbPaths }),
     Promise.all(codebuddyEntries.map(async ([key, pending]) => [key, await pending])),
     mapLimit(sessionIds, PROJ_CONCURRENCY, (sessionId) => readProjCache(projCacheDir, normalizeSessionId(sessionId)))
   ]);
   errors.push(...opencode.errors);
+  const opencodeHits = homebaseHits ?? opencode.hits;
   const codebuddyHits = /* @__PURE__ */ new Map();
   for (const [key, result] of codebuddyResults) {
     errors.push(...result.errors);
@@ -1051,7 +1180,7 @@ async function collectSubagents(deps) {
   function externalOf(entry) {
     if (!entry) return null;
     if (entry.product === "opencode" || entry.product === "acp") {
-      const hit = opencode.hits.get(entry.remoteId);
+      const hit = opencodeHits.get(entry.remoteId);
       return hit ? { ...hit, executor: executorOf(entry.product) } : null;
     }
     if (entry.product === "codebuddy") {
@@ -1246,6 +1375,10 @@ var STALE_MS = 10 * 60 * 1e3;
 var RESCAN_MS = 10 * 60 * 1e3;
 function apply(ctx) {
   const tag = "[dsh-usage-panel]";
+  const homebase = homebaseConfigFromEnv();
+  if (homebase.source === "homebase") {
+    console.log(tag, `external source: homebase (${homebase.url})`);
+  }
   const sq = ctx.get("sessionQuery");
   const registry = ctx.get("sessionProjections");
   const projCache = ctx.get("sessionProjectionCache");
@@ -1454,7 +1587,7 @@ function apply(ctx) {
         });
       }
       return respond(
-        await collectSubagents({ sq }).then(
+        await collectSubagents({ sq, externalSource: homebase.source, homebaseConfig: homebase }).then(
           (value) => ({ ok: true, value }),
           (err) => ({
             ok: false,

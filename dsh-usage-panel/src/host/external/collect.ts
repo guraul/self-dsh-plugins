@@ -16,6 +16,7 @@ import type { SessionQueryEngine, SessionRecord } from '@deepseek-ai/dsh-session
 import type { ExecutorId, SubagentExternal, SubagentItem, SubagentsPayload, UsageTotals } from '../../shared/contract.ts'
 import { emptyTotals } from '../../shared/usage.ts'
 import { defaultCodebuddyProjectsDir, readCodebuddySession } from './codebuddy.ts'
+import { fetchHomebaseUsage, type ExternalSource, type HomebaseConfig } from './homebase.ts'
 import { defaultOpencodeDbPaths, readOpencodeSessions } from './opencode.ts'
 import { defaultRegistryPath, loadRegistry, normalizeSessionId, type RegistryEntry } from './registry.ts'
 
@@ -48,6 +49,13 @@ export interface SubagentDeps {
   projCacheDir?: string
   opencodeDbPaths?: string[]
   codebuddyProjectsDir?: string
+  /**
+   * Where opencode's external usage comes from. `homebase` (self-dsh-plugins#208)
+   * asks the production API instead of reading the local db; any failure falls
+   * back to `local` so the panel never goes blank.
+   */
+  externalSource?: ExternalSource
+  homebaseConfig?: HomebaseConfig
   /** Override the 60s cache window (tests / callers that need fresh data). */
   ttlMs?: number
   now?: number
@@ -249,13 +257,28 @@ export async function collectSubagents(deps: SubagentDeps): Promise<SubagentsPay
     }
   }
 
+  // homebase replaces the local opencode scan when configured; a failure is
+  // recorded as a coverage error and the local path runs as if nothing happened.
+  let homebaseHits: Map<string, SubagentExternal> | null = null
+  if (deps.externalSource === 'homebase' && deps.homebaseConfig) {
+    try {
+      homebaseHits = await fetchHomebaseUsage(deps.homebaseConfig)
+    } catch (error) {
+      errors.push(`homebase: ${String((error as Error)?.message ?? error)}（已回退本地读取）`)
+    }
+  }
+
   const codebuddyEntries = [...codebuddyTasks.entries()]
   const [opencode, codebuddyResults, projCaches] = await Promise.all([
-    readOpencodeSessions(opencodeIds, { dbPaths }),
+    homebaseHits
+      ? Promise.resolve({ hits: new Map<string, SubagentExternal>(), errors: [] as string[] })
+      : readOpencodeSessions(opencodeIds, { dbPaths }),
     Promise.all(codebuddyEntries.map(async ([key, pending]) => [key, await pending] as const)),
     mapLimit(sessionIds, PROJ_CONCURRENCY, (sessionId) => readProjCache(projCacheDir, normalizeSessionId(sessionId))),
   ])
   errors.push(...opencode.errors)
+  // 回退时本地的 opencode 结果照常使用；只有 homebase 成功才以它为准。
+  const opencodeHits = homebaseHits ?? opencode.hits
   const codebuddyHits = new Map<string, SubagentExternal>()
   for (const [key, result] of codebuddyResults) {
     errors.push(...result.errors)
@@ -265,7 +288,7 @@ export async function collectSubagents(deps: SubagentDeps): Promise<SubagentsPay
   function externalOf(entry: RegistryEntry | undefined): SubagentExternal | null {
     if (!entry) return null
     if (entry.product === 'opencode' || entry.product === 'acp') {
-      const hit = opencode.hits.get(entry.remoteId)
+      const hit = opencodeHits.get(entry.remoteId)
       return hit ? { ...hit, executor: executorOf(entry.product) } : null
     }
     if (entry.product === 'codebuddy') {

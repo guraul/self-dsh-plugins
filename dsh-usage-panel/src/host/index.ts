@@ -27,6 +27,7 @@ import {
 } from '../shared/contract.ts'
 import { emptyAggregate, emptyOverview, finalizeOverview, mergeSessionValue, rankSessions } from './aggregate.ts'
 import { collectSubagents } from './external/collect.ts'
+import { homebaseConfigFromEnv } from './external/homebase.ts'
 import { usagePanelProjectionDefinition } from './projection-unit.ts'
 import { scanFallback } from './scan.ts'
 import type { HostConnection, HostLlm, HostWorkspaceRegistry } from './types.ts'
@@ -39,6 +40,12 @@ const RESCAN_MS = 10 * 60 * 1000 // periodic keep-warm rescan
 
 export function apply(ctx: Context): void {
   const tag = '[dsh-usage-panel]'
+  // External usage source: env-selected, defaults to local (self-dsh-plugins#208).
+  // A misconfigured 'homebase' silently stays local — page unaffected.
+  const homebase = homebaseConfigFromEnv()
+  if (homebase.source === 'homebase') {
+    console.log(tag, `external source: homebase (${homebase.url})`)
+  }
   const sq = ctx.get('sessionQuery') as SessionQueryEngine | undefined
   const registry = ctx.get('sessionProjections') as SessionProjectionRegistry | undefined
   const projCache = ctx.get('sessionProjectionCache') as SessionProjectionCache | undefined
@@ -289,7 +296,7 @@ export function apply(ctx: Context): void {
           })
         }
         return respond(
-          await collectSubagents({ sq }).then(
+          await collectSubagents({ sq, externalSource: homebase.source, homebaseConfig: homebase }).then(
             (value): RpcResult<SubagentsPayload> => ({ ok: true, value }),
             (err): RpcResult<SubagentsPayload> => ({
               ok: false,
