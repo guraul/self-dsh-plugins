@@ -44,6 +44,10 @@ node lib/cli.js log --trace 20261031T121500Z-a1b2c3d4
 # 7. 生成任务卡与 PR comment（纯文本，不碰网络）
 node lib/cli.js card --input /tmp/card.json
 node lib/cli.js comment --record .dsh-web/reviews/116-<sha>.json --round 2
+
+# 8. 发布到 PR：评论 + 按判定提交 review 状态（APPROVE→approve，REJECT→request-changes，ESCALATE→只发评论）
+GH_CONFIG_DIR=~/.config/gh-reviewer node lib/cli.js publish --record .dsh-web/reviews/116-<sha>.json --round 2
+#    先用 --dry-run 看要执行的 gh 命令
 ```
 
 退出码：`0` 通过 / `1` 拒绝（闸门不过或判定不是 `APPROVE`）/ `2` 参数或环境错误。
