@@ -17,7 +17,9 @@
 # 参数映射: --review-record=<f> → 包里的 --record <f>；--no-review / --reason / --check-only /
 #   --checks-file / --force 原样传；--dry-run 是 --check-only 的旧别名。
 #
-# 包位置: 优先 $DSH_PIPELINE_HOME，缺省 $HOME/workspace/dsh-pipeline；找不到就报错退出。
+# 包位置: 优先 $DSH_PIPELINE_HOME，缺省 <repo>/tools/node_modules/dsh-pipeline。
+#   注意：装的是 `dist/latest.tgz` 的**打包产物**（见 tools/package.json），不是源码 checkout——
+#   否则「包门禁通过才发布」这道护栏就形同虚设（ADR-0003 §4）。
 #
 # 与旧脚本的三处语义差异（都来自共享包，不是本壳的取舍）:
 #   * --no-review 必须同时给 --reason（包要求跳过必须留原因）。
@@ -53,14 +55,16 @@ done
 # —— 共享包位置 ——
 PKG_HOME=""
 if [[ -n "${DSH_PIPELINE_HOME+x}" ]]; then PKG_HOME="${DSH_PIPELINE_HOME}"; fi
-if [[ -z "${PKG_HOME}" ]]; then
-  [[ -n "${HOME+x}" ]] || die "找不到共享 pipeline 包: 未设置 DSH_PIPELINE_HOME 且 \$HOME 未定义"
-  PKG_HOME="${HOME}/workspace/dsh-pipeline"
-fi
+if [[ -z "${PKG_HOME}" ]]; then PKG_HOME="${REPO_ROOT}/tools/node_modules/dsh-pipeline"; fi
 CLI="${PKG_HOME}/bin/cli.mjs"
 [[ -f "${CLI}" ]] \
-  || die "找不到共享 pipeline 包: ${CLI} （设置 DSH_PIPELINE_HOME 指向 dsh-pipeline 仓库）"
+  || die "找不到共享 pipeline 包: ${CLI} （在 tools/ 里跑 pnpm install，或设置 DSH_PIPELINE_HOME）"
 command -v node >/dev/null 2>&1 || die "需要 node：共享包是 Node CLI"
+
+# —— 主工作区（记录落在这里，不是 worktree） ——
+MAIN_WT=$(git -C "${REPO_ROOT}" worktree list --porcelain | awk '/^worktree /{print $2; exit}')
+[[ -n "${MAIN_WT}" ]] || die "找不到主工作区"
+command -v gh >/dev/null 2>&1 || die "需要 gh：合并脚本要读 PR 状态"
 
 # —— 目标 PR：包要求 --pr 是正整数，分支名/当前分支在这里先解析成 PR 号 ——
 PR=""
@@ -79,7 +83,7 @@ fi
 [[ -n "${PR}" ]] || die "找不到 PR: ${TARGET:-$(git -C "${REPO_ROOT}" branch --show-current)}"
 
 # —— 参数转发（只做映射，不做任何判定）——
-set -- merge --pr "${PR}" --root "${REPO_ROOT}"
+set -- merge --pr "${PR}" --root "${MAIN_WT}"
 if [[ "${HAS_RECORD}" -eq 1 ]]; then set -- "$@" --record "${RECORD}"; fi
 if [[ "${HAS_CHECKS}" -eq 1 ]]; then set -- "$@" --checks-file "${CHECKS_FILE}"; fi
 if [[ "${HAS_REASON}" -eq 1 ]]; then set -- "$@" --reason "${REASON}"; fi

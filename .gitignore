@@ -18,7 +18,10 @@
 !/.github/
 # pipeline 的仓库级配置（repo / ci / highRisk）：共享包 @guraul/dsh-pipeline 从这里读，
 # 必须随仓库一起走，否则每个 worktree 都没有配置（issue #187）。
+# 只放行这一个文件：.dsh/ 下将来若有本机运行态文件，不应默认可入库。
 !/.dsh/
+/.dsh/*
+!/.dsh/pipeline.json
 
 # —— 运维脚本与 LaunchAgent ——
 !/upgrade-dsh.sh
