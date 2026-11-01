@@ -252,7 +252,16 @@ node --test scripts/pipeline/audit-subagents.test.mjs           # 单测 + 两�
 
 ## 四、关键约定（红线）
 
-1. **审核闸门 + 人在环**：`merge-pr.sh` 默认要求 `--review-record`，没有审核记录绝不合并；绕过必须显式 `--no-review`（会留痕）。reviewer 判 `APPROVE` 且未命中高风险时直接合并；只有 `ESCALATE`、高风险路径、3 轮超限才需要用户介入。
+1. **审核闸门 + 人在环**：`merge-pr.sh` 默认要求 `--review-record`，没有审核记录绝不合并；reviewer 判 `APPROVE` 且未命中高风险时直接合并；只有 `ESCALATE`、高风险路径、3 轮超限才需要用户介入。
+
+   **绕过闸门（`--no-review` / `DSH_REVIEWER=off`）**——规则正文见 `~/.dsh/AGENTS.md` §7 第 7 条，这里只写本仓的可操作细节：
+
+   | 项 | 要求 |
+   |---|---|
+   | 前提 | 用户**当场明确同意**；不得以「改动很小」为由自行跳过 |
+   | 留痕 | 跳过审计自动写到 `.dsh-web/reviews/skips/<时间戳>-<pr>.json`（主工作区） |
+   | PR 评论 | 必须在 PR 上留一条评论，写明**为什么跳过**与**谁同意的**（可复制 `.tmp/bypass-<pr>.md` 的模板） |
+   | 统计口径 | 跳过的 PR **不算已审核**：它没有审核记录，追溯时不得计入 |
 2. **合并只能 squash**；PR body 首行必须 `Closes #<issue号>`（`open-pr.sh` 已内置）。
 3. **绝不用真实 `~/.dsh` 做安装实验**：一律走 `install-check.sh`（一次性 `DSH_HOME`，装完即删）。
 4. **版本豁免（version exemption）是逃生舱**：只在拿到用户对**具体版本组合**的明确同意后才用（CLI 需 `--accept-risk`）；用完必须撤销，`dsh plugin --profile web version-exemptions` 应回到 `{}`。插件升版本或 DSH 升版本都会让它自动失效。
