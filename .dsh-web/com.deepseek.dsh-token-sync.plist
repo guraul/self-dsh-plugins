@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  token-sync 每日采集（self-dsh-plugins#202）
+
+  安装：
+    cp .dsh-web/com.deepseek.dsh-token-sync.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.deepseek.dsh-token-sync.plist
+
+  手动触发一次：
+    launchctl kickstart -k gui/$(id -u)/com.deepseek.dsh-token-sync
+
+  卸载：
+    launchctl bootout gui/$(id -u)/com.deepseek.dsh-token-sync
+
+  注意：
+  - 12:00 Asia/Shanghai（与 REQ-003 约定一致）；macOS 的 StartCalendarInterval 跟系统时区走，
+    本机已在 CST，无需额外设置。
+  - RunAtLoad=false：开机不补跑；漏采由 collect.mjs 的 --days 2 窗口兜住（每次采 T-1 与 T-2）。
+  - node 路径钉死 nvm v24.21.0：launchd 的 PATH 不含 nvm。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.deepseek.dsh-token-sync</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/gubin/.nvm/versions/node/v24.21.0/bin/node</string>
+    <string>/Users/gubin/workspace/self-dsh-plugins/scripts/token-sync/collect.mjs</string>
+    <string>--days</string>
+    <string>2</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>12</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/gubin/workspace/self-dsh-plugins/.dsh-web/token-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/gubin/workspace/self-dsh-plugins/.dsh-web/token-sync.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
