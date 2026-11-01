@@ -41,6 +41,31 @@ export function outputText(output) {
 }
 
 /**
+ * 组装 startActivation 的 spec。
+ *
+ * `signal` 是**必填**：服务端直接调用 `spec.signal.throwIfAborted()`
+ * （@deepseek-ai/dsh-subagent 的 startExternal / materialize 都会用到），
+ * 不传就会在第一次调用时抛 `Cannot read properties of undefined (reading 'throwIfAborted')`。
+ * 抽成纯函数是为了让单测能直接断言这件事，而不是再靠重启才发现。
+ */
+export function activationSpec({ provider, role, task, agent, signal, maxDepth = 3 }) {
+  if (!provider) throw new Error('activationSpec: provider 不能为空')
+  if (!signal) throw new Error('activationSpec: signal 不能为空（startActivation 必填）')
+  if (!agent) throw new Error('activationSpec: agent 不能为空（子代理的父 agent）')
+  return {
+    provider: providerName(provider),
+    signal,
+    request: {
+      // 内容分段数组是 DSH 内部已被验证的形状（旧插件也这么传）；字符串虽能跑通
+      // 我们自己的 provider，但没必要赌服务端怎么解释。
+      prompt: [{ type: 'text', text: [role?.instructions, task].filter(Boolean).join('\n\n') }],
+      parent: agent,
+      maxDepth,
+    },
+  }
+}
+
+/**
  * @param {any} ctx 插件上下文
  * @param {{ roles: Map<string, object>, maxDepth?: number }} options
  */
@@ -77,14 +102,16 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
         const provider = args.provider || role.provider
         if (!provider) throw new Error(`product_delegate: 未指定 provider，角色 "${role.id}" 也没钉 provider`)
 
-        const handle = await ctx.subagents.startActivation({
-          provider: providerName(provider),
-          request: {
-            prompt: [role.instructions, args.task].filter(Boolean).join('\n\n'),
-            parent: exec.agent,
+        const handle = await ctx.subagents.startActivation(
+          activationSpec({
+            provider,
+            role,
+            task: args.task,
+            agent: exec.agent,
+            signal: exec.signal,
             maxDepth,
-          },
-        })
+          }),
+        )
         const settled = await handle.result
         return {
           output: outputText(settled?.output),
