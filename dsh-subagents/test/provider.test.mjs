@@ -354,3 +354,22 @@ test('executor 角色是 full，reviewer 是 readonly', async () => {
   assert.equal(getRole('executor').permissionMode, 'full')
   assert.equal(getRole('reviewer').permissionMode, 'readonly')
 })
+
+test('显式 cwd 优先于 parent.cwd（否则跨仓委派被静默遮蔽）', async () => {
+  const seen = []
+  const provider = createProductProvider({
+    product: 'codebuddy',
+    spawnImpl: (bin, args, options) => {
+      seen.push(options.cwd)
+      return fakeChild({ stdout: JSON.stringify({ type: 'result', result: 'ok', modelUsage: { 'glm-5.3-flash': {} } }) + '\n' })
+    },
+  })
+  const handle = await provider.start({
+    prompt: 'x',
+    model: 'codebuddy/glm-5.3-flash',
+    cwd: '/tmp/target-repo',
+    parent: { cwd: '/tmp/parent-repo' },
+  })
+  await handle.result
+  assert.equal(seen[0], '/tmp/target-repo')
+})

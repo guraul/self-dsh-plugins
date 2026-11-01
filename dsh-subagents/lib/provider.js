@@ -200,7 +200,8 @@ export function createProductProvider({ product, bin, timeoutMs, env = process.e
       const args = command.args
       // 配置里给的二进制优先（codebuddy 在本机是 shim，不在 PATH 上）
       const executable = bin ?? command.bin
-      const cwd = request?.parent?.cwd ?? request?.cwd ?? process.cwd()
+      // 显式传入的 cwd 优先：跨仓委派时 parent.cwd 一定是发起方仓，会遮蔽目标仓
+      const cwd = request?.cwd ?? request?.parent?.cwd ?? process.cwd()
 
       // stdin 必须是 ignore：`opencode run` 在 stdin 为「未关闭的管道」时会等输入，
       // 表现为永远不返回（实测：默认 stdio 卡死，ignore 后 2 秒返回）。
