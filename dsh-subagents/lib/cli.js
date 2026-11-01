@@ -237,7 +237,10 @@ function cmdCheck(flags) {
 function cmdReview(flags) {
   if (!flags.pr) throw fail('E_BUDGET', '缺少 --pr')
   if ((flags.form || 'b') !== 'b') {
-    throw fail('E_UNAVAILABLE', '一期只实现 --form b（形态 A 的 HTTP 通道在 PR4）')
+    throw fail(
+      'E_UNAVAILABLE',
+      'CLI 只支持 --form b：形态 A 需要会话内的父 agent，请由控制面用 subagent 工具发起（不要在这里假装能跑）',
+    )
   }
   const dir = reviewsDir(root(flags))
   const circuit = readCircuit(dir)
