@@ -19,8 +19,10 @@
 5. 开 PR        （在 worktree 内）scripts/pipeline/open-pr.sh
                 → 自动推送 + 开 PR，body 首行 Closes #<issue号>
 6. CI           GitHub Actions（.github/workflows/ci.yml）：只跑测试 + node --check 语法检查
-6.5 审核        reviewer 产出审核记录 .dsh-web/reviews/<pr>-<sha>.json
-                （dsh-subagents 的 prepare → 调用 → record）
+6.5 审核        控制面委派 reviewer（会话内子代理）→ 读 issue/PR/diff
+                → 写 PR comment（第 N 次/共 3 次）+ 提交 review 状态
+                → 写审核记录 .dsh-web/reviews/<pr>-<sha>.json
+                → 有问题则委派 executor 修复后重审（上限 3 轮）
 7. 合并         scripts/pipeline/merge-pr.sh --review-record=<记录>   # 闸门 → squash merge → 清理 → 快进 main
 8. 收尾         合并后**没有部署**；只有 CI 测试通过这一件事
 ```
@@ -30,7 +32,9 @@
 - **CI**（第 6 步）：测试与语法检查，不过就停；
 - **审核闸门**（`merge-pr.sh` 内置）：合并前必须有审核记录，校验判定、提交绑定、时效与高风险路径。**默认 fail-closed**——没记录就拒绝合并。要绕过必须显式声明 `--no-review` 或 `DSH_REVIEWER=off`，此时脚本打印警告并写一条跳过审计（`.dsh-web/reviews/skips/`），事后可查。
 
-**人在环仍是调用纪律**：脚本不替用户做决定，`--review-record` 只能证明「有个审核方看过」，不能证明「用户同意了」。因此在 reviewer 判定 `APPROVE` 之后、跑 `merge-pr.sh` 之前，agent 仍须拿到用户对本次 review 的**明确同意**。
+**人在哪**：只在三种情况被叫——判定 `ESCALATE`、命中高风险路径、3 轮仍不通过。其余环节由会话内的角色接转完成。
+
+**身份分离**：PR 由主账号开与合并；PR comment 与 review 状态由**机器账号**（`dsh-bot-guraul`，`GH_CONFIG_DIR=~/.config/gh-reviewer`）提交——GitHub 不允许同一账号 approve 自己的 PR。
 
 **合并后没有部署**：本仓库没有服务器、没有 rsync / ssh / systemd、没有线上 curl 验证。合并的唯一后果是 main 前进一格、CI 重跑一遍。
 
