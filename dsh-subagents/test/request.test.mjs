@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { changedLines, fenceDiff, linkedIssueNumber, sha256 } from '../lib/request.js'
+import { changedLines, fenceDiff, linkedIssueNumber, sha256, truncate } from '../lib/request.js'
 
 test('linkedIssueNumber 取 Closes #N', () => {
   assert.equal(linkedIssueNumber('Closes #160'), 160)
@@ -40,8 +40,7 @@ test('linkedIssueNumber 支持 GitHub 全部 auto-close 关键词', () => {
   assert.equal(linkedIssueNumber('Fixes #12'), 12)
 })
 
-test('truncate 超预算时截断并注明', async () => {
-  const { truncate } = await import('../lib/request.js')
+test('truncate 超预算时截断并注明', () => {
   assert.equal(truncate('abc', 10), 'abc')
   const long = truncate('x'.repeat(50), 10)
   assert.match(long, /^x{10}/)
