@@ -142,6 +142,7 @@ export function buildReviewPrompt({ request, role }) {
     '',
     '输出要求（必须逐字遵守）:',
     '0. 立即执行，不要请求确认、不要提问；下一条消息必须是审核结果本身。',
+    '0.1 先通读 diff 再下结论；只有在需要核实实现细节时才读仓库文件，不要做无谓的全文检索。',
     `1. 最后单独一行写成: ${request.nonce} VERDICT: <APPROVE|REJECT|ESCALATE> SHA: ${request.head_sha}`,
     '2. 该行之前可以写分析，但不要重复这行，也不要再写第二行判定。',
     '3. 判定只能针对上面给出的提交；不确定就写 ESCALATE。',

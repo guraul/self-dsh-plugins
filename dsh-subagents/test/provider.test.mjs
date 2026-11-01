@@ -271,3 +271,19 @@ test('实际模型与请求一致 -> 正常返回', async () => {
   const settled = await handle.result
   assert.equal(settled.output[0].text, 'ok')
 })
+
+test('defaultTimeout 按产品区分且可覆盖', async () => {
+  const { defaultTimeout } = await import('../lib/provider.js')
+  assert.equal(defaultTimeout('codebuddy'), 600000)
+  assert.equal(defaultTimeout('opencode'), 300000)
+  assert.throws(() => defaultTimeout('nope'), /未支持的 product/)
+})
+
+test('buildReviewPrompt 要求先读 diff 再读仓库', async () => {
+  const { buildReviewPrompt } = await import('../lib/request.js')
+  const prompt = buildReviewPrompt({
+    request: { pr: 1, head_sha: 'a'.repeat(40), nonce: 'ABCDEFGH2345', files: [], diff: 'x', issue: { body: '' } },
+    role: {},
+  })
+  assert.match(prompt, /先通读 diff/)
+})

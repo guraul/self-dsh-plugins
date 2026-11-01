@@ -26,13 +26,15 @@
 
 ## 形态 B 的默认配置与权限映射
 
-reviewer 默认走**形态 B**（`codebuddy/glm-5.3`）：独立模型家族，能读仓库但改不了文件。
+reviewer 默认走**形态 B**（`codebuddy/glm-5.3-flash`）：独立模型家族，能读仓库但改不了文件。
 
 | 角色权限 | opencode | codebuddy |
 |---|---|---|
 | `readonly` | `--agent plan`（内置只读 agent） | `--permission-mode plan` |
 | `default` | 不附加参数 | 不附加参数 |
 | `full` | `--auto` | `--permission-mode auto` |
+
+超时按形态区分：opencode `300s`、codebuddy `600s`（plan 模式要读仓库，5k+ diff 实测超 300s），可在 `config.products[].timeoutMs` 覆盖。
 
 映射实现在 `lib/provider.js` 的 `permissionArgs()`；`codebuddy` 在本机是 shim，路径通过 profile 的 `config.products` 指定。
 
