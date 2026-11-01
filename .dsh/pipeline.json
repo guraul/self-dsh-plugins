@@ -1,0 +1,5 @@
+{
+  "repo": "guraul/self-dsh-plugins",
+  "ci": ["node --test"],
+  "highRisk": [".github/**", "scripts/pipeline/**", "AGENTS.md", "docs/pipeline/**", "docs/adr/**", ".gitignore"]
+}
