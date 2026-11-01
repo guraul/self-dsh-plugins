@@ -12,18 +12,24 @@ import { URL } from 'node:url';
 
 export const MAX_BATCH_ROWS = 500;
 
-/** 把 rows 按 source 分组、每批 ≤ limit。 */
+/** 把 rows 按 (source, usage_date) 分组、每批 ≤ limit。
+ *
+ * 必须带日期分组：`--days 2` 会把两天的行放进同一次运行，
+ * 若只按 source 分组，整批只能有一个 usage_date 标签，台账就会错
+ * （实测：dsh 70 行被记成单日）。行本身各自带日期，但台账要按天可查。
+ */
 export function batchRows(rows, limit = MAX_BATCH_ROWS) {
   const batches = [];
-  const bySource = new Map();
+  const groups = new Map();
   for (const row of rows) {
-    const list = bySource.get(row.source) ?? [];
+    const key = `${row.source}\u0000${row.usage_date}`;
+    const list = groups.get(key) ?? [];
     list.push(row);
-    bySource.set(row.source, list);
+    groups.set(key, list);
   }
-  for (const [source, list] of bySource) {
+  for (const list of groups.values()) {
     for (let i = 0; i < list.length; i += limit) {
-      batches.push({ source, rows: list.slice(i, i + limit) });
+      batches.push({ source: list[0].source, usage_date: list[0].usage_date, rows: list.slice(i, i + limit) });
     }
   }
   return batches;
@@ -80,7 +86,7 @@ export async function uploadRows({ rows, config, retries = [30000, 120000, 30000
   const results = [];
 
   for (const batch of batches) {
-    const usageDate = batch.rows[0]?.usage_date ?? 'unknown';
+    const usageDate = batch.usage_date ?? 'unknown';
     const batchId = `dsh-token-sync-${usageDate}-${batch.source}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const body = { batch_id: batchId, usage_date: usageDate, source: batch.source, rows: batch.rows };
 
