@@ -48,7 +48,20 @@ scripts/pipeline/review.sh publish 173 --record .dsh-web/reviews/173-<sha>.json 
 
 # 5) 合并（闸门）
 scripts/pipeline/merge-pr.sh 173 --review-record=.dsh-web/reviews/173-<sha>.json
+#    确需跳过时（须用户当场同意）：--no-review --reason="<为什么跳过>"
 ```
+
+**合并脚本已改为转发共享包**（issue #187）：`merge-pr.sh` 只是薄壳，真正的闸门 / CI / squash 合并 /
+清理都在 `@guraul/dsh-pipeline`（优先 `$DSH_PIPELINE_HOME`，否则本仓 `tools/node_modules/dsh-pipeline`——装的是 `dist/latest.tgz` 产物）。
+因此有三点与旧脚本不同，写命令时别用旧写法：
+
+| 差异 | 新语义 |
+|---|---|
+| 参数映射 | `--review-record=<f>` → 包侧 `--record <f>`；其余参数（`--no-review` / `--reason` / `--checks-file` / `--check-only` / `--force`）原样透传 |
+| 跳过审核 | `--no-review` **必须**配 `--reason=<文本>`，裸 `--no-review` 被拒绝；`DSH_REVIEWER=off` **已不再生效** |
+| `--checks-file` | 读的是 JSON `{"state":"success"｜"failure"}`，不再是 `gh pr checks` 原文；非 JSON / 不可读按 CI 未过拒绝 |
+
+`scripts/pipeline/merge-pr.legacy.sh` 仅作**回滚**用，不要在日常流程里调用。
 
 **为什么产物不放 `/tmp`**：macOS 的 `/etc/periodic/daily/110.clean-tmps` 每天清理 `/tmp` 里超过 3 天未访问的文件，重启也可能清掉；证据要留在项目内。
 

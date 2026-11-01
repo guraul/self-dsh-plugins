@@ -30,7 +30,7 @@
 **两道闸门，一个纪律**：
 
 - **CI**（第 6 步）：测试与语法检查，不过就停；
-- **审核闸门**（`merge-pr.sh` 内置）：合并前必须有审核记录，校验判定、提交绑定、时效与高风险路径。**默认 fail-closed**——没记录就拒绝合并。要绕过必须显式声明 `--no-review` 或 `DSH_REVIEWER=off`，此时脚本打印警告并写一条跳过审计（`.dsh-web/reviews/skips/`），事后可查。
+- **审核闸门**（由共享包 `@guraul/dsh-pipeline` 实现，`merge-pr.sh` 只转发）：合并前必须有审核记录，校验判定、提交绑定、时效与高风险路径。**默认 fail-closed**——没记录就拒绝合并。要绕过必须显式声明 `--no-review --reason=<文本>`（包要求跳过必须写原因），此时打印警告并写一条跳过审计（`.dsh-web/reviews/skips/`），事后可查。**`DSH_REVIEWER=off` 已不再生效**。
 
 **人在哪**：只在三种情况被叫——判定 `ESCALATE`、命中高风险路径、3 轮仍不通过。其余环节由会话内的角色接转完成。
 
@@ -110,26 +110,58 @@ cd .worktrees/12-xxx && scripts/pipeline/open-pr.sh
 
 ### merge-pr.sh
 
+**本仓的 `scripts/pipeline/merge-pr.sh` 是一条薄转发壳**（issue #187 起）：闸门 → CI → squash 合并 →
+清理现场 → 快进 main 的**唯一实现**在共享包 `@guraul/dsh-pipeline` 里，本仓只保留「文件名与参数都不变」
+的转发表面，免得两份实现各自漂移。
+
 ```bash
 cd <worktree> && scripts/pipeline/merge-pr.sh    # 自动识别当前分支的 PR
 scripts/pipeline/merge-pr.sh <PR号|分支名>        # 任意位置（含主工作区）指定 PR
+scripts/pipeline/merge-pr.sh <PR号> --check-only  # 演练：跑到闸门 / CI 为止，不合并、不清理
 scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎用）
 ```
+
+**包位置解析**：优先 `$DSH_PIPELINE_HOME`，未设置则用本仓 `tools/node_modules/dsh-pipeline`（由 `tools/package.json` 从 `dist/latest.tgz` 安装的**打包产物**，不是源码 checkout），取
+`<包根>/bin/cli.mjs`；两者都找不到 `cli.mjs` 就报错退出（提示设置 `DSH_PIPELINE_HOME`）。
+
+**参数转发**（壳只做映射，不做任何判定）：
+
+| 本仓参数 | 传给包侧 | 说明 |
+|---|---|---|
+| `--review-record=<f>` | `--record <f>` | **只有这一项改名**；审核记录路径，不传即拒绝合并（fail-closed） |
+| `--no-review` | `--no-review` | 原样透传，但**必须同时给 `--reason`**（见下） |
+| `--reason=<文本>` | `--reason <文本>` | 原样透传；跳过审核的原因，只能与 `--no-review` 同用 |
+| `--checks-file=<f>` | `--checks-file <f>` | 原样透传；语义已变（见下） |
+| `--check-only` | `--check-only` | 原样透传；`--dry-run` 是本仓保留的旧别名，映射成 `--check-only` |
+| `--force` | `--force` | 原样透传 |
+| `<PR号或分支名>` | `--pr <PR号>` | 壳先把分支名 / 当前分支解析成 PR 号（包只接受正整数） |
+
+壳还会自动补上 `--root <仓库根>`。除上表外不接受任何参数（未知参数直接报错）。
+
+**与旧脚本（`merge-pr.sh` 转发前）的三处语义差异**——都来自共享包，不是本壳的取舍：
+
+1. **`--no-review` 必须带 `--reason`**：单独 `--no-review` 会被包拒绝（跳过必须留原因）。
+   `--reason` 也不能脱离 `--no-review` 单独出现；`--record` 与 `--no-review` 互斥。
+2. **`--checks-file` 读的是 JSON，不是 `gh pr checks` 原文**：文件内容需形如
+   `{"state":"success"}` / `{"state":"failure"}`（也接受带 `state` 的 check 列表）。
+   `success` 放行且**完全不调 `gh`**；`failure` 按 CI 未过拒绝；不可读 / 非合法 JSON 一律算
+   「CI 无法判定」并拒绝（**不静默放行**）。
+3. **`DSH_REVIEWER=off` 已不再生效**：环境变量不再被读取，跳过审核只认显式
+   `--no-review --reason=<文本>`。
+
 | 项 | 说明 |
 |---|---|
-| 行为 | 定位 PR → CI checks 未过则拒绝 → 审核闸门未过则拒绝 → `gh pr merge --squash` → 删远端分支 → 删本地分支（`-D`）→ 移除对应 worktree → `worktree prune` → 主工作区快进（`ff_main()`：`git fetch --prune origin main` + `git merge --ff-only origin/main`，**显式命名 merge head** 以绕开 `FETCH_HEAD` 竞态，仍绝不做非快进合并；失败时**先确认无分叉才自动重试一次**，真分叉则拒绝并提示不要用 `--force`） |
+| 行为（包侧） | 定位 PR → CI checks 未过则拒绝 → 审核闸门未过则拒绝 → `gh pr merge --squash` → 删远端分支 → 删本地分支（`-D`）→ 移除对应 worktree → `worktree prune` → 主工作区快进（`ff_main()`：`git fetch --prune origin main` + `git merge --ff-only origin/main`，**显式命名 merge head** 以绕开 `FETCH_HEAD` 竞态，仍绝不做非快进合并；失败时**先确认无分叉才自动重试一次**，真分叉则拒绝并提示不要用 `--force`） |
 | 幂等 | PR 已是 `MERGED` → 跳过合并，只清理现场并快进 main |
-| 退出码 | 0 成功；1 找不到 main 工作区 / 找不到 PR / 状态非 OPEN·MERGED / CI 未过 / 快进失败 |
+| 退出码 | 原样透传包侧退出码：**0** 成功（`--check-only` 通过也是 0）；**1** 审核闸门未过 / CI 未过（含 `--checks-file` 判定失败），或壳找不到共享包；**2** 参数非法（含 `--no-review` 缺 `--reason`、`--record` 与 `--no-review` 同用）/ PR 状态不符 / git·gh 操作失败 |
 
-| 新参数 | 说明 |
-|---|---|
-| `--review-record=<文件>` | 审核记录路径；**不传即拒绝合并**（fail-closed） |
-| `--no-review` | 显式跳过审核闸门：打印警告 + 写 `.dsh-web/reviews/skips/*.json` |
-| `DSH_REVIEWER=off` | 等价于 `--no-review` |
-
-审核闸门排在 `--check-only` **之前**——演练模式恰恰最该验证闸门拦不拦得住。闸门内部调用
-`node dsh-subagents/lib/cli.js check`，判定、SHA 绑定、时效、高风险路径都由它负责，脚本只负责
+审核闸门排在 `--check-only` **之前**——演练模式恰恰最该验证闸门拦不拦得住。闸门由共享包调用
+`node dsh-subagents/lib/cli.js check`，判定、SHA 绑定、时效、高风险路径都由它负责，包只负责
 「拿不到记录就拒绝」与「显式跳过要留痕」。
+
+> **`scripts/pipeline/merge-pr.legacy.sh` 仅作回滚用。** 它是转发前的旧实现，语义与共享包**不一致**
+> （允许裸 `--no-review`、`--checks-file` 读 `gh pr checks` 原文、`DSH_REVIEWER=off` 仍生效），
+> 平时不要用它；只有共享包出问题时才临时回滚到它。
 
 ### status.sh
 
@@ -267,7 +299,7 @@ node --test scripts/pipeline/audit-subagents.test.mjs           # 单测 + 两�
 
 1. **审核闸门 + 人在环**：`merge-pr.sh` 默认要求 `--review-record`，没有审核记录绝不合并；reviewer 判 `APPROVE` 且未命中高风险时直接合并；只有 `ESCALATE`、高风险路径、3 轮超限才需要用户介入。
 
-   **绕过闸门（`--no-review` / `DSH_REVIEWER=off`）**——规则正文见 `~/.dsh/AGENTS.md` §7 第 7 条，这里只写本仓的可操作细节：
+   **绕过闸门（`--no-review --reason=<文本>`）**——规则正文见 `~/.dsh/AGENTS.md` §7 第 7 条，这里只写本仓的可操作细节。注意共享包要求 `--no-review` **必须**配 `--reason`，裸 `--no-review` 会被拒绝；`DSH_REVIEWER=off` 已**不再生效**（不承认环境变量这种隐式跳过）：
 
    | 项 | 要求 |
    |---|---|
