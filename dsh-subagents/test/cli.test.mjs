@@ -384,3 +384,30 @@ test('record 的 --round 不带值时报错，不静默当 1', () => {
   assert.equal(out.code, 2)
   assert.match(out.stderr, /--round 需要一个值/)
 })
+
+test('recheck：任务书含上轮问题与新标记，且不提轮次', () => {
+  const { root, dir } = sandbox()
+  const prev = join(dir, `9-${SHA}.json`)
+  writeFileSync(
+    prev,
+    JSON.stringify({
+      schemaVersion: 1,
+      policyVersion: '0.1.0',
+      round: 1,
+      pr: 9,
+      verdict: 'REJECT',
+      head_sha: SHA,
+      findings: [{ severity: 'major', file: 'lib/a.js', line: 3, message: '缺校验' }],
+      evidence: [],
+      createdAt: new Date().toISOString(),
+    }),
+  )
+  const req = join(root, 'req.json')
+  writeFileSync(req, JSON.stringify({ request: { pr: 9, head_sha: SHA, nonce: NONCE, diff: 'x', files: [], issue: { body: 'b' }, budget: { maxChars: 100 } } }))
+  const out = run(['recheck', '--request', req, '--previous', prev])
+  assert.equal(out.code, 0, out.stderr)
+  assert.match(out.stdout, /上一轮你审过这个 PR，判定为 REJECT/)
+  assert.match(out.stdout, /\[major\] lib\/a\.js:3 缺校验/)
+  assert.match(out.stdout, new RegExp(NONCE))
+  assert.doesNotMatch(out.stdout, /第\s*2\s*轮/, 'reviewer 不该知道轮次')
+})

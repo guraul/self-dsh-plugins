@@ -38,6 +38,8 @@ import {
 const USAGE = `用法:
   dsh-subagents prepare --pr <号> [--out <文件>] [--root <仓库根>]
   dsh-subagents prompt  --request <文件> [--out <文件>] [--role <角色>]  # 渲染审核提示词
+  dsh-subagents recheck --request <新请求> --previous <上一轮记录> [--out <文件>]
+                                                        # 渲染「同一会话复审」的任务书
   dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>]
                         [--round <1..3>] [--policy-version <版本>] [--root <仓库根>]
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
@@ -112,6 +114,41 @@ function cmdPrepare(flags) {
     return 0
   }
   emit(payload, { ...flags, json: true })
+  return 0
+}
+
+/**
+ * 复审任务书：把「上一轮为什么拒绝 + 这轮改了什么」交给同一个 reviewer 会话，
+ * 避免整轮重开（省一半成本）。任务书里**不写轮次**——reviewer 不该知道第几轮。
+ */
+function renderRecheckTask({ request, previous }) {
+  const lines = []
+  lines.push('上一轮你审过这个 PR，判定为 REJECT。这一轮作者做了修改，请重新审核。')
+  lines.push('')
+  if (previous.findings?.length > 0) {
+    lines.push('你上一轮指出的问题（逐条确认是否已解决，未解决的继续列）：')
+    for (const item of previous.findings) {
+      lines.push(`- [${item.severity}] ${item.file}:${item.line ?? '-'} ${item.message}`)
+    }
+    lines.push('')
+  }
+  lines.push('这一轮的完整材料如下（新的随机标记，必须原样回显）：')
+  lines.push('')
+  lines.push(buildReviewPrompt({ request, role: getRole('reviewer') }))
+  return `${lines.join('\n')}\n`
+}
+
+function cmdRecheck(flags) {
+  if (!flags.request || !flags.previous) throw fail('E_BUDGET', '缺少 --request 或 --previous')
+  const request = JSON.parse(readFileSync(flags.request, 'utf8')).request
+  const previous = readRecord(flags.previous)
+  const text = renderRecheckTask({ request, previous })
+  if (flags.out) {
+    writeFileSync(flags.out, text, 'utf8')
+    process.stdout.write(`已写入 ${flags.out}\n`)
+    return 0
+  }
+  process.stdout.write(text)
   return 0
 }
 
@@ -518,6 +555,7 @@ function cmdRoles(flags) {
 const COMMANDS = {
   prepare: cmdPrepare,
   prompt: cmdPrompt,
+  recheck: cmdRecheck,
   record: cmdRecord,
   check: cmdCheck,
   gate: cmdGate,
