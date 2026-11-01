@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prepareRequest } from '../lib/request.js'
@@ -14,8 +14,9 @@ function fakeBin(dir, name, script) {
   return file
 }
 
-function sandbox({ issueFails = false, prBody = `Closes #7` } = {}) {
+function sandbox(t, { issueFails = false, prBody = `Closes #7` } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-subagents-prep-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
   const gh = fakeBin(
     dir,
     'gh',
@@ -42,8 +43,8 @@ echo "+hello"
   return { dir, gh, git }
 }
 
-test('prepareRequest 取真实 issue 正文', () => {
-  const { dir, gh, git } = sandbox()
+test('prepareRequest 取真实 issue 正文', (t) => {
+  const { dir, gh, git } = sandbox(t)
   const { request } = prepareRequest({ pr: 42, cwd: dir, ghBin: gh, gitBin: git })
   assert.equal(request.issue.number, 7)
   assert.equal(request.issue.title, '真 issue')
@@ -52,22 +53,34 @@ test('prepareRequest 取真实 issue 正文', () => {
   assert.equal(request.head_sha, SHA)
 })
 
-test('取 issue 失败时回退到 PR 信息且 number 为 null', () => {
-  const { dir, gh, git } = sandbox({ issueFails: true })
-  const { request } = prepareRequest({ pr: 42, cwd: dir, ghBin: gh, gitBin: git })
-  assert.equal(request.issue.number, null)
-  assert.equal(request.issue.title, 't')
-  assert.match(request.issue.body, /Closes #7/)
+test('取 issue 失败时回退到 PR 信息且 number 为 null，并有 stderr 告警', (t) => {
+  const { dir, gh, git } = sandbox(t, { issueFails: true })
+  const written = []
+  const originalWrite = process.stderr.write.bind(process.stderr)
+  process.stderr.write = (chunk) => {
+    written.push(String(chunk))
+    return true
+  }
+  try {
+    const { request } = prepareRequest({ pr: 42, cwd: dir, ghBin: gh, gitBin: git })
+    assert.equal(request.issue.number, null)
+    assert.equal(request.issue.title, 't')
+    assert.match(request.issue.body, /Closes #7/)
+  } finally {
+    process.stderr.write = originalWrite
+  }
+  assert.equal(written.length, 1, '回退必须留一条告警')
+  assert.match(written[0], /取 issue #7 失败/)
 })
 
-test('无 Closes 时不去取 issue', () => {
-  const { dir, gh, git } = sandbox({ prBody: '没有链接' })
+test('无 Closes 时不去取 issue', (t) => {
+  const { dir, gh, git } = sandbox(t, { prBody: '没有链接' })
   const { request } = prepareRequest({ pr: 42, cwd: dir, ghBin: gh, gitBin: git })
   assert.equal(request.issue.number, null)
 })
 
-test('diff 超预算时抛 E_BUDGET', () => {
-  const { dir, gh, git } = sandbox()
+test('diff 超预算时抛 E_BUDGET', (t) => {
+  const { dir, gh, git } = sandbox(t)
   assert.throws(
     () => prepareRequest({ pr: 42, cwd: dir, ghBin: gh, gitBin: git, maxChars: 5 }),
     (error) => {
