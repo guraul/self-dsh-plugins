@@ -26,6 +26,12 @@ function run(bin, args, { cwd, timeout = 60000, env } = {}) {
   return result.stdout
 }
 
+/** 从 PR 正文里取 `Closes #<n>` 的 issue 号；没有则返回 null。 */
+export function linkedIssueNumber(body) {
+  const match = /\bcloses\s+#(\d+)/i.exec(String(body ?? ''))
+  return match ? Number(match[1]) : null
+}
+
 export function sha256(text) {
   return `sha256:${createHash('sha256').update(String(text)).digest('hex')}`
 }
@@ -82,13 +88,34 @@ export function prepareRequest({
 
   const files = Array.isArray(meta.files) ? meta.files.map((file) => file.path) : []
 
+  // 验收依据必须来自 issue 本身：PR 正文只有 `Closes #N` 与自动生成说明，
+  // 拿它当验收标准等于让 reviewer 对着废话审核。
+  let issue = { number: null, title: meta.title ?? '', body: meta.body ?? '' }
+  const issueNumber = linkedIssueNumber(meta.body)
+  if (issueNumber) {
+    try {
+      const raw = run(ghBin, ['issue', 'view', String(issueNumber), '--json', 'number,title,body'], {
+        cwd,
+        env,
+      })
+      const parsedIssue = JSON.parse(raw)
+      issue = {
+        number: parsedIssue.number ?? issueNumber,
+        title: parsedIssue.title ?? '',
+        body: parsedIssue.body ?? '',
+      }
+    } catch {
+      // 取不到 issue 就回退到 PR 信息，并把 number 保持 null（不假装有验收依据）
+    }
+  }
+
   return {
     request: {
       pr: meta.number,
       head_sha: headSha,
       nonce,
       model: model ?? null,
-      issue: { number: null, title: meta.title ?? '', body: meta.body ?? '' },
+      issue,
       files,
       diff: fenceDiff(diff),
       budget: { maxChars, timeoutMs },
