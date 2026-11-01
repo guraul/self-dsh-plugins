@@ -24,6 +24,20 @@
 | provider 实现 | `lib/provider.js` | 一次性 spawn CLI；没有 `prepareContinuable`（续接是下一期） |
 | 委派工具 | `lib/tools/delegate.js` | 动态 import `@deepseek-ai/dsh-tools`，拿不到就跳过注册并告警 |
 
+## 形态 B 的默认配置与权限映射
+
+reviewer 默认走**形态 B**（`codebuddy/glm-5.3`）：独立模型家族，能读仓库但改不了文件。
+
+| 角色权限 | opencode | codebuddy |
+|---|---|---|
+| `readonly` | `--agent plan`（内置只读 agent） | `--permission-mode plan` |
+| `default` | 不附加参数 | 不附加参数 |
+| `full` | `--auto` | `--permission-mode auto` |
+
+映射实现在 `lib/provider.js` 的 `permissionArgs()`；`codebuddy` 在本机是 shim，路径通过 profile 的 `config.products` 指定。
+
+**B 不可用时停下上报，不自动退回形态 A**——退回同族模型等于把「独立视角」这个唯一价值悄悄换掉。
+
 ## 已知坑
 
 1. **provider 重名会让整个 profile 插件树启动失败。** 旧插件注册了 `product-subagents:opencode` 等；
