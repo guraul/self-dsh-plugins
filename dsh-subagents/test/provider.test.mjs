@@ -130,7 +130,8 @@ test('activationSpec 必须带 signal（PR8 事故回归）', async () => {
   assert.equal(spec.signal, controller.signal)
   assert.equal(spec.request.parent.id, 'parent')
   assert.equal(spec.request.maxDepth, 2)
-  assert.match(spec.request.prompt, /你是执行者[\s\S]*修一下/)
+  assert.deepEqual(spec.request.prompt.map((part) => part.type), ['text'])
+  assert.match(spec.request.prompt[0].text, /你是执行者[\s\S]*修一下/)
 })
 
 test('activationSpec 缺 signal / provider / agent 时报错', async () => {

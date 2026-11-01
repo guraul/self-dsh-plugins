@@ -56,7 +56,9 @@ export function activationSpec({ provider, role, task, agent, signal, maxDepth =
     provider: providerName(provider),
     signal,
     request: {
-      prompt: [role?.instructions, task].filter(Boolean).join('\n\n'),
+      // 内容分段数组是 DSH 内部已被验证的形状（旧插件也这么传）；字符串虽能跑通
+      // 我们自己的 provider，但没必要赌服务端怎么解释。
+      prompt: [{ type: 'text', text: [role?.instructions, task].filter(Boolean).join('\n\n') }],
       parent: agent,
       maxDepth,
     },
