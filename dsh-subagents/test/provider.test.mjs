@@ -335,3 +335,22 @@ test('sessionArgs 对未知产品报错而不是猜', async () => {
   assert.throws(() => sessionArgs('nope', 'id'), /未支持的 product/)
   assert.deepEqual(sessionArgs('nope', null), [])
 })
+
+test('activationSpec 带 cwd 时写进 request（跨仓任务必需）', async () => {
+  const { activationSpec } = await import('../lib/tools/delegate.js')
+  const spec = activationSpec({
+    provider: 'codebuddy',
+    role: { instructions: 'x' },
+    task: 't',
+    agent: { id: 'p' },
+    signal: new AbortController().signal,
+    cwd: '/Users/gubin/workspace/agent-mobile',
+  })
+  assert.equal(spec.request.cwd, '/Users/gubin/workspace/agent-mobile')
+})
+
+test('executor 角色是 full，reviewer 是 readonly', async () => {
+  const { getRole } = await import('../lib/roles.js')
+  assert.equal(getRole('executor').permissionMode, 'full')
+  assert.equal(getRole('reviewer').permissionMode, 'readonly')
+})
