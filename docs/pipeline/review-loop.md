@@ -104,13 +104,13 @@ pnpm install
 | 形态 B 闭环 | `prepare → reviewer(B) → record → comment → review → merge` 全自动，PR #161 实测 |
 | 模型防降级 | codebuddy 自报 `modelUsage`，与请求不一致即 `E_UNAVAILABLE` |
 | 机器账号 | `dsh-bot-guraul` + `GH_CONFIG_DIR` 隔离，评论与 review 状态由它提交 |
-| 续接（路线 a） | `product_continue` + `[delegate-session: <id>]`；2026-11-01 实测：第一次让 codebuddy「记住 42」，第二次用同一 session 追问，答出 42（该数字只出现在第一轮） |
+| 续接（路线 a） | `product_continue` + `[delegate-session: <id>]`；2026-11-01 实测：第一次让 codebuddy「记住 42」，第二次用同一 session `01a19644-05c2-7c7c-b41b-f066a44b8fcf` 追问，答出 42（该数字只出现在第一轮），两次返回的 session id 一致 |
 
 ### 未做（及为什么现在不做）
 
 | 项 | 为什么现在不做 |
 |---|---|
-| `product_wait`（后台等待） | 续接已用「同步 resume」满足（路线 a）；真正需要后台等待的场景还没出现 |
+| `product_submit`（异步提交）/ `product_wait`（后台等待） | 续接已由「同步 resume」覆盖（`product_continue`，路线 a）；真正需要「先提交、稍后来取」的场景还没出现，因此不做异步形态 |
 | opencode 侧模型校验 | CLI 输出不含模型信息，无法自证；只能依赖「未知模型硬失败」 |
 | 形态 C（网页清言） | 依赖 REQ-002 的桥接，尚未实现 |
 | 分片审核 | 需要先定义多份判定的合成规则 |
@@ -127,9 +127,9 @@ pnpm install
 
 | 缺口 | 影响 | 补的时机 |
 |---|---|---|
-| 没有 `product_submit` / `product_wait` | 委派出去不能续接、不能追问，只能一次性拿结果 | 续接那期 |
+| 没有异步的 `product_submit` / `product_wait` | 委派是同步的，提交与取结果在同一个调用里完成 | 需要后台等待时再做 |
 | 没有 ACP 会话 | `acp` 产品未注册；`opencode` / `codebuddy` 走各自的 CLI | 同上 |
 | 没有权限天花板 | 角色声明的 `permissionMode` 目前只透传给产品 CLI，未做「子代理不能派生更高权限」的校验 | 同上 |
-| provider 名带 `product-` 前缀 | 名不副实，但改名会让 `audit-subagents.mjs` 静默失效 | 续接补齐后统一改 |
+| provider 名带 `product-` 前缀 | 名不副实，但改名会让 `audit-subagents.mjs` 静默失效 | 单独一次改名 + 同步审计脚本 |
 
 这些缺口不阻塞 reviewer 循环：reviewer 走形态 A（宿主内置子代理），executor 走一次性委派。
