@@ -54,3 +54,11 @@ test('ghCommands 对 ESCALATE 只发评论', () => {
   assert.equal(commands.length, 1)
   assert.ok(!commands[0].args.includes('--approve'))
 })
+
+test('parseRemoteUrl 支持 SSH 与 HTTPS', async () => {
+  const { parseRemoteUrl } = await import('../lib/publish.js')
+  assert.equal(parseRemoteUrl('git@github.com:guraul/self-dsh-plugins.git'), 'guraul/self-dsh-plugins')
+  assert.equal(parseRemoteUrl('https://github.com/guraul/self-dsh-plugins.git'), 'guraul/self-dsh-plugins')
+  assert.equal(parseRemoteUrl('https://github.com/guraul/self-dsh-plugins'), 'guraul/self-dsh-plugins')
+  assert.equal(parseRemoteUrl('不是 URL'), null)
+})

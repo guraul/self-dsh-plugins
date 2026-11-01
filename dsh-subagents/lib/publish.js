@@ -6,7 +6,17 @@
  */
 import { renderComment } from './comment.js'
 
-/** APPOVE → approve；REJECT → request-changes；ESCALATE → 只发评论，交回人工。 */
+/** 从 git remote URL 解析 owner/repo（SSH 与 HTTPS 两种形态）。 */
+export function parseRemoteUrl(url) {
+  const text = String(url ?? '').trim()
+  const ssh = /^git@[^:]+:([^/]+)\/(.+?)(?:\.git)?$/.exec(text)
+  if (ssh) return `${ssh[1]}/${ssh[2]}`
+  const https = /^https?:\/\/[^/]+\/([^/]+)\/(.+?)(?:\.git)?$/.exec(text)
+  if (https) return `${https[1]}/${https[2]}`
+  return null
+}
+
+/** APPROVE → approve；REJECT → request-changes；ESCALATE → 只发评论，交回人工。 */
 export function reviewAction(verdict) {
   if (verdict === 'APPROVE') return 'approve'
   if (verdict === 'REJECT') return 'request-changes'

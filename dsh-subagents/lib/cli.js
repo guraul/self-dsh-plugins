@@ -18,7 +18,7 @@ import {
 import { buildReviewPrompt, prepareRequest } from './request.js'
 import { renderCard } from './card.js'
 import { extractFindings, normalizeEvidence, normalizeFinding } from './findings.js'
-import { ghCommands, publishPlan } from './publish.js'
+import { ghCommands, parseRemoteUrl, publishPlan } from './publish.js'
 import { renderComment } from './comment.js'
 import { runProvider } from './bridge-cli.js'
 import { getRole, loadRoles } from './roles.js'
@@ -344,20 +344,32 @@ function cmdComment(flags) {
   return 0
 }
 
+/** 先用本地 git remote 解析仓库，避免任何网络调用。 */
+function repoFromGit(cwd) {
+  const out = spawnSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', cwd })
+  if (out.status !== 0) return null
+  return parseRemoteUrl(out.stdout)
+}
+
 function cmdPublish(flags) {
   if (!flags.record) throw fail('E_BUDGET', '缺少 --record')
   const round = Number(flags.round ?? 1)
   const record = readRecord(flags.record)
+  if (!Number.isInteger(record.pr) || record.pr <= 0) {
+    throw fail('E_BUDGET', `记录里的 pr 不是正整数：${record.pr}（无法确定要发布到哪个 PR）`)
+  }
   const plan = publishPlan({ record, round })
 
-  let repo = flags.repo
-  if (!repo) {
+  // --dry-run 必须零网络：仓库只从 --repo 或本地 git remote 取，绝不调用 gh。
+  let repo = flags.repo || repoFromGit(root(flags))
+  if (!repo && !flags['dry-run']) {
     const out = spawnSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
       encoding: 'utf8',
     })
     if (out.status !== 0) throw fail('E_UNAVAILABLE', '无法确定仓库（用 --repo 指定）')
     repo = String(out.stdout).trim()
   }
+  if (!repo) throw fail('E_UNAVAILABLE', '--dry-run 需要 --repo，或在仓库内从 git remote origin 能解析出仓库')
 
   const commands = ghCommands({ plan, pr: record.pr, repo })
   if (flags['dry-run']) {
