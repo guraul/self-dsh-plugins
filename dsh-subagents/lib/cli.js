@@ -18,6 +18,7 @@ import {
 import { buildReviewPrompt, prepareRequest } from './request.js'
 import { renderCard } from './card.js'
 import { extractFindings, normalizeEvidence, normalizeFinding } from './findings.js'
+import { ghCommands, parseRemoteUrl, publishPlan } from './publish.js'
 import { renderComment } from './comment.js'
 import { runProvider } from './bridge-cli.js'
 import { getRole, loadRoles } from './roles.js'
@@ -41,6 +42,8 @@ const USAGE = `用法:
   dsh-subagents log     --trace <traceId> [--root <仓库根>]
   dsh-subagents card    --input <文件> [--out <文件>]     # 任务卡（纯文本）
   dsh-subagents comment --record <文件> --round <n> [--out <文件>]  # PR comment（纯文本）
+  dsh-subagents publish --record <文件> --round <n> [--repo <owner/name>] [--dry-run]
+                                                        # 发评论 + 按判定提交 review 状态
   dsh-subagents roles   [--roles-dir <目录>]
 
 退出码: 0 通过 / 1 拒绝（闸门或判定不是 APPROVE）/ 2 参数或环境错误`
@@ -341,6 +344,53 @@ function cmdComment(flags) {
   return 0
 }
 
+/** 先用本地 git remote 解析仓库，避免任何网络调用。 */
+function repoFromGit(cwd) {
+  const out = spawnSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', cwd })
+  if (out.status !== 0) return null
+  return parseRemoteUrl(out.stdout)
+}
+
+function cmdPublish(flags) {
+  if (!flags.record) throw fail('E_BUDGET', '缺少 --record')
+  const round = Number(flags.round ?? 1)
+  const record = readRecord(flags.record)
+  if (!Number.isInteger(record.pr) || record.pr <= 0) {
+    throw fail('E_BUDGET', `记录里的 pr 不是正整数：${record.pr}（无法确定要发布到哪个 PR）`)
+  }
+  const plan = publishPlan({ record, round })
+
+  // --dry-run 必须零网络：仓库只从 --repo 或本地 git remote 取，绝不调用 gh。
+  let repo = flags.repo || repoFromGit(root(flags))
+  if (!repo && !flags['dry-run']) {
+    const out = spawnSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+      encoding: 'utf8',
+    })
+    if (out.status !== 0) throw fail('E_UNAVAILABLE', '无法确定仓库（用 --repo 指定）')
+    repo = String(out.stdout).trim()
+  }
+  if (!repo) throw fail('E_UNAVAILABLE', '--dry-run 需要 --repo，或在仓库内从 git remote origin 能解析出仓库')
+
+  const commands = ghCommands({ plan, pr: record.pr, repo })
+  if (flags['dry-run']) {
+    process.stdout.write(`${JSON.stringify({ repo, pr: record.pr, commands }, null, 2)}\n`)
+    return 0
+  }
+
+  for (const command of commands) {
+    const out = spawnSync('gh', command.args, {
+      encoding: 'utf8',
+      input: command.stdin ?? undefined,
+    })
+    if (out.status !== 0) {
+      const detail = (out.stderr || '').trim().split('\n').slice(-2).join(' ')
+      throw fail('E_UNAVAILABLE', `gh ${command.args.slice(0, 2).join(' ')} 失败: ${detail}`)
+    }
+  }
+  process.stdout.write(`已发布 ${commands.length} 个动作（${plan.action}）到 PR #${record.pr}\n`)
+  return 0
+}
+
 function cmdLog(flags) {
   if (!flags.trace) throw fail('E_BUDGET', '缺少 --trace')
   const hits = findByTrace(reviewsDir(root(flags)), flags.trace)
@@ -374,6 +424,7 @@ const COMMANDS = {
   log: cmdLog,
   card: cmdCard,
   comment: cmdComment,
+  publish: cmdPublish,
   roles: cmdRoles,
 }
 
