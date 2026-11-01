@@ -63,3 +63,17 @@ test('normalizeEvidence 只保留非空字符串', () => {
   assert.deepEqual(normalizeEvidence(['a', '', null, 1]), ['a'])
   assert.deepEqual(normalizeEvidence('not array'), [])
 })
+
+test('extractFindings 前面有非 json 代码块时仍能取到真块（PR151 事故回归）', () => {
+  const text = '```bash\necho hi\n```\n```json\n' + JSON.stringify({
+    findings: [{ severity: 'major', file: 'a.js', line: 1, message: 'm' }],
+    evidence: ['a.js:1'],
+  }) + '\n```'
+  const parsed = extractFindings(text)
+  assert.ok(parsed, '真块不能被前面的 bash 块吞掉')
+  assert.equal(parsed.findings[0].file, 'a.js')
+})
+
+test('extractFindings 忽略 ``` 无语言标记的块', () => {
+  assert.equal(extractFindings('```\n{"findings":[]}\n```'), null)
+})

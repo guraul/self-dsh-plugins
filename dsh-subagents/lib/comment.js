@@ -14,6 +14,15 @@ const VERDICT_LABEL = {
 
 const BLOCKING = new Set(['blocker', 'major'])
 
+/** findings 的 message 是模型原文，进 markdown 前必须压平：换行会断列表、反引号会破行内代码、@ 会误 ping。 */
+export function safeInline(text) {
+  return String(text ?? '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/`/g, "'")
+    .replace(/@/g, '@\u200b')
+    .trim()
+}
+
 function bullet(items, empty = '（无）') {
   if (items.length === 0) return `- ${empty}`
   return items.map((item) => `- ${item}`).join('\n')
@@ -34,10 +43,10 @@ export function renderComment({ result, round, maxRounds = MAX_ROUNDS }) {
   const findings = Array.isArray(result.findings) ? result.findings : []
   const mustFix = findings
     .filter((finding) => BLOCKING.has(finding.severity))
-    .map((finding) => `\`${finding.file}:${finding.line}\` ${finding.message}`)
+    .map((finding) => `\`${safeInline(finding.file)}:${finding.line}\` ${safeInline(finding.message)}`)
   const suggestions = findings
     .filter((finding) => !BLOCKING.has(finding.severity))
-    .map((finding) => `\`${finding.file}:${finding.line}\` ${finding.message}`)
+    .map((finding) => `\`${safeInline(finding.file)}:${finding.line}\` ${safeInline(finding.message)}`)
 
   return [
     `## 审核判定：${label}（第 ${round} 次 / 共 ${maxRounds} 次）`,

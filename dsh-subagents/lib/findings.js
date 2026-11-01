@@ -9,7 +9,9 @@
  */
 import { SEVERITIES } from './contract.js'
 
-const FENCE = /```(?:json)?\s*\n([\s\S]*?)```/g
+// 只认 ```json：把语言标记设为可选时，前面任意 ``` 块的**闭合**围栏会被当成新的开围栏，
+// 与真正的 ```json 配对，捕获空串把真块吞掉（PR #151 审核发现的静默丢数据）。
+const FENCE = /```json[ \t]*\r?\n([\s\S]*?)```/g
 
 export function normalizeFinding(raw) {
   if (!raw || typeof raw !== 'object') return null

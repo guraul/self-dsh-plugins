@@ -241,3 +241,45 @@ test('record: --findings 兜底', () => {
   const stored = JSON.parse(readFileSync(join(dir, `7-${SHA}.json`), 'utf8'))
   assert.equal(stored.findings[0].severity, 'nit')
 })
+
+test('record: --findings 文件非法时给 E_PARSE 而不是原始 SyntaxError', () => {
+  const { root } = sandbox()
+  const request = join(root, 'req.json')
+  const response = join(root, 'res.txt')
+  const bad = join(root, 'bad.json')
+  writeFileSync(
+    request,
+    JSON.stringify({
+      request: {
+        pr: 7, head_sha: SHA, nonce: NONCE, issue: { number: 7, title: 't', body: 'b' },
+        files: ['a.js'], diff: '<<<D>>>\n+x\n<<<E>>>', budget: { maxChars: 1000, timeoutMs: 1000 },
+      },
+    }),
+  )
+  writeFileSync(response, `${NONCE} VERDICT: REJECT SHA: ${SHA}\n`)
+  writeFileSync(bad, '{不是 json')
+  const out = run(['record', '--request', request, '--response', response, '--findings', bad, '--root', root])
+  assert.equal(out.code, 2)
+  assert.match(out.stderr, /--findings 文件不可读或不是合法 JSON/)
+})
+
+test('record: --findings 缺 findings 数组时报错', () => {
+  const { root } = sandbox()
+  const request = join(root, 'req.json')
+  const response = join(root, 'res.txt')
+  const bad = join(root, 'bad.json')
+  writeFileSync(
+    request,
+    JSON.stringify({
+      request: {
+        pr: 7, head_sha: SHA, nonce: NONCE, issue: { number: 7, title: 't', body: 'b' },
+        files: ['a.js'], diff: '<<<D>>>\n+x\n<<<E>>>', budget: { maxChars: 1000, timeoutMs: 1000 },
+      },
+    }),
+  )
+  writeFileSync(response, `${NONCE} VERDICT: REJECT SHA: ${SHA}\n`)
+  writeFileSync(bad, '{"evidence":[]}')
+  const out = run(['record', '--request', request, '--response', response, '--findings', bad, '--root', root])
+  assert.equal(out.code, 2)
+  assert.match(out.stderr, /缺少 findings 数组/)
+})

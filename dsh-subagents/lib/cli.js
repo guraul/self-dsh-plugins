@@ -17,7 +17,7 @@ import {
 } from './contract.js'
 import { buildReviewPrompt, prepareRequest } from './request.js'
 import { renderCard } from './card.js'
-import { extractFindings } from './findings.js'
+import { extractFindings, normalizeEvidence, normalizeFinding } from './findings.js'
 import { renderComment } from './comment.js'
 import { runProvider } from './bridge-cli.js'
 import { getRole, loadRoles } from './roles.js'
@@ -142,9 +142,16 @@ function cmdRecord(flags) {
     findings = block.findings
     evidence = block.evidence
   } else if (flags.findings) {
-    const fallback = JSON.parse(readFileSync(flags.findings, 'utf8'))
-    findings = Array.isArray(fallback.findings) ? fallback.findings : []
-    evidence = Array.isArray(fallback.evidence) ? fallback.evidence : []
+    if (flags.findings === true) throw fail('E_PARSE', '--findings 需要一个文件路径')
+    let fallback
+    try {
+      fallback = JSON.parse(readFileSync(flags.findings, 'utf8'))
+    } catch (error) {
+      throw fail('E_PARSE', `--findings 文件不可读或不是合法 JSON: ${error.message}`)
+    }
+    if (!Array.isArray(fallback?.findings)) throw fail('E_PARSE', '--findings 文件缺少 findings 数组')
+    findings = fallback.findings.map(normalizeFinding).filter(Boolean)
+    evidence = normalizeEvidence(fallback.evidence)
   }
 
   const result = {
@@ -259,7 +266,7 @@ function cmdReview(flags) {
       timeoutMs: request.budget.timeoutMs,
       cwd: root(flags),
     })
-    meta = run.meta
+    meta = { ...run.meta, text: run.text }
     if (nonceInDiff(request.diff, request.nonce)) {
       throw new ContractError('E_PARSE', 'diff 内出现随机标记')
     }
@@ -270,12 +277,17 @@ function cmdReview(flags) {
   }
 
   const policy = highRiskHit({ files: request.files, diff: request.diff })
+  const block = extractFindings(meta.text ?? '')
   const result = {
     verdict: policy.hit ? 'ESCALATE' : parsed.verdict,
     head_sha: request.head_sha,
     nonce: request.nonce,
-    findings: [],
-    evidence: policy.hit ? policy.reasons : (parsed.message ? [parsed.message] : []),
+    findings: block?.findings ?? [],
+    evidence: [
+      ...(policy.hit ? policy.reasons : []),
+      ...(block?.evidence ?? []),
+      ...(parsed.message ? [parsed.message] : []),
+    ],
     form: meta.form,
     model: meta.model,
     durationMs: meta.durationMs,
