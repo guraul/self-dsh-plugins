@@ -16,6 +16,22 @@ _Avoid_: review gate、人工闸门
 流程中必须由人做决定的那一步。本仓当前唯一的人在环是「合并前确认」，其上游产物是审核记录，不是口头同意。
 _Avoid_: 人工确认、human in the loop
 
+**角色接转**：
+控制面把同一件事依次交给不同角色完成：executor 做完交给 reviewer，reviewer 判完再交回 executor 修复或合并。接转的载体是任务卡，不是人对人转述。
+_Avoid_: 交接、handoff、转派
+
+**轮次**：
+reviewer 审一次算一轮。上限 3 轮，由控制面计数并写进 PR comment 与任务卡；reviewer 自己不知道轮次，否则它可以为不超限而放行。
+_Avoid_: 迭代、循环次数、retry
+
+**任务卡**：
+交给下一位 agent 的最小指令：目标、边界（不许改什么）、验收方式、指针。它与 PR comment 是两层——comment 面向人与追溯，任务卡面向执行者。
+_Avoid_: 工单、卡片、ticket
+
+**review 状态**：
+GitHub 原生的 `APPROVED` / `CHANGES_REQUESTED`，由机器账号提交。它是 PR 上对外的结论，审核记录是结论的存档。
+_Avoid_: 判定标签、label
+
 **跳过审计**：
 用 `--no-review` 显式绕过审核闸门时写下的一条记录。它不阻止合并，只保证「谁在什么时候绕过了闸门」可查。
 _Avoid_: 豁免、白名单
@@ -43,7 +59,7 @@ _Avoid_: 结论行、verdict line
 _Avoid_: nonce、token、盐
 
 **审核记录**：
-一次审核的不可变摘要，落在 `.dsh-web/reviews/<pr>-<sha>.json`，只存 diff 的哈希与长度，不存全文。
+一次审核的不可变摘要，落在**主工作区**的 `.dsh-web/reviews/<pr>-<sha>.json`，只存 diff 的哈希与长度，不存全文。
 _Avoid_: 审计日志、review log
 
 **审计记录**：
