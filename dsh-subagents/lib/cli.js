@@ -36,6 +36,7 @@ import {
 
 const USAGE = `用法:
   dsh-subagents prepare --pr <号> [--out <文件>] [--root <仓库根>]
+  dsh-subagents prompt  --request <文件> [--out <文件>] [--role <角色>]  # 渲染审核提示词
   dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>] [--root <仓库根>]
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
   dsh-subagents review  --pr <号> --form <b> --model <名> [--provider <名>] [--root <仓库根>]
@@ -107,6 +108,19 @@ function cmdPrepare(flags) {
     return 0
   }
   emit(payload, { ...flags, json: true })
+  return 0
+}
+
+function cmdPrompt(flags) {
+  if (!flags.request) throw fail('E_BUDGET', '缺少 --request')
+  const request = JSON.parse(readFileSync(flags.request, 'utf8')).request
+  const text = buildReviewPrompt({ request, role: getRole(flags.role || 'reviewer') })
+  if (flags.out) {
+    writeFileSync(flags.out, text, 'utf8')
+    process.stdout.write(`已写入 ${flags.out}\n`)
+    return 0
+  }
+  process.stdout.write(text)
   return 0
 }
 
@@ -418,6 +432,7 @@ function cmdRoles(flags) {
 
 const COMMANDS = {
   prepare: cmdPrepare,
+  prompt: cmdPrompt,
   record: cmdRecord,
   check: cmdCheck,
   review: cmdReview,

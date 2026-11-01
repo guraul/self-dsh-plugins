@@ -29,6 +29,29 @@ pnpm install
 /Users/gubin/workspace/self-dsh-plugins/.dsh-web/restart-once.sh
 ```
 
+## 一点五、审核循环里的脚本
+
+机械步骤已固化，**reviewer 的模型调用不在脚本内**（必须由会话内 agent 发起）：
+
+```bash
+# 1) 准备材料：产物落在 .tmp/review/<pr>/（项目内，不会被 /tmp 的定期清理带走）
+scripts/pipeline/review.sh prepare 173 --model codebuddy/glm-5.3-flash
+
+# 2) 会话内 agent 读 .tmp/review/173/prompt.md 完成审核，把响应存成文件
+
+# 3) 落记录（插件 CLI）
+node dsh-subagents/lib/cli.js record --request .tmp/review/173/request.json --response <响应文件>
+
+# 4) 发布：评论 + review 状态，用机器账号
+scripts/pipeline/review.sh publish 173 --record .dsh-web/reviews/173-<sha>.json --round 1
+#    --dry-run 可零网络预演
+
+# 5) 合并（闸门）
+scripts/pipeline/merge-pr.sh 173 --review-record=.dsh-web/reviews/173-<sha>.json
+```
+
+**为什么产物不放 `/tmp`**：macOS 的 `/etc/periodic/daily/110.clean-tmps` 每天清理 `/tmp` 里超过 3 天未访问的文件，重启也可能清掉；证据要留在项目内。
+
 ## 二、重启后验证
 
 ```bash
