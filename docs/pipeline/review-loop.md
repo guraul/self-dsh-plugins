@@ -104,12 +104,13 @@ pnpm install
 | 形态 B 闭环 | `prepare → reviewer(B) → record → comment → review → merge` 全自动，PR #161 实测 |
 | 模型防降级 | codebuddy 自报 `modelUsage`，与请求不一致即 `E_UNAVAILABLE` |
 | 机器账号 | `dsh-bot-guraul` + `GH_CONFIG_DIR` 隔离，评论与 review 状态由它提交 |
+| 续接（路线 a） | `product_continue` + `[delegate-session: <id>]`；2026-11-01 实测：第一次让 codebuddy「记住 42」，第二次用同一 session 追问，答出 42（该数字只出现在第一轮） |
 
 ### 未做（及为什么现在不做）
 
 | 项 | 为什么现在不做 |
 |---|---|
-| `product_submit` / `product_wait`（续接） | 需要会话状态机与事件流，约 900 行；当前任务卡都是「一次性修一处/合一次」，没有追问需求 |
+| `product_wait`（后台等待） | 续接已用「同步 resume」满足（路线 a）；真正需要后台等待的场景还没出现 |
 | opencode 侧模型校验 | CLI 输出不含模型信息，无法自证；只能依赖「未知模型硬失败」 |
 | 形态 C（网页清言） | 依赖 REQ-002 的桥接，尚未实现 |
 | 分片审核 | 需要先定义多份判定的合成规则 |
