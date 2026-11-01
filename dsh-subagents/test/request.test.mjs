@@ -5,7 +5,7 @@ import { changedLines, fenceDiff, linkedIssueNumber, sha256 } from '../lib/reque
 test('linkedIssueNumber 取 Closes #N', () => {
   assert.equal(linkedIssueNumber('Closes #160'), 160)
   assert.equal(linkedIssueNumber('closes #7\n\n其他说明'), 7)
-  assert.equal(linkedIssueNumber('Fix #9\nCloses #12'), 12, '取第一个匹配到的 closes')
+  assert.equal(linkedIssueNumber('Fix #9\nCloses #12'), 9, '取文档里第一个出现的 auto-close 关键词')
   assert.equal(linkedIssueNumber('Closes #5\nCloses #6'), 5)
 })
 
@@ -31,4 +31,19 @@ test('changedLines 只数增删行', () => {
 test('sha256 稳定且带前缀', () => {
   assert.equal(sha256('abc'), sha256('abc'))
   assert.match(sha256('abc'), /^sha256:[0-9a-f]{64}$/)
+})
+
+test('linkedIssueNumber 支持 GitHub 全部 auto-close 关键词', () => {
+  for (const word of ['close', 'closes', 'closed', 'fix', 'fixes', 'fixed', 'resolve', 'resolves', 'resolved']) {
+    assert.equal(linkedIssueNumber(`${word} #12`), 12, `${word} 应被识别`)
+  }
+  assert.equal(linkedIssueNumber('Fixes #12'), 12)
+})
+
+test('truncate 超预算时截断并注明', async () => {
+  const { truncate } = await import('../lib/request.js')
+  assert.equal(truncate('abc', 10), 'abc')
+  const long = truncate('x'.repeat(50), 10)
+  assert.match(long, /^x{10}/)
+  assert.match(long, /已截断/)
 })

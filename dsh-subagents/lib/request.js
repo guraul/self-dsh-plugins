@@ -26,10 +26,20 @@ function run(bin, args, { cwd, timeout = 60000, env } = {}) {
   return result.stdout
 }
 
-/** 从 PR 正文里取 `Closes #<n>` 的 issue 号；没有则返回 null。 */
+// GitHub 全部的 auto-close 关键词；本仓 open-pr.sh 只写 Closes，但人工 PR 可能用别的。
+const CLOSE_KEYWORDS = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i
+
+/** 从 PR 正文里取会关闭哪个 issue；没有则返回 null。 */
 export function linkedIssueNumber(body) {
-  const match = /\bcloses\s+#(\d+)/i.exec(String(body ?? ''))
+  const match = CLOSE_KEYWORDS.exec(String(body ?? ''))
   return match ? Number(match[1]) : null
+}
+
+/** issue 正文也吃预算：超长正文会把提示词撑爆，截断并注明。 */
+export function truncate(text, maxChars) {
+  const value = String(text ?? '')
+  if (value.length <= maxChars) return value
+  return `${value.slice(0, maxChars)}\n\n…（正文超过预算 ${maxChars} 字符，已截断）`
 }
 
 export function sha256(text) {
@@ -102,10 +112,11 @@ export function prepareRequest({
       issue = {
         number: parsedIssue.number ?? issueNumber,
         title: parsedIssue.title ?? '',
-        body: parsedIssue.body ?? '',
+        body: truncate(parsedIssue.body ?? '', maxChars),
       }
-    } catch {
-      // 取不到 issue 就回退到 PR 信息，并把 number 保持 null（不假装有验收依据）
+    } catch (error) {
+      // 回退必须可观测：否则「无链接」与「gh 取失败」在记录里长得一样
+      process.stderr.write(`[prepare] 取 issue #${issueNumber} 失败，回退 PR 信息: ${error.message}\n`)
     }
   }
 
