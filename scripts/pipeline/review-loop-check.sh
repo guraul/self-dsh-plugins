@@ -41,7 +41,8 @@ fi
 
 # 2. 软链是否悬空
 if [[ -L "${PROFILE_DIR}/node_modules/${NEW_PKG}" ]]; then
-  TARGET=$(readlink "${PROFILE_DIR}/node_modules/${NEW_PKG}")
+  # 软链内容是相对路径，必须在链接所在目录解析，不能在仓库根直接 -d
+  TARGET=$(cd "$(dirname "${PROFILE_DIR}/node_modules/${NEW_PKG}")" && cd "$(readlink "${PROFILE_DIR}/node_modules/${NEW_PKG}")" && pwd)
   if [[ -d "${TARGET}" ]]; then
     check "软链有效 -> ${TARGET}" 1
   else
@@ -53,7 +54,8 @@ fi
 
 # 3. dump-config 里能看到插件
 if command -v dsh >/dev/null 2>&1; then
-  if dsh plugin --profile web --dump-config 2>/dev/null | grep -q "${NEW_PKG}"; then
+  # 注意：`dsh plugin ...` 会把参数转发给 pnpm，dump-config 不是 plugin 的子命令
+  if dsh --profile web --dump-config 2>/dev/null | grep -q "${NEW_PKG}"; then
     check "dsh --dump-config 能看到 ${NEW_PKG}" 1
   else
     check "dsh --dump-config 能看到 ${NEW_PKG}" 0
