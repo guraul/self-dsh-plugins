@@ -384,3 +384,45 @@ test('record 的 --round 不带值时报错，不静默当 1', () => {
   assert.equal(out.code, 2)
   assert.match(out.stderr, /--round 需要一个值/)
 })
+
+test('recheck：任务书含上轮问题与新标记，且不提轮次', () => {
+  const { root, dir } = sandbox()
+  const prev = join(dir, `9-${SHA}.json`)
+  writeFileSync(
+    prev,
+    JSON.stringify({
+      schemaVersion: 1,
+      policyVersion: '0.1.0',
+      round: 1,
+      pr: 9,
+      verdict: 'REJECT',
+      head_sha: 'f'.repeat(40), // 上一轮的提交，必须与新请求不同
+      findings: [{ severity: 'major', file: 'lib/a.js', line: 3, message: '缺校验' }],
+      evidence: [],
+      createdAt: new Date().toISOString(),
+    }),
+  )
+  const req = join(root, 'req.json')
+  writeFileSync(req, JSON.stringify({ request: { pr: 9, head_sha: SHA, nonce: NONCE, diff: 'x', files: [], issue: { body: 'b' }, budget: { maxChars: 100 } } }))
+  const out = run(['recheck', '--request', req, '--previous', prev])
+  assert.equal(out.code, 0, out.stderr)
+  assert.match(out.stdout, /上一轮你审过这个 PR，判定为 REJECT/)
+  assert.match(out.stdout, /\[major\] lib\/a\.js:3 缺校验/)
+  assert.match(out.stdout, new RegExp(NONCE))
+  assert.doesNotMatch(out.stdout, /第\s*2\s*轮/, 'reviewer 不该知道轮次')
+})
+
+test('recheck：传错记录时拒绝（非 REJECT / PR 不符 / head 未变）', () => {
+  const { root, dir } = sandbox()
+  const req = join(root, 'req.json')
+  writeFileSync(req, JSON.stringify({ request: { pr: 9, head_sha: SHA, nonce: NONCE, diff: 'x', files: [], issue: { body: 'b' }, budget: { maxChars: 100 } } }))
+  const other = '1'.repeat(40)
+  const mk = (over) => {
+    const file = join(dir, `p-${Object.keys(over).join('')}-${Math.random().toString(36).slice(2, 6)}.json`)
+    writeFileSync(file, JSON.stringify({ schemaVersion: 1, policyVersion: '0.1.0', round: 1, pr: 9, verdict: 'REJECT', head_sha: other, findings: [], evidence: [], createdAt: new Date().toISOString(), ...over }))
+    return file
+  }
+  assert.match(run(['recheck', '--request', req, '--previous', mk({ verdict: 'APPROVE', pr: 9 })]).stderr, /只有 REJECT/)
+  assert.match(run(['recheck', '--request', req, '--previous', mk({ pr: 8 })]).stderr, /不符/)
+  assert.match(run(['recheck', '--request', req, '--previous', mk({ head_sha: SHA })]).stderr, /没有新提交/)
+})

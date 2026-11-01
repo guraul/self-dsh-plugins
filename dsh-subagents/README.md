@@ -80,6 +80,20 @@ reviewer 必须输出恰好一行：
 | SHA 与请求不符 | `ESCALATE` + `E_SHA_MISMATCH` |
 | diff 里出现该随机标记 | `ESCALATE` + `E_PARSE`（判定行可能来自被审内容） |
 
+## 复审走同一会话（省钱）
+
+`REJECT` 之后不必整轮重开：拿到上一轮的 `[delegate-session: <id>]`，先用新请求渲染复审任务书，再用 `product_continue` 发给同一个会话。
+
+```bash
+scripts/pipeline/review.sh prepare 123 --model codebuddy/glm-5.3-flash   # 新 nonce
+node dsh-subagents/lib/cli.js recheck \
+  --request .tmp/review/123/request.json \
+  --previous .dsh-web/reviews/123-<旧sha>.json \
+  --out .tmp/review/123/recheck.md
+```
+
+然后把 `recheck.md` 作为 `product_continue(session: '<id>', task: …)` 的任务正文。任务书里**不含轮次**——reviewer 不该知道第几轮。
+
 ## 跨仓委派要带 `cwd`
 
 CLI 的子进程沙箱以工作目录为界。派任务给另一个仓时**必须**传 `cwd`，否则它只看得到当前仓：
