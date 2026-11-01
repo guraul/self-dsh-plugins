@@ -200,6 +200,15 @@ scripts/pipeline/compat-matrix.sh 0.2.2-alpha.2 --json                      # �
 issue 里会单列「需要人回填的」（`未验证→compatible` 的那批）与「记录比 L1 更严」的两类，
 按需回填矩阵后再把结论写进 [`COMPATIBILITY.md`](../COMPATIBILITY.md)。
 
+### review.sh
+
+```bash
+scripts/pipeline/review.sh prepare <pr> [--model <模型>]
+scripts/pipeline/review.sh publish <pr> --record <文件> --round <n> [--dry-run] [--repo <owner/name>]
+scripts/pipeline/review.sh paths <pr>
+```
+审核循环的机械步骤：`prepare` 把请求与提示词写到 `.tmp/review/<pr>/`（项目内，避开 `/tmp` 定期清理）；`publish` 用机器账号发评论并提交 review 状态（`APPROVE→approve`、`REJECT→request-changes`、`ESCALATE→只评论`）。**reviewer 的模型调用不在脚本内**——那一步必须由会话内 agent 发起。
+
 ### audit-subagents.mjs
 
 定时审计 product 子代理会话（issue #10）：**只读、确定性、不调模型**。用 launchd / cron 直接跑，不要挂到 DSH 的 schedule 提醒上（那会唤醒会话、花模型调用）。

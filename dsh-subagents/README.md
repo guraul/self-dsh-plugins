@@ -22,33 +22,37 @@ dsh plugin --profile web add /path/to/self-dsh-plugins/dsh-subagents
 
 ## 用法
 
+**审核循环的机械步骤走脚本**（`scripts/pipeline/review.sh`），不要手敲一长串命令，也不要把产物放 `/tmp`——macOS 每天会清理 `/tmp` 里 3 天未访问的文件。
+
 ```bash
-# 1. 组装审核请求（diff 走 git，PR 元数据走 gh）
-node lib/cli.js prepare --pr 116 --out /tmp/req.json
+# 1. 准备材料：请求与提示词写到 <主工作区>/.tmp/review/<pr>/（.gitignore 已覆盖）
+scripts/pipeline/review.sh prepare 116 --model codebuddy/glm-5.3-flash
 
-# 2. 把 /tmp/req.json 里的 request 交给 reviewer，拿回文本响应
+# 2. 会话内 agent 读 .tmp/review/116/prompt.md 完成审核，把响应存成文件
 
-# 3. 解析响应、校验 schema、判高风险、落记录
-#    （reviewer 输出里的 ```json 块会被提取成 findings；没有块时可用 --findings 兜底）
-node lib/cli.js record --request /tmp/req.json --response /tmp/res.txt --model codebuddy/glm-5.3
+# 3. 落记录（findings 从响应里的 json 块提取，缺块可用 --findings 兜底）
+node dsh-subagents/lib/cli.js record \
+  --request .tmp/review/116/request.json \
+  --response .tmp/review/116/response.txt \
+  --form cli --provider codebuddy
 
-# 4. 一条命令跑完（形态 B，一次性调用）
-node lib/cli.js review --pr 116 --form b --provider codebuddy --model codebuddy/glm-5.3
+# 4. 发布：评论 + 按判定提交 review 状态（APPROVE→approve，REJECT→request-changes，ESCALATE→只评论）
+scripts/pipeline/review.sh publish 116 --record .dsh-web/reviews/116-<sha>.json --round 1
+#    先 --dry-run 零网络预演；重跑会重复发评论，先 `gh pr view --json comments` 查重
 
-# 5. 合并前的闸门校验（给 merge-pr.sh 用）
-node lib/cli.js check --pr 116 --record .dsh-web/reviews/116-<sha>.json
+# 5. 合并（闸门）
+scripts/pipeline/merge-pr.sh 116 --review-record=.dsh-web/reviews/116-<sha>.json
+```
 
-# 6. 按 traceId 反查
-node lib/cli.js log --trace 20261031T121500Z-a1b2c3d4
+其余子命令（单次排查时才用）：
 
-# 7. 生成任务卡与 PR comment（纯文本，不碰网络）
-node lib/cli.js card --input /tmp/card.json
+```bash
+node lib/cli.js prompt  --request .tmp/review/116/request.json     # 单独渲染提示词
+node lib/cli.js review  --pr 116 --form b --provider codebuddy --model codebuddy/glm-5.3-flash
+node lib/cli.js check   --pr 116 --record .dsh-web/reviews/116-<sha>.json
+node lib/cli.js log     --trace 20261031T121500Z-a1b2c3d4
+node lib/cli.js card    --input .tmp/review/116/card.json
 node lib/cli.js comment --record .dsh-web/reviews/116-<sha>.json --round 2
-
-# 8. 发布到 PR：评论 + 按判定提交 review 状态（APPROVE→approve，REJECT→request-changes，ESCALATE→只发评论）
-GH_CONFIG_DIR=~/.config/gh-reviewer node lib/cli.js publish --record .dsh-web/reviews/116-<sha>.json --round 2
-#    先用 --dry-run 看要执行的 gh 命令（零网络：仓库从 --repo 或本地 git remote 解析）
-#    重跑语义：评论先发、review 后提交；若 review 失败，重跑会重复发评论——先 `gh pr view --json comments` 查重
 ```
 
 退出码：`0` 通过 / `1` 拒绝（闸门不过或判定不是 `APPROVE`）/ `2` 参数或环境错误。
