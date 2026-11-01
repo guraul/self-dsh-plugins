@@ -160,18 +160,25 @@
 ### 6.2 任务卡模板（塞进委派 prompt，≤300 字）
 
 ```
-角色：executor　目标：修复 PR #<n> 的审核问题（第 N 次 / 共 3 次）
+角色: executor
+目标: 修复 PR #<n> 的审核问题
+轮次: 第 N 次 / 共 3 次
 
-边界：
+边界:
 - 只改 comment 里「必须修」列出的位置，不重构、不动无关文件
 - 不许改 .github/ 与 scripts/pipeline/
 
-验收：
+验收:
 - node --test dsh-subagents 全过
 - 在 PR 里回复改了哪几处（对应 comment 的条目）
 
-指针：PR #<n>、comment <url>、issue #<n>
+指针:
+- PR #<n>
+- comment <url>
+- issue #<n>
 ```
+
+渲染与校验在 `dsh-subagents/lib/card.js`（`renderCard` / `parseCard`），缺字段直接报错并指出缺哪个。
 
 ---
 
