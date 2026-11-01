@@ -61,6 +61,8 @@ export function activationSpec({ provider, role, task, agent, signal, maxDepth =
       prompt: [{ type: 'text', text: [role?.instructions, task].filter(Boolean).join('\n\n') }],
       parent: agent,
       maxDepth,
+      // 角色权限交给 provider 映射成 CLI 参数（readonly → plan，full → auto）
+      permissionMode: role?.permissionMode ?? 'default',
     },
   }
 }

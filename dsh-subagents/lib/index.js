@@ -27,17 +27,20 @@ export function resolveOptions(config = {}) {
 }
 
 export async function apply(ctx, config = {}) {
-  const products = Array.isArray(config.products) && config.products.length > 0
-    ? config.products
-    : detectProducts({ env: process.env })
+  // config.products 支持 'opencode' 或 { product: 'codebuddy', bin: '/path/to/shim' }
+  const configured = Array.isArray(config.products) && config.products.length > 0
+    ? config.products.map((item) =>
+        typeof item === 'string' ? { product: item } : { product: item.product, bin: item.bin },
+      )
+    : detectProducts({ env: process.env }).map((product) => ({ product }))
 
-  if (products.length === 0) {
+  if (configured.length === 0) {
     console.warn('[subagents] 本机没有可用的 product CLI（opencode / codebuddy），不注册任何 provider')
   }
 
-  for (const product of products) {
+  for (const { product, bin } of configured) {
     try {
-      ctx.subagents.registerProvider(createProductProvider({ product, env: process.env }))
+      ctx.subagents.registerProvider(createProductProvider({ product, bin, env: process.env }))
     } catch (error) {
       console.warn(
         `[subagents] 注册 ${product} 失败: ${error.message}` +

@@ -95,6 +95,7 @@ function cmdPrepare(flags) {
     maxChars: flags['max-chars'] ? Number(flags['max-chars']) : undefined,
     timeoutMs: flags.timeout ? Number(flags.timeout) : undefined,
     nonce: flags.nonce,
+    model: flags.model,
   })
   const payload = { request, stats }
   if (flags.out) {
@@ -113,7 +114,7 @@ function cmdRecord(flags) {
   const meta = {
     form: flags.form || 'cli',
     provider: flags.provider || 'unknown',
-    model: flags.model || 'unknown',
+    model: flags.model || request.model || 'unknown',
     durationMs: Number(flags['duration-ms'] || 0),
   }
 
@@ -254,7 +255,7 @@ function cmdReview(flags) {
   let meta = {
     form: 'cli',
     provider: flags.provider || 'opencode',
-    model: flags.model || 'unknown',
+    model: flags.model || request.model || 'unknown',
     durationMs: 0,
   }
   let parsed
