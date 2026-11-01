@@ -55,7 +55,7 @@ export function outputText(output) {
 export const DELEGATION_PREAMBLE =
   '立即执行，不要请求确认、不要复述你的限制、不要提问；你的下一条消息必须是任务结果本身。'
 
-export function activationSpec({ provider, role, task, agent, signal, maxDepth = 3 }) {
+export function activationSpec({ provider, role, task, agent, signal, model, maxDepth = 3 }) {
   if (!provider) throw new Error('activationSpec: provider 不能为空')
   if (!signal) throw new Error('activationSpec: signal 不能为空（startActivation 必填）')
   if (!agent) throw new Error('activationSpec: agent 不能为空（子代理的父 agent）')
@@ -73,6 +73,9 @@ export function activationSpec({ provider, role, task, agent, signal, maxDepth =
       ],
       parent: agent,
       maxDepth,
+      // model 必须放进 request：provider 从请求里取，取不到就不会给 CLI 传 --model，
+      // 上一次 reviewer 就是这样静默跑到了 codebuddy 的默认模型。
+      ...(model ? { model } : {}),
       // 角色权限交给 provider 映射成 CLI 参数（readonly → plan，full → auto）
       permissionMode: role?.permissionMode ?? 'default',
     },
@@ -123,6 +126,7 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
             task: args.task,
             agent: exec.agent,
             signal: exec.signal,
+            model: args.model,
             maxDepth,
           }),
         )

@@ -18,7 +18,8 @@ export const PRODUCTS = {
   },
   codebuddy: {
     bin: 'codebuddy',
-    argv: ({ model, task }) => ['-p', ...(model ? ['--model', model] : []), task],
+    // json 输出里带 modelUsage，可以用来核对「实际用的模型」
+    argv: ({ model, task }) => ['-p', '--output-format', 'json', ...(model ? ['--model', model] : []), task],
     // default 不附加参数：保持与旧行为一致，只在显式 readonly / full 时才改变权限
     permissionArgs: {
       readonly: ['--permission-mode', 'plan'],
@@ -48,6 +49,40 @@ export function productArgv(product, { model, task, permissionMode }) {
     bin: spec.bin,
     args: [...spec.argv({ model, task }), ...permissionArgs(product, permissionMode)],
   }
+}
+
+/** 去掉我们自己的 `codebuddy/` 前缀，用于与 CLI 自报的模型名比对。 */
+export function normalizeModelName(model) {
+  return String(model ?? '').replace(/^codebuddy\//, '')
+}
+
+/**
+ * 请求了具体模型时，核对 CLI 自报的实际模型；不一致返回错误文案，一致或无从判断返回 null。
+ * 只有 codebuddy 提供 modelUsage；opencode 的 json 是事件流，暂无等价校验。
+ */
+export function modelMismatch(product, model, stdout) {
+  if (product !== 'codebuddy' || !model) return null
+  const used = reportedModels(stdout)
+  const wanted = normalizeModelName(model)
+  if (used.length === 0 || used.includes(wanted)) return null
+  return `模型不一致：请求 ${wanted}，实际使用 ${used.join(',')}——已停止，不降级`
+}
+
+/** 从 codebuddy 的 json 信封里取实际使用的模型列表；取不到返回空数组。 */
+export function reportedModels(stdout) {
+  for (const line of String(stdout ?? '').split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('{')) continue
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (parsed && typeof parsed.modelUsage === 'object' && parsed.modelUsage !== null) {
+        return Object.keys(parsed.modelUsage)
+      }
+    } catch {
+      // 不是信封行，继续
+    }
+  }
+  return []
 }
 
 /** codebuddy 在部分参数组合下会吐 JSON 信封；解出 result，其余按纯文本处理。 */
@@ -86,6 +121,7 @@ export function createProductProvider({ product, bin, timeoutMs = 300000, env = 
     // 四项如实声明：我们不用 agentOptions / agentPreset / outputSchema，只限制递归深度。
     capabilities: { agentOptions: false, agentPreset: false, outputSchema: false, depthLimit: true },
     async start(request) {
+      const started = Date.now()
       const task = requestTask(request)
       const model = request?.model ?? request?.productSettings?.model
       const command = productArgv(product, { model, task, permissionMode: request?.permissionMode })
@@ -126,6 +162,14 @@ export function createProductProvider({ product, bin, timeoutMs = 300000, env = 
         child.on('close', (code) => {
           clearTimeout(timer)
           if (code === 0) {
+            // 防降级：请求了具体模型时，CLI 自报的 modelUsage 必须包含它。
+            const mismatch = modelMismatch(product, model, stdout)
+            if (mismatch) {
+              const error = new ContractError('E_UNAVAILABLE', mismatch)
+              error.durationMs = Date.now() - started
+              reject(error)
+              return
+            }
             resolve({ output: [{ type: 'text', text: extractText(stdout) }], stopReason: 'end' })
             return
           }
