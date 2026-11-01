@@ -4,7 +4,7 @@
  *
  * 判定与合并分离是这里的硬约束：CLI 只产出记录，不执行合并。
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import {
@@ -19,7 +19,7 @@ import { buildReviewPrompt, prepareRequest } from './request.js'
 import { renderCard } from './card.js'
 import { extractFindings, normalizeEvidence, normalizeFinding } from './findings.js'
 import { ghCommands, parseRemoteUrl, publishPlan } from './publish.js'
-import { renderComment } from './comment.js'
+import { renderComment, safeInline } from './comment.js'
 import { runProvider } from './bridge-cli.js'
 import { getRole, loadRoles } from './roles.js'
 import {
@@ -40,6 +40,8 @@ const USAGE = `用法:
   dsh-subagents prompt  --request <文件> [--out <文件>] [--role <角色>]  # 渲染审核提示词
   dsh-subagents recheck --request <新请求> --previous <上一轮记录> [--out <文件>]
                                                         # 渲染「同一会话复审」的任务书
+  dsh-subagents adjudicate --record <文件> --decision <merge|abandon> --by <人> --reason <文本>
+                                                        # 给 ESCALATE 的判定留下人为处置
   dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>]
                         [--round <1..3>] [--policy-version <版本>] [--root <仓库根>]
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
@@ -136,6 +138,56 @@ function renderRecheckTask({ request, previous }) {
   lines.push('')
   lines.push(buildReviewPrompt({ request, role: getRole('reviewer') }))
   return `${lines.join('\n')}\n`
+}
+
+/**
+ * ESCALATE 的处置留档：不覆盖原判定，只追加 adjudication。
+ * 没有这一步，「这条为什么最后放行了」事后无从回答。
+ */
+function cmdAdjudicate(flags) {
+  if (!flags.record) throw fail('E_BUDGET', '缺少 --record')
+  const decision = flags.decision
+  if (decision !== 'merge' && decision !== 'abandon') {
+    throw fail('E_BUDGET', `--decision 只能是 merge 或 abandon，收到 ${decision ?? '(空)'}`)
+  }
+  if (typeof flags.by !== 'string' || flags.by.length === 0) {
+    throw fail('E_BUDGET', '--by 需要一个值（谁做的决定）')
+  }
+  if (typeof flags.reason !== 'string' || flags.reason.length === 0) {
+    throw fail('E_BUDGET', '--reason 需要一个值（为什么这么决定）')
+  }
+
+  const record = readRecord(flags.record)
+  if (record.verdict !== 'ESCALATE') {
+    throw fail('E_BUDGET', `记录判定是 ${record.verdict}，只有 ESCALATE 需要人为处置`)
+  }
+  if (record.adjudication) {
+    throw fail('E_BUDGET', `该记录已被 ${record.adjudication.by} 处置过（${record.adjudication.decision}），不覆盖`)
+  }
+
+  record.adjudication = {
+    decision,
+    by: String(flags.by),
+    reason: String(flags.reason),
+    at: new Date().toISOString(),
+  }
+  // 原子写：记录里是审计证据，写到一半断电不能把它毁掉
+  const tmpFile = `${flags.record}.${process.pid}.tmp`
+  writeFileSync(tmpFile, `${JSON.stringify(record, null, 2)}\n`, 'utf8')
+  renameSync(tmpFile, flags.record)
+
+  const lines = [
+    '## 人工处置',
+    '',
+    `- **判定**：${record.verdict}（${record.errorCode ?? '无错误码'}）→ **${decision === 'merge' ? '放行合并' : '放弃'}**`,
+    `- **由**：${safeInline(record.adjudication.by)}`,
+    `- **理由**：${safeInline(record.adjudication.reason)}`,
+    `- **时间**：${record.adjudication.at}`,
+    '',
+    '原判定保持不变；这条只记录人为什么推翻了它。',
+  ]
+  process.stdout.write(`${lines.join('\n')}\n`)
+  return 0
 }
 
 function cmdRecheck(flags) {
@@ -566,6 +618,7 @@ const COMMANDS = {
   prepare: cmdPrepare,
   prompt: cmdPrompt,
   recheck: cmdRecheck,
+  adjudicate: cmdAdjudicate,
   record: cmdRecord,
   check: cmdCheck,
   gate: cmdGate,

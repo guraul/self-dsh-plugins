@@ -80,6 +80,18 @@ reviewer 必须输出恰好一行：
 | SHA 与请求不符 | `ESCALATE` + `E_SHA_MISMATCH` |
 | diff 里出现该随机标记 | `ESCALATE` + `E_PARSE`（判定行可能来自被审内容） |
 
+## ESCALATE 之后：处置要留档
+
+判定 `ESCALATE` 时闸门不会放行，但人可以让它过。**让过这件事本身要留证据**，否则事后无法回答「这条为什么最后合并了」：
+
+```bash
+node dsh-subagents/lib/cli.js adjudicate \
+  --record .dsh-web/reviews/123-<sha>.json \
+  --decision merge --by guraol --reason "改的是流程文档，已人工看过"
+```
+
+只追加 `adjudication` 字段，**原判定不改**；同一条记录只能处置一次（防覆盖）。输出可直接贴进 PR 评论。
+
 ## 复审走同一会话（省钱）
 
 `REJECT` 之后不必整轮重开：拿到上一轮的 `[delegate-session: <id>]`，先用新请求渲染复审任务书，再用 `product_continue` 发给同一个会话。

@@ -69,3 +69,22 @@ test('renderComment 的证据走行内代码并压平', () => {
   assert.match(evidence, /^- `lib\/a\.js:1 /mu)
   assert.doesNotMatch(evidence, /```/)
 })
+
+test('renderComment 渲染人工处置段（ESCALATE 被放行时可追溯）', () => {
+  const text = renderComment({
+    result: {
+      ...result,
+      verdict: 'ESCALATE',
+      adjudication: { decision: 'merge', by: 'guraul', reason: '已人工看过', at: '2026-11-01T20:00:00Z' },
+    },
+    round: 1,
+  })
+  assert.match(text, /### 人工处置/)
+  assert.match(text, /放行合并/)
+  assert.match(text, /guraul/)
+})
+
+test('renderComment 无处置时不出现处置段', () => {
+  const text = renderComment({ result, round: 1 })
+  assert.doesNotMatch(text, /### 人工处置/)
+})
