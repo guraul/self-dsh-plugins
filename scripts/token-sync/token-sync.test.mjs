@@ -86,3 +86,35 @@ test('codebuddy: OpenAI 语义 —— input 扣掉缓存，total 含 reasoning',
   assert.equal(row.source, 'codebuddy');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('codebuddy: 同一 trace 的多次调用合并成一行（否则服务端 UPSERT 会互相覆盖）', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-sync-agg-'));
+  const traceDir = path.join(dir, '5678');
+  fs.mkdirSync(traceDir, { recursive: true });
+  const mk = (id, prompt, out) => ({
+    id,
+    model: 'deepseek-v4.1-flash',
+    usage: {
+      prompt_tokens: prompt,
+      completion_tokens: out,
+      prompt_cache_hit_tokens: 0,
+      prompt_tokens_details: { cached_tokens: 0 },
+      completion_tokens_details: { reasoning_tokens: 0 },
+    },
+  });
+  const lines = [
+    JSON.stringify({ type: 'trace_start', trace: { traceId: 'tr-agg', startedAt: '2026-10-30T04:00:00.000Z' } }),
+    JSON.stringify({ type: 'span_end', span: { toolOutput: JSON.stringify([mk('c1', 100, 10)]) } }),
+    JSON.stringify({ type: 'span_end', span: { toolOutput: JSON.stringify([mk('c2', 200, 20)]) } }),
+  ];
+  fs.writeFileSync(path.join(traceDir, 'trace_y.jsonl'), lines.join('\n') + '\n');
+
+  const { rows } = await collectCodebuddy({ tracesRoot: dir, days: ['2026-10-30'] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].session_id, 'tr-agg');
+  assert.equal(rows[0].calls, 2);
+  assert.equal(rows[0].input_tokens, 300);
+  assert.equal(rows[0].output_tokens, 30);
+  assert.equal(rows[0].total_tokens, 330);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
