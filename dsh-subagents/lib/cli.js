@@ -17,10 +17,9 @@ import {
 } from './contract.js'
 import { buildReviewPrompt, prepareRequest } from './request.js'
 import { renderCard } from './card.js'
-import { safeInline } from './comment.js'
 import { extractFindings, normalizeEvidence, normalizeFinding } from './findings.js'
 import { ghCommands, parseRemoteUrl, publishPlan } from './publish.js'
-import { renderComment } from './comment.js'
+import { renderComment, safeInline } from './comment.js'
 import { runProvider } from './bridge-cli.js'
 import { getRole, loadRoles } from './roles.js'
 import {
@@ -43,7 +42,6 @@ const USAGE = `用法:
                                                         # 渲染「同一会话复审」的任务书
   dsh-subagents adjudicate --record <文件> --decision <merge|abandon> --by <人> --reason <文本>
                                                         # 给 ESCALATE 的判定留下人为处置
-                                                        # 渲染「同一会话复审」的任务书
   dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>]
                         [--round <1..3>] [--policy-version <版本>] [--root <仓库根>]
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
@@ -174,7 +172,7 @@ function cmdAdjudicate(flags) {
     at: new Date().toISOString(),
   }
   // 原子写：记录里是审计证据，写到一半断电不能把它毁掉
-  const tmpFile = `${flags.record}.tmp`
+  const tmpFile = `${flags.record}.${process.pid}.tmp`
   writeFileSync(tmpFile, `${JSON.stringify(record, null, 2)}\n`, 'utf8')
   renameSync(tmpFile, flags.record)
 

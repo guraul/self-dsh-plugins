@@ -35,7 +35,12 @@ function bullet(items, empty = '（无）') {
 /** ESCALATE 被人工处置过时，评论里要能看出「谁、为什么」——否则事后无法解释这次放行。 */
 function adjudicationSection(adjudication) {
   if (!adjudication || typeof adjudication !== 'object') return []
-  const decision = adjudication.decision === 'merge' ? '放行合并' : '放弃'
+  const decision =
+    adjudication.decision === 'merge'
+      ? '放行合并'
+      : adjudication.decision === 'abandon'
+        ? '放弃'
+        : `未知处置：${safeInline(String(adjudication.decision ?? '无'))}`
   return [
     '### 人工处置',
     `- **决定**：${decision}　**由**：${safeInline(adjudication.by ?? '未记')}`,
