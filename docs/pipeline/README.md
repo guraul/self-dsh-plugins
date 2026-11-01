@@ -121,7 +121,7 @@ scripts/pipeline/merge-pr.sh <PR号> --check-only  # 演练：跑到闸门 / CI 
 scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎用）
 ```
 
-**包位置解析**：优先 `$DSH_PIPELINE_HOME`，未设置则退回 `$HOME/workspace/dsh-pipeline`，取
+**包位置解析**：优先 `$DSH_PIPELINE_HOME`，未设置则用本仓 `tools/node_modules/dsh-pipeline`（由 `tools/package.json` 从 `dist/latest.tgz` 安装的**打包产物**，不是源码 checkout），取
 `<包根>/bin/cli.mjs`；两者都找不到 `cli.mjs` 就报错退出（提示设置 `DSH_PIPELINE_HOME`）。
 
 **参数转发**（壳只做映射，不做任何判定）：
