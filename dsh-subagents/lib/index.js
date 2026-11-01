@@ -1,20 +1,46 @@
 /**
  * dsh-plugin-subagents 的宿主半边。
  *
- * PR2 只交付骨架：角色层、契约层、记录层与 CLI。宿主侧能力（注册
- * `product-subagents:*` provider、审核 HTTP 路由）在 PR4 补齐——那一版会先卸载
- * 旧插件 `dsh-plugin-product-subagents`，再挂本插件，避免 provider 重名导致
- * 整个 profile 插件树启动失败。
+ * 一期职责只有两件：按本机可用性注册 product provider，注册 `product_delegate`
+ * 工具。角色库与判定契约是纯函数，宿主侧不参与。
  *
- * 为什么这里什么也不注册：一期不挂真实 profile，装配验证只要求本包能被
- * `install-check.sh` 装进一次性 DSH_HOME。提前注册 provider 会让「有没有装进
- * 去」和「注册对不对」两件事混在一次验收里。
+ * provider 名必须与旧插件同名前缀（`product-subagents:*`）：
+ *   - `scripts/pipeline/audit-subagents.mjs` 靠它识别 product 子代理会话；
+ *   - 代价是两个插件**不能同时挂载**——重名会让整个 profile 插件树启动失败。
+ *     这里捕获注册失败并大声告警，而不是让宿主起不来。
  */
+import { loadRoles } from './roles.js'
+import { createProductProvider, detectProducts } from './provider.js'
+import { registerDelegateTool } from './tools/delegate.js'
+
 export const name = 'subagents'
+export const inject = ['subagents', 'tools']
 
-/** PR4 会补 `subagents`（注册 provider）与 `webServer`（审核路由）。 */
-export const inject = []
+export async function apply(ctx, config = {}) {
+  const products = Array.isArray(config.products) && config.products.length > 0
+    ? config.products
+    : detectProducts({ env: process.env })
 
-export function apply() {
-  // PR4: ctx.subagents.registerProvider(...) + POST /api/dsh-subagents/review
+  if (products.length === 0) {
+    console.warn('[subagents] 本机没有可用的 product CLI（opencode / codebuddy），不注册任何 provider')
+  }
+
+  for (const product of products) {
+    try {
+      ctx.subagents.registerProvider(createProductProvider({ product, env: process.env }))
+    } catch (error) {
+      console.warn(
+        `[subagents] 注册 ${product} 失败: ${error.message}` +
+          '（若旧插件 dsh-plugin-product-subagents 仍挂载，两者 provider 重名，必须先摘掉旧的）',
+      )
+    }
+  }
+
+  try {
+    await registerDelegateTool(ctx, { roles: loadRoles(config.rolesDir), maxDepth: config.maxDepth ?? 3 })
+  } catch (error) {
+    // 拿不到 @deepseek-ai/dsh-tools 时不能让整个 profile 起不来：provider 已经注册，
+    // 没有工具只是「不能委派」，应当降级并大声说明。
+    console.warn(`[subagents] product_delegate 未注册: ${error.message}`)
+  }
 }

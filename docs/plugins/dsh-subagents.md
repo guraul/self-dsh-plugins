@@ -7,7 +7,7 @@
 |---|---|
 | 包名 | `dsh-plugin-subagents` |
 | 来源 | **原创**（重写替代 fork `dsh-plugin-product-subagents`，见 [ADR-0001](../adr/0001-不再跟随上游重写-subagents.md)） |
-| 当前阶段 | PR2：骨架 + 角色层 + 契约层 + CLI（形态 B 一次性调用） |
+| 当前阶段 | 契约/角色/记录/CLI + executor 委派（provider + `product_delegate`，一次性） |
 | 设计依据 | [`docs/requirements/REQ-001-design.md`](../requirements/REQ-001-design.md) |
 
 ## 改哪里
@@ -20,7 +20,9 @@
 | 角色字段与加载 | `lib/roles.js` + `roles/*.json` | 非法值降级到最保守值，坏文件跳过 |
 | 形态 B 的 CLI 调用 | `lib/bridge-cli.js` | 一期只有 `opencode` / `codebuddy`；ACP 在 PR4 |
 | 子命令 | `lib/cli.js` | 退出码契约：0 通过 / 1 拒绝 / 2 参数或环境错误 |
-| 宿主侧注册 | `lib/index.js` | **PR4 才动**；见下面「已知坑」第一条 |
+| 宿主侧注册 | `lib/index.js` | 注册 `product-subagents:*` provider 与 `product_delegate`；见「已知坑」第一条 |
+| provider 实现 | `lib/provider.js` | 一次性 spawn CLI；没有 `prepareContinuable`（续接是下一期） |
+| 委派工具 | `lib/tools/delegate.js` | 动态 import `@deepseek-ai/dsh-tools`，拿不到就跳过注册并告警 |
 
 ## 已知坑
 
@@ -33,6 +35,9 @@
 4. **`nonce` 是 `ReviewResult` 的必填字段**，比 REQ-001 §7.2 多一个——结果不带它就无法证明对应哪次标记。
 5. **不要在这里写「自动换模型」。** 模型不可用就 `ESCALATE`，静默降级比失败更危险。
 6. **记录不能落在工作树里。** 工作树合并完就被删；`mainWorktreeRoot()` 就是为这件事存在的，PR3 上线后真实丢过一次跳过审计。
+7. **与旧插件不能同时挂载。** 两者都注册 `product-subagents:opencode` / `:codebuddy`，provider 名全局唯一，重名会让整个 profile 插件树启动失败。切换与回滚步骤见 [`docs/pipeline/review-loop.md`](../pipeline/review-loop.md)。
+8. **两个 gh 身份在 macOS 上会互相覆盖 active 指针。** bot 登录后主号会读到 bot 的 token；修法是 `gh auth switch --user guraul`（不需要重新授权），且辅助身份必须用 `--insecure-storage` 落在自己的 `GH_CONFIG_DIR`。
+9. **一期没有续接。** `product_submit` / `product_wait` 不存在，委派只能一次性拿结果；控制面写任务卡时要假定「交出去就收不回来追问」。
 
 ## 怎么验证
 
