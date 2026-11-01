@@ -13,11 +13,26 @@ export const PRODUCTS = {
   opencode: {
     bin: 'opencode',
     argv: ({ model, task }) => ['run', ...(model ? ['--model', model] : []), task],
+    // plan 是 opencode 内置的只读 agent：能读仓库、不能写。
+    permissionArgs: { readonly: ['--agent', 'plan'], default: [], full: ['--auto'] },
   },
   codebuddy: {
     bin: 'codebuddy',
     argv: ({ model, task }) => ['-p', ...(model ? ['--model', model] : []), task],
+    // default 不附加参数：保持与旧行为一致，只在显式 readonly / full 时才改变权限
+    permissionArgs: {
+      readonly: ['--permission-mode', 'plan'],
+      default: [],
+      full: ['--permission-mode', 'auto'],
+    },
   },
+}
+
+/** 角色权限 → CLI 参数。不传权限时按 default（不附加任何参数）。 */
+export function permissionArgs(product, permissionMode) {
+  const spec = PRODUCTS[product]
+  if (!spec) throw new ContractError('E_UNAVAILABLE', `未支持的 product: ${product}`)
+  return spec.permissionArgs[permissionMode ?? 'default'] ?? []
 }
 
 /** provider 的注册名必须带 `product-subagents:` 前缀——audit-subagents.mjs 靠它识别会话。 */
@@ -25,11 +40,14 @@ export function providerName(product) {
   return `product-subagents:${product}`
 }
 
-export function productArgv(product, { model, task }) {
+export function productArgv(product, { model, task, permissionMode }) {
   const spec = PRODUCTS[product]
   if (!spec) throw new ContractError('E_UNAVAILABLE', `未支持的 product: ${product}`)
   if (!task) throw new ContractError('E_UNAVAILABLE', '委派任务不能为空')
-  return { bin: spec.bin, args: spec.argv({ model, task }) }
+  return {
+    bin: spec.bin,
+    args: [...spec.argv({ model, task }), ...permissionArgs(product, permissionMode)],
+  }
 }
 
 /** codebuddy 在部分参数组合下会吐 JSON 信封；解出 result，其余按纯文本处理。 */
@@ -60,7 +78,7 @@ function requestTask(request) {
 /**
  * @param {{ product: string, timeoutMs?: number, env?: object, spawnImpl?: Function }} options
  */
-export function createProductProvider({ product, timeoutMs = 300000, env = process.env, spawnImpl = spawn }) {
+export function createProductProvider({ product, bin, timeoutMs = 300000, env = process.env, spawnImpl = spawn }) {
   let seq = 0
   return {
     name: providerName(product),
@@ -70,12 +88,15 @@ export function createProductProvider({ product, timeoutMs = 300000, env = proce
     async start(request) {
       const task = requestTask(request)
       const model = request?.model ?? request?.productSettings?.model
-      const { bin, args } = productArgv(product, { model, task })
+      const command = productArgv(product, { model, task, permissionMode: request?.permissionMode })
+      const args = command.args
+      // 配置里给的二进制优先（codebuddy 在本机是 shim，不在 PATH 上）
+      const executable = bin ?? command.bin
       const cwd = request?.parent?.cwd ?? request?.cwd ?? process.cwd()
 
       // stdin 必须是 ignore：`opencode run` 在 stdin 为「未关闭的管道」时会等输入，
       // 表现为永远不返回（实测：默认 stdio 卡死，ignore 后 2 秒返回）。
-      const child = spawnImpl(bin, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawnImpl(executable, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = ''
       let stderr = ''
       child.stdout?.on('data', (chunk) => {
@@ -100,7 +121,7 @@ export function createProductProvider({ product, timeoutMs = 300000, env = proce
         }, timeoutMs)
         child.on('error', (error) => {
           clearTimeout(timer)
-          reject(new ContractError('E_UNAVAILABLE', `${bin} 启动失败: ${error.message}`))
+          reject(new ContractError('E_UNAVAILABLE', `${executable} 启动失败: ${error.message}`))
         })
         child.on('close', (code) => {
           clearTimeout(timer)

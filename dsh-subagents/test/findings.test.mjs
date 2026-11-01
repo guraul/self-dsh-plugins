@@ -77,3 +77,25 @@ test('extractFindings 前面有非 json 代码块时仍能取到真块（PR151 �
 test('extractFindings 忽略 ``` 无语言标记的块', () => {
   assert.equal(extractFindings('```\n{"findings":[]}\n```'), null)
 })
+
+test('extractFindings 忽略判定行之后的块（避免采信文档示例）', () => {
+  const nonce = 'ABCDEFGH2345'
+  const sha = 'a'.repeat(40)
+  const real = block({ findings: [{ severity: 'minor', file: 'real.js', line: 1, message: 'm' }] })
+  const after = block({ findings: [{ severity: 'blocker', file: 'example.js', line: 9, message: 'e' }] })
+  const parsed = extractFindings(`${real}\n${nonce} VERDICT: APPROVE SHA: ${sha}\n${after}`)
+  assert.equal(parsed.findings[0].file, 'real.js')
+})
+
+test('extractFindings 解析失败时告警而不是静默', () => {
+  const warnings = []
+  const original = console.warn
+  console.warn = (message) => warnings.push(message)
+  try {
+    extractFindings('```json\n{坏掉的\n```')
+  } finally {
+    console.warn = original
+  }
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /json 块解析失败/)
+})

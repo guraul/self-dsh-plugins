@@ -52,3 +52,20 @@ test('renderComment 缺 verdict 或缺轮次时报错', () => {
   assert.throws(() => renderComment({ result: {}, round: 1 }), /缺少 result\.verdict/)
   assert.throws(() => renderComment({ result, round: 0 }), /round/)
 })
+
+test('safeInline 压平换行、转义反引号与 @', async () => {
+  const { safeInline } = await import('../lib/comment.js')
+  assert.equal(safeInline('第一行\n第二行'), '第一行 第二行')
+  assert.equal(safeInline('代码 `x`'), "代码 'x'")
+  assert.equal(safeInline('@someone'), '@\u200bsomeone')
+})
+
+test('renderComment 的证据走行内代码并压平', () => {
+  const text = renderComment({
+    result: { ...result, evidence: ['lib/a.js:1\n```block```'] },
+    round: 1,
+  })
+  const evidence = text.split('### 证据')[1]
+  assert.match(evidence, /^- `lib\/a\.js:1 /mu)
+  assert.doesNotMatch(evidence, /```/)
+})

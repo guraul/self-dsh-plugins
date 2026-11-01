@@ -63,7 +63,9 @@ export function renderComment({ result, round, maxRounds = MAX_ROUNDS }) {
     bullet(suggestions),
     '',
     '### 证据',
-    bullet(Array.isArray(result.evidence) ? result.evidence : []),
+    bullet(
+      (Array.isArray(result.evidence) ? result.evidence : []).map((item) => `\`${safeInline(item)}\``),
+    ),
     '',
   ]
     .filter((line) => line !== undefined)

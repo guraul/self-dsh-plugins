@@ -34,6 +34,8 @@
 
 **人在哪**：只在三种情况被叫——判定 `ESCALATE`、命中高风险路径、3 轮仍不通过。其余环节由会话内的角色接转完成。
 
+**判定 `APPROVE` 且未命中高风险 → 直接合并**：不再向用户确认。闸门已经校验判定、提交绑定、时效与高风险路径，再问一次只是把人工环节从后门塞回来。
+
 **身份分离**：PR 由主账号开与合并；PR comment 与 review 状态由**机器账号**（`dsh-bot-guraul`，`GH_CONFIG_DIR=~/.config/gh-reviewer`）提交——GitHub 不允许同一账号 approve 自己的 PR。
 
 ### 审核循环与控制面的权力
@@ -241,7 +243,7 @@ node --test scripts/pipeline/audit-subagents.test.mjs           # 单测 + 两�
 
 ## 四、关键约定（红线）
 
-1. **审核闸门 + 人在环**：`merge-pr.sh` 默认要求 `--review-record`，没有审核记录绝不合并；绕过必须显式 `--no-review`（会留痕）。同时，reviewer 判 `APPROVE` 之后仍须拿到用户对本次 review 的**明确同意**——闸门证明「审过」，不证明「用户同意」。
+1. **审核闸门 + 人在环**：`merge-pr.sh` 默认要求 `--review-record`，没有审核记录绝不合并；绕过必须显式 `--no-review`（会留痕）。reviewer 判 `APPROVE` 且未命中高风险时直接合并；只有 `ESCALATE`、高风险路径、3 轮超限才需要用户介入。
 2. **合并只能 squash**；PR body 首行必须 `Closes #<issue号>`（`open-pr.sh` 已内置）。
 3. **绝不用真实 `~/.dsh` 做安装实验**：一律走 `install-check.sh`（一次性 `DSH_HOME`，装完即删）。
 4. **版本豁免（version exemption）是逃生舱**：只在拿到用户对**具体版本组合**的明确同意后才用（CLI 需 `--accept-risk`）；用完必须撤销，`dsh plugin --profile web version-exemptions` 应回到 `{}`。插件升版本或 DSH 升版本都会让它自动失效。

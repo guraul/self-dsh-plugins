@@ -69,6 +69,18 @@ reviewer 必须输出恰好一行：
 | SHA 与请求不符 | `ESCALATE` + `E_SHA_MISMATCH` |
 | diff 里出现该随机标记 | `ESCALATE` + `E_PARSE`（判定行可能来自被审内容） |
 
+## findings 块
+
+reviewer 要在判定行之前输出一个 json 代码块，`record` 会把它提取成记录里的 `findings` / `evidence`：
+
+````markdown
+```json
+{"findings":[{"severity":"blocker","file":"lib/cli.js","line":120,"message":"应报 E_PARSE"}],"evidence":["lib/cli.js:118-124"]}
+```
+````
+
+优先级：先解析该块（只看判定行之前的内容，避免采信文档里的示例块），没有或格式不合法时用 `record --findings <文件>` 兜底；两者都没有不算失败——结论仍有效，只是没有明细。
+
 ## 已知限制（诚实清单）
 
 - **只有形态 B，且是一次性调用**：不移植 ACP 会话，因此没有「续接」（`product_submit` / `product_wait` 不存在）。

@@ -52,6 +52,7 @@ export function prepareRequest({
   gitBin = 'git',
   ghBin = 'gh',
   nonce = makeNonce(),
+  model,
   env,
 }) {
   const metaRaw = run(
@@ -86,6 +87,7 @@ export function prepareRequest({
       pr: meta.number,
       head_sha: headSha,
       nonce,
+      model: model ?? null,
       issue: { number: null, title: meta.title ?? '', body: meta.body ?? '' },
       files,
       diff: fenceDiff(diff),

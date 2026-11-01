@@ -157,3 +157,34 @@ test('activationSpec 缺 signal / provider / agent 时报错', async () => {
   assert.throws(() => activationSpec({ ...base, provider: '' }), /provider 不能为空/)
   assert.throws(() => activationSpec({ ...base, agent: undefined }), /agent 不能为空/)
 })
+
+test('productArgv 按角色权限附加 CLI 参数', () => {
+  const readonlyOpen = productArgv('opencode', { model: 'm', task: 't', permissionMode: 'readonly' })
+  assert.deepEqual(readonlyOpen.args.slice(-2), ['--agent', 'plan'])
+  const readonlyBuddy = productArgv('codebuddy', { model: 'm', task: 't', permissionMode: 'readonly' })
+  assert.deepEqual(readonlyBuddy.args.slice(-2), ['--permission-mode', 'plan'])
+  const fullOpen = productArgv('opencode', { model: 'm', task: 't', permissionMode: 'full' })
+  assert.deepEqual(fullOpen.args.slice(-1), ['--auto'])
+  const fullBuddy = productArgv('codebuddy', { model: 'm', task: 't', permissionMode: 'full' })
+  assert.deepEqual(fullBuddy.args.slice(-2), ['--permission-mode', 'auto'])
+})
+
+test('permissionArgs 缺省不附加参数', () => {
+  assert.deepEqual(productArgv('opencode', { task: 't' }).args, ['run', 't'])
+  assert.deepEqual(productArgv('codebuddy', { task: 't', permissionMode: 'default' }).args, ['-p', 't'])
+})
+
+test('createProductProvider 支持配置二进制路径', async () => {
+  const calls = []
+  const provider = createProductProvider({
+    product: 'codebuddy',
+    bin: '/Users/gubin/workspace/codebuddy-shim.py',
+    spawnImpl: (bin) => {
+      calls.push(bin)
+      return fakeChild({ stdout: 'ok' })
+    },
+  })
+  const handle = await provider.start({ prompt: 'x', permissionMode: 'readonly' })
+  await handle.result
+  assert.equal(calls[0], '/Users/gubin/workspace/codebuddy-shim.py')
+})

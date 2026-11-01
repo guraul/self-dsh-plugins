@@ -31,13 +31,20 @@ export function normalizeEvidence(raw) {
 /**
  * @returns {{ findings: object[], evidence: string[] } | null}
  */
+const VERDICT_LINE = /^[A-Z2-7]{12}[ \t]+VERDICT:/m
+
 export function extractFindings(text) {
-  const source = String(text ?? '')
+  const full = String(text ?? '')
+  // 只看判定行之前的内容：模型常会把文档里的示例块原样引用过来，
+  // 示例排在真块前面时会顶替真结论。
+  const verdict = full.match(VERDICT_LINE)
+  const source = verdict ? full.slice(0, verdict.index) : full
   for (const match of source.matchAll(FENCE)) {
     let parsed
     try {
       parsed = JSON.parse(match[1])
-    } catch {
+    } catch (error) {
+      console.warn(`[findings] json 块解析失败，已跳过: ${error.message}`)
       continue
     }
     if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.findings)) continue
