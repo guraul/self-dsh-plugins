@@ -15,7 +15,11 @@ set -u
 source "$(dirname "$0")/lib.sh"
 
 CLI="${REPO_ROOT}/dsh-subagents/lib/cli.js"
-BASE_TMP="${REPO_ROOT}/.tmp/review"
+# 产物落**主工作区**：reviewer 子代理的工作目录是主工作区（不是当前 worktree），
+# worktree 还会在合并时被删掉。和审核记录落在主工作区是同一个理由。
+MAIN_WT=$(main_worktree)
+[[ -n "${MAIN_WT}" ]] || die "未找到 main 主工作区"
+BASE_TMP="${MAIN_WT}/.tmp/review"
 GH_REVIEWER_DIR="${GH_REVIEWER_DIR:-$HOME/.config/gh-reviewer}"
 
 usage() {
@@ -37,7 +41,7 @@ cmd_prepare() {
   local model=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --model) model="$2"; shift 2 ;;
+      --model) [[ $# -ge 2 ]] || usage; model="$2"; shift 2 ;;
       *) usage ;;
     esac
   done
@@ -69,15 +73,25 @@ cmd_publish() {
   local record="" round="" dry="" repo=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --record) record="$2"; shift 2 ;;
-      --round) round="$2"; shift 2 ;;
+      --record) [[ $# -ge 2 ]] || usage; record="$2"; shift 2 ;;
+      --round) [[ $# -ge 2 ]] || usage; round="$2"; shift 2 ;;
       --dry-run) dry="--dry-run"; shift ;;
-      --repo) repo="$2"; shift 2 ;;
+      --repo) [[ $# -ge 2 ]] || usage; repo="$2"; shift 2 ;;
       *) usage ;;
     esac
   done
+  [[ "${pr}" =~ ^[0-9]+$ ]] || usage
   [[ -n "${record}" ]] || die "publish 需要 --record <文件>"
   [[ -n "${round}" ]] || die "publish 需要 --round <n>"
+  [[ "${round}" =~ ^[0-9]+$ ]] || die "--round 必须是正整数"
+  [[ -r "${record}" ]] || die "记录文件不可读: ${record}"
+
+  # 位置参数里的 pr 必须与记录一致，否则「传错 PR 号」会被静默忽略
+  local record_pr
+  record_pr=$(node -e 'const fs=require("node:fs");process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).pr))' "${record}") \
+    || die "记录文件无法解析: ${record}"
+  [[ "${record_pr}" == "${pr}" ]] \
+    || die "位置参数 PR #${pr} 与记录里的 PR #${record_pr} 不一致"
 
   local args=(publish --record "${record}" --round "${round}")
   if [[ -n "${dry}" ]]; then args+=("${dry}"); fi
