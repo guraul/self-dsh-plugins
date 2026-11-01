@@ -74,6 +74,21 @@ test('createProductProvider 返回规范句柄', async () => {
   await handle.dispose()
 })
 
+test('createProductProvider 必须忽略子进程 stdin（PR9 事故回归）', async () => {
+  const calls = []
+  const provider = createProductProvider({
+    product: 'opencode',
+    spawnImpl: (bin, args, options) => {
+      calls.push({ bin, args, options })
+      return fakeChild({ stdout: 'ok' })
+    },
+  })
+  const handle = await provider.start({ prompt: 'x' })
+  await handle.result
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls[0].options.stdio, ['ignore', 'pipe', 'pipe'])
+})
+
 test('createProductProvider 把非零退出码变成 E_UNAVAILABLE', async () => {
   const provider = createProductProvider({
     product: 'codebuddy',
