@@ -60,6 +60,9 @@ export function lastSession(product) {
 /** 续接参数：codebuddy 用 --resume，opencode 用 --session。 */
 export function sessionArgs(product, sessionId) {
   if (!sessionId) return []
+  if (!PRODUCTS[product]) {
+    throw new ContractError('E_UNAVAILABLE', `未支持的 product: ${product}`)
+  }
   return product === 'codebuddy' ? ['--resume', sessionId] : ['--session', sessionId]
 }
 
@@ -188,7 +191,12 @@ export function createProductProvider({ product, bin, timeoutMs, env = process.e
       const started = Date.now()
       const task = requestTask(request)
       const model = request?.model ?? request?.productSettings?.model
-      const command = productArgv(product, { model, task, permissionMode: request?.permissionMode })
+      const command = productArgv(product, {
+        model,
+        task,
+        permissionMode: request?.permissionMode,
+        sessionId: request?.sessionId,
+      })
       const args = command.args
       // 配置里给的二进制优先（codebuddy 在本机是 shim，不在 PATH 上）
       const executable = bin ?? command.bin

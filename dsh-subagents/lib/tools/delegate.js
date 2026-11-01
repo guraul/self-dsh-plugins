@@ -27,6 +27,7 @@ const OUTPUT_SCHEMA = {
     role: { type: 'string', description: '解析后的角色 id' },
     provider: { type: 'string', description: '实际使用的产品 CLI' },
     permissionMode: { type: 'string', description: '角色声明的权限模式' },
+    sessionId: { type: 'string', description: '续接句柄（本次运行的真实会话 id）' },
   },
 }
 
@@ -133,7 +134,8 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
           }),
         )
         const settled = await handle.result
-        const sessionId = settled?.sessionId ?? lastSession(provider)
+        // 只用本次运行真实的会话 id：回退到「上一次」会发放指向别的会话的句柄
+        const sessionId = settled?.sessionId
         const text = outputText(settled?.output)
         return {
           output: sessionId ? `${text}\n\n[delegate-session: ${sessionId}]` : text,
@@ -189,12 +191,15 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
           }),
         )
         const settled = await handle.result
+        // 续接后如果产品轮换了会话 id，以本次为准；否则仍是传入的那个
+        const nextSession = settled?.sessionId ?? sessionId
+        const text = outputText(settled?.output)
         return {
-          output: outputText(settled?.output),
+          output: `${text}\n\n[delegate-session: ${nextSession}]`,
           stopReason: settled?.stopReason ?? 'end',
           role: role.id,
           provider,
-          sessionId,
+          sessionId: nextSession,
         }
       },
     }),

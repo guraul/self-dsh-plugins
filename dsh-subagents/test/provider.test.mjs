@@ -315,7 +315,7 @@ test('productArgv 带 sessionId 时拼续接参数且不影响权限参数', asy
   assert.deepEqual(open.args.slice(0, 3), ['run', '--session', 'ses_2'])
 })
 
-test('extractSessionId 会记住最近一次会话', async () => {
+test('运行结束后记住最近一次会话并附带 sessionId', async () => {
   const { createProductProvider, lastSession } = await import('../lib/provider.js')
   const provider = createProductProvider({
     product: 'codebuddy',
@@ -328,4 +328,10 @@ test('extractSessionId 会记住最近一次会话', async () => {
   const settled = await handle.result
   assert.equal(settled.sessionId, 'sid-9')
   assert.equal(lastSession('codebuddy'), 'sid-9')
+})
+
+test('sessionArgs 对未知产品报错而不是猜', async () => {
+  const { sessionArgs } = await import('../lib/provider.js')
+  assert.throws(() => sessionArgs('nope', 'id'), /未支持的 product/)
+  assert.deepEqual(sessionArgs('nope', null), [])
 })
