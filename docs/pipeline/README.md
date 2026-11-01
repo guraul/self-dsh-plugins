@@ -277,6 +277,13 @@ node --test scripts/pipeline/audit-subagents.test.mjs           # 单测 + 两�
 
 **包管理约定**：本机 / 本仓库统一用 **pnpm**，禁用 npm / yarn / bun / npx（临时执行用 `pnpm exec` / `pnpm dlx` 代替）——这是全局约定（`~/.config/opencode/AGENTS.md`），脚本、CI、文档一律照此写。
 
+## 六点五、相关文档
+
+| 文档 | 用途 |
+|---|---|
+| [`review-loop.md`](./review-loop.md) | 把 executor 从旧插件切到 `dsh-subagents` 的步骤、验证与回滚；一期缺口清单 |
+| [`PROGRESS.md`](./PROGRESS.md) | 进度台账与已定决策（D1–D6） |
+
 ## 七、阶段状态
 
 当前进度与阶段划分见 [PROGRESS.md](PROGRESS.md)。
