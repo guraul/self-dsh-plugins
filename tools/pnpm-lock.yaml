@@ -10,16 +10,16 @@ importers:
     dependencies:
       dsh-pipeline:
         specifier: file:/Users/gubin/workspace/dsh-pipeline/dist/latest.tgz
-        version: '@guraul/dsh-pipeline@file:../../../../dsh-pipeline/dist/latest.tgz'
+        version: '@guraul/dsh-pipeline@file:../../dsh-pipeline/dist/latest.tgz'
 
 packages:
 
-  '@guraul/dsh-pipeline@file:../../../../dsh-pipeline/dist/latest.tgz':
-    resolution: {integrity: sha512-JnlgLJMWVYl/PhQwN6+EEZG2OvmIhqBMwpBljgFyFSCHRgpHYS8Z16cvzeEU1wpCg/fUQnTZnqggsO+L6NyqgQ==, tarball: file:../../../../dsh-pipeline/dist/latest.tgz}
+  '@guraul/dsh-pipeline@file:../../dsh-pipeline/dist/latest.tgz':
+    resolution: {integrity: sha512-eyeI740HtFENqxV+CFrzwpx877Mlo3De/gwQS9qVFQmfLl7KeYTrXJpIf1xh2GPRg9aObMbbUx4ids8P1JQxug==, tarball: file:../../dsh-pipeline/dist/latest.tgz}
     version: 0.1.0
     engines: {node: '>=20'}
     hasBin: true
 
 snapshots:
 
-  '@guraul/dsh-pipeline@file:../../../../dsh-pipeline/dist/latest.tgz': {}
+  '@guraul/dsh-pipeline@file:../../dsh-pipeline/dist/latest.tgz': {}
