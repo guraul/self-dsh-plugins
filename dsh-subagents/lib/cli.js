@@ -40,6 +40,8 @@ const USAGE = `用法:
   dsh-subagents prompt  --request <文件> [--out <文件>] [--role <角色>]  # 渲染审核提示词
   dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>] [--root <仓库根>]
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
+  dsh-subagents gate    --pr <号> [--record <文件>] [--head-sha <sha>] [--root <仓库根>]
+                        [--no-review --reason <说明>]   # 跨仓共用闸门（合并脚本调用）
   dsh-subagents review  --pr <号> --form <b> --model <名> [--provider <名>] [--root <仓库根>]
   dsh-subagents log     --trace <traceId> [--root <仓库根>]
   dsh-subagents card    --input <文件> [--out <文件>]     # 任务卡（纯文本）
@@ -278,7 +280,7 @@ function cmdGate(flags) {
   }
 
   const record = assertGate(flags)
-  process.stdout.write(`✓ 审核闸门通过: ${record.verdict} @ ${record.head_sha} (${record.traceId})\n`)
+  emit(`✓ 审核闸门通过: ${record.verdict} @ ${record.head_sha} (${record.traceId})`, flags)
   return 0
 }
 
