@@ -289,3 +289,46 @@ test('review --form a 给出可操作指引', () => {
   assert.equal(out.code, 2)
   assert.match(out.stderr, /请由控制面用 subagent 工具发起/)
 })
+
+test('gate: 记录合格且 head 一致时放行', () => {
+  const { root, dir } = sandbox()
+  writeRecord(dir)
+  const out = run(['gate', '--pr', '7', '--root', root, '--head-sha', SHA, '--record', join(dir, '7-' + SHA + '.json')])
+  assert.equal(out.code, 0)
+  assert.match(out.stdout, /审核闸门通过/)
+})
+
+test('gate: 没有记录时拒绝（fail-closed）', () => {
+  const { root } = sandbox()
+  const out = run(['gate', '--pr', '7', '--root', root, '--head-sha', SHA, '--record', join(root, 'nope.json')])
+  assert.equal(out.code, 1)
+  assert.match(out.stderr, /审核闸门: 找不到审核记录/)
+})
+
+test('gate: 判定不是 APPROVE 时拒绝', () => {
+  const { root, dir } = sandbox()
+  writeRecord(dir, { verdict: 'REJECT' })
+  const out = run(['gate', '--pr', '7', '--root', root, '--head-sha', SHA, '--record', join(dir, '7-' + SHA + '.json')])
+  assert.equal(out.code, 1)
+  assert.match(out.stderr, /判定为 REJECT/)
+})
+
+test('gate: --no-review 放行并写跳过审计', () => {
+  const { root } = sandbox()
+  const out = run(['gate', '--pr', '7', '--root', root, '--no-review', '--reason', '用户同意'])
+  assert.equal(out.code, 0)
+  assert.match(out.stderr, /审核闸门已跳过/)
+  const files = readdirSync(join(root, '.dsh-web', 'reviews', 'skips'))
+  assert.equal(files.length, 1)
+  const audit = JSON.parse(readFileSync(join(root, '.dsh-web', 'reviews', 'skips', files[0]), 'utf8'))
+  assert.equal(audit.pr, 7)
+  assert.equal(audit.reason, '用户同意')
+})
+
+test('gate: 命中高风险路径时拒绝', () => {
+  const { root, dir } = sandbox()
+  writeRecord(dir, { policy: { hit: true, reasons: ['scripts/pipeline/x'] } })
+  const out = run(['gate', '--pr', '7', '--root', root, '--head-sha', SHA, '--record', join(dir, '7-' + SHA + '.json')])
+  assert.equal(out.code, 1)
+  assert.match(out.stderr, /必须人工放行/)
+})

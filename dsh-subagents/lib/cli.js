@@ -32,6 +32,7 @@ import {
   reviewsDir,
   traceId,
   writeRecord,
+  writeSkipAudit,
 } from './record.js'
 
 const USAGE = `用法:
@@ -39,6 +40,8 @@ const USAGE = `用法:
   dsh-subagents prompt  --request <文件> [--out <文件>] [--role <角色>]  # 渲染审核提示词
   dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>] [--root <仓库根>]
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
+  dsh-subagents gate    --pr <号> [--record <文件>] [--head-sha <sha>] [--root <仓库根>]
+                        [--no-review --reason <说明>]   # 跨仓共用闸门（合并脚本调用）
   dsh-subagents review  --pr <号> --form <b> --model <名> [--provider <名>] [--root <仓库根>]
   dsh-subagents log     --trace <traceId> [--root <仓库根>]
   dsh-subagents card    --input <文件> [--out <文件>]     # 任务卡（纯文本）
@@ -219,7 +222,8 @@ function currentHeadSha(flags) {
 }
 
 /** merge-pr.sh 的闸门：任一项不过即拒绝，文案首行统一带 `审核闸门:`。 */
-function cmdCheck(flags) {
+/** 闸门判定：不过就抛 exitCode=1 的错误。check 与 gate 共用。 */
+function assertGate(flags) {
   if (!flags.record) throw fail('E_BUDGET', '缺少 --record')
   const gate = (message) => {
     const error = new Error(`审核闸门: ${message}`)
@@ -247,7 +251,36 @@ function cmdCheck(flags) {
   if (record.policy?.hit) {
     throw gate(`命中高风险路径 ${record.policy.reasons.join('; ')}，必须人工放行`)
   }
+  return record
+}
+
+function cmdCheck(flags) {
+  const record = assertGate(flags)
   emit(`审核闸门通过: ${record.verdict} @ ${record.head_sha} (${record.traceId})`, flags)
+  return 0
+}
+
+/**
+ * 跨仓共用的审核闸门：合并脚本只要调它，不必复制判定逻辑。
+ * `--no-review` 时写跳过审计并放行（留痕由本命令负责，不靠调用方）。
+ */
+function cmdGate(flags) {
+  const pr = Number(flags.pr)
+  if (!Number.isInteger(pr) || pr <= 0) throw fail('E_BUDGET', '缺少 --pr')
+  const dir = root(flags)
+
+  if (flags['no-review']) {
+    const file = writeSkipAudit(reviewsDir(dir), {
+      pr,
+      headSha: flags['head-sha'] ?? null,
+      reason: flags.reason || '未说明',
+    })
+    process.stderr.write(`⚠️  审核闸门已跳过（--no-review）：${file}\n`)
+    return 0
+  }
+
+  const record = assertGate(flags)
+  emit(`✓ 审核闸门通过: ${record.verdict} @ ${record.head_sha} (${record.traceId})`, flags)
   return 0
 }
 
@@ -435,6 +468,7 @@ const COMMANDS = {
   prompt: cmdPrompt,
   record: cmdRecord,
   check: cmdCheck,
+  gate: cmdGate,
   review: cmdReview,
   log: cmdLog,
   card: cmdCard,
