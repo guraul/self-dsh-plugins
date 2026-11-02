@@ -7,7 +7,7 @@
 |---|---|---|---|
 | REQ-001 | [Reviewer 子代理接入形态](REQ-001-reviewer-subagent.md) | 草稿 | 用 reviewer 子代理替换 pipeline 中「人回复 ok」的放行环节；定义三种接入形态与统一判定契约 |
 | REQ-002 | [清言网页适配器（回读与桥接）](REQ-002-qingyan-web-adapter.md) | 草稿 | 把网页清言从「单向投递」补成「可编程问答端点」：等待、回读、错误分类、宿主可发起 |
-| REQ-003 | [Token 用量归集（dsh/codebuddy/opencode → homebase）](token-usage-pipeline.md) | 设计稿 | 三方用量每天 12:00 采集并写入 homebase 生产 SQLite，插件数据源改为 homebase API |
+| REQ-003 | [Token 用量归集（dsh/codebuddy/opencode → homebase）](token-usage-pipeline.md) | **已实现** | 三方用量每天 12:00 写入 homebase 生产 SQLite；插件的 overview 与子代理明细全部从 API 拉取 |
 
 ## 两份文档的关系
 
