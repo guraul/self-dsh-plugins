@@ -212,7 +212,7 @@ test('dsh: 从投影缓存读出会话标题；没有标题时为 null', async (
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-sync-dsh-'));
   const projDir = path.join(home, 'storages', 'session_projcache', 'sessions');
   fs.mkdirSync(projDir, { recursive: true });
-  const mk = (id, label) => ({
+  const mk = (id, label, rootTitle = null) => ({
     record: {
       rows: {
         usagePanel: {
@@ -223,16 +223,19 @@ test('dsh: 从投影缓存读出会话标题；没有标题时为 null', async (
           },
         },
         ...(label === null ? {} : { subagent: { val: { identity: { label } } } }),
+        ...(rootTitle === null ? {} : { title: { val: rootTitle } }),
       },
     },
   });
   fs.writeFileSync(path.join(projDir, 'sess-with-title.json'), JSON.stringify(mk('sess-with-title', '查找 DSH token 消耗插件')));
   fs.writeFileSync(path.join(projDir, 'sess-no-title.json'), JSON.stringify(mk('sess-no-title', null)));
+  fs.writeFileSync(path.join(projDir, 'sess-root.json'), JSON.stringify(mk('sess-root', null, '构建 Reviewer 子代理')));
 
   const { rows, errors } = await collectDsh({ home, days: ['2026-10-30'] });
   assert.deepEqual(errors, []);
   const byId = new Map(rows.map((r) => [r.session_id, r]));
   assert.equal(byId.get('sess-with-title').title, '查找 DSH token 消耗插件');
   assert.equal(byId.get('sess-no-title').title, null);
+  assert.equal(byId.get('sess-root').title, '构建 Reviewer 子代理');
   fs.rmSync(home, { recursive: true, force: true });
 });
