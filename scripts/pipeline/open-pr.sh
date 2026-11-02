@@ -37,7 +37,8 @@ BODY="Closes #${ISSUE}
 
 ---
 由 scripts/pipeline/open-pr.sh 创建。
-合并前必须：(1) CI 通过；(2) 拿到用户对本次 review 的明确同意（见 docs/pipeline/README.md §一）。"
+合并前提：(1) CI 通过；(2) 审核闸门通过——reviewer 判 APPROVE 且未命中高风险 → 直接合并；
+命中高风险 / ESCALATE / 轮次超限时才需要用户点头（见 docs/pipeline/README.md §四 第 1 条）。"
 gh pr create --repo "${GH_REPO}" --base main --head "${BRANCH}" \
   --title "${TITLE} (#${ISSUE})" --body "${BODY}"
-ok "PR 已创建；等待 CI，然后请用户 review（用户同意后才跑 merge-pr.sh）"
+ok "PR 已创建；等 CI 与审核判定（APPROVE 且未命中高风险可直接 merge-pr.sh）"

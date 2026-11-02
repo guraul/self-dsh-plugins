@@ -211,7 +211,7 @@ scripts/pipeline/new-task.sh <issue号>          # 建分支 task/<号>-<slug> +
 cd .worktrees/<号>-<slug>                       # 在 worktree 里开发
 scripts/pipeline/check-all.sh                   # 本地自测
 scripts/pipeline/open-pr.sh                     # 自动推送 + 开 PR
-# 拿到用户对 review 的明确同意后：
+# 审核判 APPROVE 且未命中高风险 → 直接合并；命中高风险 / ESCALATE / 轮次超限才需用户点头：
 scripts/pipeline/merge-pr.sh
 ```
 
