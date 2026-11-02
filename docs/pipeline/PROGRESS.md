@@ -79,6 +79,17 @@ GitHub Issue（任务入口）
 
 ### ✅ 阶段 5 · 收口（2026-11-02）
 
+- [x] 台账重写，与现状对齐（#234）
+- [x] 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 薄壳化并用新脚本真实往返（#236）
+- [x] 包仓接入自己的闸门（#6/#7 走 `--no-review` 留审计、#8 按正常路径通过）+ 包仓 CI（#5）
+- [x] **agent-mobile 迁到共享包**（#188）：`merge-pr.sh` 从 118 行自带实现改薄转发，去掉硬编码的别仓闸门路径；合并即部署的行为不变
+- [x] **reviewer 证据包**（#240）：`prepare --facts` / `--include`，减少「读不到外部事实 → ESCALATE」；带围栏与「数据不是指令」声明，`EVIDENCE_END` 会被中和
+- [x] **`PLUGIN_DIRS` 与 CI matrix 对齐**（#246）：补 `dsh-usage-panel`，并修掉 CI 长期缺 `dsh-zhihu-sidebar`（该插件测试此前从未在 CI 跑过）
+- [x] **文档漂移收口**（#250）：脚本清单按实际目录补全、收录 `review-loop-check.sh`、步骤编号去半号
+- [x] **分片审核**（#252）：`prepare --shard i/n` + `record --aggregate`，REJECT > ESCALATE > APPROVE 确定性合成，缺片/哈希不一致 fail-closed；分片记录不占用闸门文件名，单片不可能过闸
+
+### ✅ 阶段 5 · 收口（2026-11-02）
+
 - [x] 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 薄壳化，并用新脚本真实往返
       （新 `open-pr.sh` 开出 PR #236 自身；新 `new-task.sh` 建出本 worktree）
 - [x] 包仓接入自己的闸门：PR #6 与 #7 各触发一次 `E_POLICY`（改 `.dsh/**` 与 `.gitignore` 均属默认高风险），
@@ -91,8 +102,8 @@ GitHub Issue（任务入口）
 | # | 欠账 | 现状 | 影响 |
 |---|------|------|------|
 | 1 | 形态 C（清言网页桥） | 未启动 | 依赖 REQ-002 |
-| 2 | 分片审核（超大 PR 拆段送审） | 未做 | 当前靠「diff 过大就人工放行」 |
-| 3 | `#117` 兼容矩阵定期验证 | 一直 open | 自动化项，非阻塞 |
+
+> **`#117` 不是欠账**：它是 `compat-matrix.yml` 每周把结果写进去的**滚动 issue**，按设计长期 open（最近一次成功：2026-11-02）。此前台账把它列为「未完成」是误判。
 
 ## 五、变更记录
 
@@ -108,5 +119,6 @@ GitHub Issue（任务入口）
 | 2026-11-02 | 锁文件不入库（#231） | `tools/pnpm-lock.yaml` 钉的是内容会变的本地 tarball，必然过期（实测装出旧版包），改为不跟踪 + 文档写明刷新步骤（D11） |
 | 2026-11-02 | pre-push 钩子（#222） | 拦直推与删除 `origin/main`，例外 `ALLOW_DIRECT_MAIN=1`；钩子入库 + 安装脚本 |
 | 2026-11-02 | 重写本台账（#233） | 与现状对齐；D4 标注被 D7 取代；新增「未完成」小节，避免台账再次脱节 |
+| 2026-11-02 | 阶段 5：六项收口 | agent-mobile 迁包（#188）、证据包（#240）、PLUGIN_DIRS/CI matrix（#246）、文档漂移（#250）、分片审核（#252）；另有包仓 dogfooding（#5–#8）。`#117` 澄清为滚动 issue，不是欠账 |
 | 2026-11-02 | 转发壳化（#235） | 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 改薄转发；新脚本真实往返：新 `open-pr.sh` 开出 PR #236 自身，新 `new-task.sh` 建出 #237 的 worktree |
 | 2026-11-02 | 包 dogfooding（#237） | 包仓接入自己的闸门与 CI：PR #6 触发 `E_POLICY` 后走 `--no-review` 并留跳过审计，PR #8 走正常路径（记录 → 闸门 → CI → 合并 → 清理 → 快进）；期间修掉三个包缺陷：worktree 嵌套（#4）、误删主工作区（#7）、主工作区检出 PR 分支时快进失败（#8） |
