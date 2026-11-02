@@ -19,12 +19,12 @@
 5. 开 PR        （在 worktree 内）scripts/pipeline/open-pr.sh
                 → 自动推送 + 开 PR，body 首行 Closes #<issue号>
 6. CI           GitHub Actions（.github/workflows/ci.yml）：只跑测试 + node --check 语法检查
-6.5 审核        控制面委派 reviewer（会话内子代理）→ 读 issue/PR/diff
+7. 审核         控制面委派 reviewer（会话内子代理）→ 读 issue/PR/diff
                 → 写 PR comment（第 N 次/共 3 次）+ 提交 review 状态
                 → 写审核记录 .dsh-web/reviews/<pr>-<sha>.json
                 → 有问题则委派 executor 修复后重审（上限 3 轮）
-7. 合并         scripts/pipeline/merge-pr.sh --review-record=<记录>   # 闸门 → squash merge → 清理 → 快进 main
-8. 收尾         合并后**没有部署**；只有 CI 测试通过这一件事
+8. 合并         scripts/pipeline/merge-pr.sh --review-record=<记录>   # 闸门 → squash merge → 清理 → 快进 main
+9. 收尾         合并后**没有部署**；只有 CI 测试通过这一件事
 ```
 
 **两道闸门，一个纪律**：
@@ -59,6 +59,28 @@
 ## 二、脚本用法
 
 环境：任何脚本都必须在**本仓库或其 worktree 内**运行（`lib.sh` 用 `git rev-parse --show-toplevel` 定位根）。
+
+### 脚本清单
+
+本目录（`scripts/pipeline/`）的完整文件清单，**以 `ls scripts/pipeline/` 为准**——新增 / 删除脚本时同步改这张表，不要只改局部段落：
+
+| 文件 | 作用 | 详述 |
+|---|---|---|
+| `audit-subagents.mjs` | product 子代理会话审计：只读、确定性、不调模型 | 本节 §audit-subagents.mjs |
+| `audit-subagents.test.mjs` | 上者的单测 + fixture 集成（`node --test`） | 本节 §audit-subagents.mjs |
+| `check-all.sh` | 逐插件跑 `test` / `check` / `typecheck` | 本节 §check-all.sh |
+| `compat-matrix.sh` | 对任意 dsh 版本跑全插件装配验收（兼容矩阵） | 本节 §compat-matrix.sh |
+| `install-check.sh` | 一次性 `DSH_HOME` 里验证插件装配 | 本节 §install-check.sh |
+| `install-hooks.sh` | 安装 `pre-push` 钩子（拦直推 / 删 `origin/main`） | 本节 §pre-push-main-guard.sh / install-hooks.sh |
+| `lib.sh` | 公共常量、日志函数、工具函数；被其他脚本 source | 本节 §lib.sh |
+| `merge-pr.legacy.sh` | 转发前的旧 `merge-pr.sh`，**仅作回滚用** | 本节 §merge-pr.sh 末尾引用块 |
+| `merge-pr.sh` | 审核闸门 → CI → squash 合并 → 清理 → 快进 main（转发壳） | 本节 §merge-pr.sh |
+| `new-task.sh` | 建 `task/<号>-<slug>` 分支 + worktree（转发壳） | 本节 §new-task.sh |
+| `open-pr.sh` | 推送分支 + 开 PR（转发壳） | 本节 §open-pr.sh |
+| `pre-push-main-guard.sh` | `pre-push` 钩子本体（由 `install-hooks.sh` 安装） | 本节 §pre-push-main-guard.sh / install-hooks.sh |
+| `review-loop-check.sh` | 切换 `dsh-subagents` 后的只读体检 | 本节 §review-loop-check.sh |
+| `review.sh` | 审核循环的机械步骤：`prepare` / `publish` / `paths` | 本节 §review.sh |
+| `status.sh` | 只读状态总览（分支 / worktree / 插件 / profile） | 本节 §status.sh |
 
 ### lib.sh
 
@@ -299,6 +321,25 @@ scripts/pipeline/review.sh paths <pr>
 ```
 审核循环的机械步骤：`prepare` 把请求与提示词写到 `.tmp/review/<pr>/`（项目内，避开 `/tmp` 定期清理）；`publish` 用机器账号发评论并提交 review 状态（`APPROVE→approve`、`REJECT→request-changes`、`ESCALATE→只评论`）。**reviewer 的模型调用不在脚本内**——那一步必须由会话内 agent 发起。
 
+### review-loop-check.sh
+
+```bash
+scripts/pipeline/review-loop-check.sh     # 无参数
+```
+
+**做什么**：把 profile 从旧的 `dsh-plugin-product-subagents` 切到 `dsh-subagents` 之后的**只读体检**——四组检查逐条打 `✓` / `✗`：
+
+| # | 检查 | 判据 |
+|---|---|---|
+| 1 | profile 依赖与 bundle | `~/.dsh/profiles/web/package.json`（受 `DSH_HOME` 影响）里**已无** `dsh-plugin-product-subagents`、**已有** `dsh-plugin-subagents` |
+| 2 | 软链是否悬空 | profile 的 `node_modules/dsh-plugin-subagents` 是软链且解析后目录存在（相对软链在链接所在目录解析）；悬空时提示回 profile 目录跑 `pnpm install` |
+| 3 | 装配可见性 | `dsh --profile web --dump-config` 的输出里能 grep 到 `dsh-plugin-subagents` |
+| 4 | 审核记录目录 | `.dsh-web/reviews` 可写（脚本会先 `mkdir -p`，这是它唯一的写动作） |
+
+**什么时候跑**：切换 / 升级审核链路之后（步骤见 [`review-loop.md`](./review-loop.md)），以及怀疑「插件莫名其妙没加载」时先跑一遍——它把「声明没进 profile」「软链悬空」「bundle 没装配」这三种静默失败直接分行打出来。**它不启动会话、不调模型、不改配置**；链路是否真通仍需人工在新会话里调一次 `product_delegate`，脚本通过时会把这句话打在最后一行。
+
+**退出码**：**0** = 四组检查全过（仍需做上面那条人工验证）；**1** = 至少一项 `✗`（`✗` 行打到 stderr，末行指向 `review-loop.md` §三 的回滚步骤）。参数 / 用法错误不单独区分——脚本无参数。
+
 ### audit-subagents.mjs
 
 定时审计 product 子代理会话（issue #10）：**只读、确定性、不调模型**。用 launchd / cron 直接跑，不要挂到 DSH 的 schedule 提醒上（那会唤醒会话、花模型调用）。
@@ -402,7 +443,7 @@ scripts/pipeline/install-hooks.sh     # 幂等，可重复执行
 | 部署脚本 | `deploy.sh` / `rollback.sh` / `fix-opencode-binary.sh` | **不存在**，也不移植 |
 | CI 工作流 | `deploy-web.yml`（tsc + vitest → expo export → rsync → 切软链 → restart → 验证） | `ci.yml`（**只跑测试 + `node --check`**，零部署步骤） |
 | 交付物 | 生产静态站 9928 上的新版本 | **插件被本机 DSH profile 正确装配**（对应 `install-check.sh`） |
-| 额外脚本 | — | `check-all.sh`、`install-check.sh` |
+| 额外脚本 | — | 见 [§二「脚本清单」](#脚本清单)：完整文件清单**以 `ls scripts/pipeline/` 为准**，本表不重复列举、也不写死数量 |
 | 仓库 | `guraul/agent-mobile` | `guraul/self-dsh-plugins` |
 | 文档语言 | 中英混排 | **一律中文** |
 | `merge-pr.sh` | 从主工作区运行会**跳过** worktree 清理与 main 快进（其 AGENTS.md 规定 15 ④ / issue #102） | **已修掉**：从主工作区运行也会反查并移除该分支的 worktree，然后快进 main |
