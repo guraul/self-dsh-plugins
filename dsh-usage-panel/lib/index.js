@@ -739,6 +739,22 @@ function num2(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
+var caCache = /* @__PURE__ */ new Map();
+function loadCaContents(caPath) {
+  if (!caPath) return void 0;
+  if (caCache.has(caPath)) {
+    const cached = caCache.get(caPath);
+    return cached ?? void 0;
+  }
+  try {
+    const pem = fs.readFileSync(caPath, "utf8");
+    caCache.set(caPath, pem);
+    return pem;
+  } catch {
+    caCache.set(caPath, null);
+    return void 0;
+  }
+}
 function requestJson(config, path6) {
   return new Promise((resolve, reject) => {
     let url;
@@ -750,6 +766,7 @@ function requestJson(config, path6) {
     }
     const isHttps = url.protocol === "https:";
     const lib = isHttps ? https : http;
+    const ca = isHttps ? loadCaContents(config.ca) : void 0;
     const req = lib.request(
       {
         method: "GET",
@@ -758,7 +775,7 @@ function requestJson(config, path6) {
         path: url.pathname + url.search,
         headers: { "x-internal-token": config.token },
         timeout: config.timeoutMs,
-        ...isHttps && config.ca ? { ca: config.ca } : {}
+        ...ca ? { ca } : {}
       },
       (res) => {
         const chunks = [];

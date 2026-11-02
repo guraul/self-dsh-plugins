@@ -107,6 +107,26 @@ function num(value: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
+/** 证书内容缓存：ca 是路径，https.request 需要 PEM 内容（传路径等于没配）。 */
+const caCache = new Map<string, string | null>()
+
+export function loadCaContents(caPath: string | null): string | undefined {
+  if (!caPath) return undefined
+  if (caCache.has(caPath)) {
+    const cached = caCache.get(caPath)
+    return cached ?? undefined
+  }
+  try {
+    const pem = fs.readFileSync(caPath, 'utf8')
+    caCache.set(caPath, pem)
+    return pem
+  } catch {
+    // 读不到就当作没配 CA：请求会自然失败，调用方据此回退本地。
+    caCache.set(caPath, null)
+    return undefined
+  }
+}
+
 function requestJson(config: HomebaseConfig, path: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let url: URL
@@ -118,6 +138,7 @@ function requestJson(config: HomebaseConfig, path: string): Promise<unknown> {
     }
     const isHttps = url.protocol === 'https:'
     const lib = isHttps ? https : http
+    const ca = isHttps ? loadCaContents(config.ca) : undefined
     const req = lib.request(
       {
         method: 'GET',
@@ -126,7 +147,7 @@ function requestJson(config: HomebaseConfig, path: string): Promise<unknown> {
         path: url.pathname + url.search,
         headers: { 'x-internal-token': config.token },
         timeout: config.timeoutMs,
-        ...(isHttps && config.ca ? { ca: config.ca } : {}),
+        ...(ca ? { ca } : {}),
       },
       (res) => {
         const chunks: Buffer[] = []
