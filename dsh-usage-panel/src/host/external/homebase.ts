@@ -181,7 +181,10 @@ function requestJson(config: HomebaseConfig, path: string): Promise<unknown> {
  * window is min(first_at)..max(last_at).
  */
 export function foldHomebaseRows(rows: readonly QueryRow[]): Map<string, SubagentExternal> {
-  const bySession = new Map<string, { totals: UsageTotals; calls: number; first: number; last: number; byModel: Map<string, number> }>()
+  const bySession = new Map<
+    string,
+    { totals: UsageTotals; calls: number; first: number; last: number; byModel: Map<string, number>; source: string }
+  >()
   for (const row of rows) {
     if (!row || typeof row.session_id !== 'string' || !row.session_id) continue
     const cur = bySession.get(row.session_id) ?? {
@@ -190,6 +193,7 @@ export function foldHomebaseRows(rows: readonly QueryRow[]): Map<string, Subagen
       first: 0,
       last: 0,
       byModel: new Map<string, number>(),
+      source: row.source ?? 'opencode',
     }
     cur.totals.input += num(row.input_tokens)
     cur.totals.output += num(row.output_tokens)
@@ -215,15 +219,17 @@ export function foldHomebaseRows(rows: readonly QueryRow[]): Map<string, Subagen
         model = name
       }
     }
+    // executor 与 source 随行来源走：同一张表里 opencode / codebuddy 都有。
+    const isCodebuddy = agg.source === 'codebuddy'
     out.set(sessionId, {
-      executor: 'opencode',
+      executor: isCodebuddy ? 'codebuddy' : 'opencode',
       remoteId: sessionId,
       model,
       totals: agg.totals,
       calls: agg.calls,
       startedAt: agg.first,
       endedAt: agg.last || null,
-      source: 'opencode-db',
+      source: isCodebuddy ? 'codebuddy-jsonl' : 'opencode-db',
     })
   }
   return out
@@ -234,9 +240,14 @@ export async function fetchHomebaseUsage(config: HomebaseConfig, opts: { limit?:
   if (config.source !== 'homebase') throw new Error('homebase source not enabled')
   if (!config.url || !config.token) throw new Error('homebase url/token missing')
   const limit = Math.min(Math.max(opts.limit ?? 2000, 1), 2000)
-  const payload = (await requestJson(
-    config,
-    `/api/internal/token-usage/query?source=opencode&group_by=all&limit=${limit}`,
-  )) as { rows?: QueryRow[] }
-  return foldHomebaseRows(payload?.rows ?? [])
+  // 一次拉两个源：外部执行方目前只有 opencode 与 codebuddy 会进子代理表。
+  const [opencode, codebuddy] = await Promise.all([
+    requestJson(config, `/api/internal/token-usage/query?source=opencode&group_by=all&limit=${limit}`),
+    requestJson(config, `/api/internal/token-usage/query?source=codebuddy&group_by=all&limit=${limit}`),
+  ])
+  const rows = [
+    ...(((opencode as { rows?: QueryRow[] })?.rows) ?? []),
+    ...(((codebuddy as { rows?: QueryRow[] })?.rows) ?? []),
+  ]
+  return foldHomebaseRows(rows)
 }

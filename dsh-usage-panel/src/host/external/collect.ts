@@ -292,6 +292,10 @@ export async function collectSubagents(deps: SubagentDeps): Promise<SubagentsPay
       return hit ? { ...hit, executor: executorOf(entry.product) } : null
     }
     if (entry.product === 'codebuddy') {
+      // 按会话粒度回退：这个会话在 homebase 里有记录就用 API，
+      // 没有才落到本地转录（避免一个会话缺失把整张表拉回本地）。
+      const fromApi = homebaseHits?.get(entry.remoteId)
+      if (fromApi) return fromApi
       return codebuddyHits.get(codebuddyKey(entry.cwd, entry.remoteId)) ?? null
     }
     return null
