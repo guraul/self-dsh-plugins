@@ -417,6 +417,6 @@ scripts/pipeline/install-hooks.sh     # 幂等，可重复执行
 当前进度与阶段划分见 [PROGRESS.md](PROGRESS.md)。
 
 现状：**流程已实跑，不再是脚手架**——issue → worktree → PR → 审核循环 → 闸门 → squash 合并已在本仓的真实任务上跑通：
-审核循环有多次 `REJECT → 修复 → 重审` 的实际记录、也有 `--no-review` 的跳过留痕（`.dsh-web/reviews/`、`.dsh-web/reviews/skips/`）；
+审核循环有多次 `REJECT → 修复 → 重审` 的实际记录、也有 `--no-review` 的跳过留痕（`.dsh-web/reviews/`、`.dsh-web/reviews/skips/`，本机留痕，不入库）；
 闸门已抽成共享包 `@guraul/dsh-pipeline`，本仓 `merge-pr.sh` 只剩转发壳；审核记录的写入也已统一到包侧 `record`（D10），
 不再由各插件 / 各脚本各写一套。

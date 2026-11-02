@@ -40,7 +40,7 @@ GitHub Issue（任务入口）
 - [x] `scripts/pipeline/` 七个脚本：`lib.sh` / `new-task.sh` / `open-pr.sh` / `merge-pr.sh` / `status.sh` / `check-all.sh` / `install-check.sh`
 - [x] `docs/pipeline/README.md`（工作手册）+ 本台账
 - [x] `.github/workflows/ci.yml`（按插件 matrix 跑测试 + 语法检查，无部署）
-- [x] `.gitignore` 纳入 `.worktrees/`、`.dsh-web/reviews/`、`.tmp/`
+- [x] `.gitignore` 纳入 `.worktrees/`
 - [x] 白名单问题已解决：`scripts/`、`docs/`、`.github/` 均已入库，CI 能检出全部插件
 
 ### ✅ 阶段 1 · 首次实跑（2026-10-18）
@@ -62,6 +62,7 @@ GitHub Issue（任务入口）
 ### ✅ 阶段 3 · 审核循环（2026-11-01 ~ 11-02）
 
 - [x] `review.sh` 固化 `prepare` / `publish`，产物落项目内 `.tmp/`
+- [x] `.gitignore` 纳入 `.dsh-web/reviews/`（本机审核留痕）与 `.tmp/`（`review.sh` 产物），**均不入库**
 - [x] `gate` 子命令：跨仓共用的审核闸门（`E_POLICY` / 高风险 / 轮次 / 过期）
 - [x] 记录增 `schemaVersion` / `policyVersion` / `round`
 - [x] `REJECT` 后用 `recheck` 在同一会话复审
