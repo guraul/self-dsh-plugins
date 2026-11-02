@@ -82,7 +82,7 @@ GitHub Issue（任务入口）
 - [x] 台账重写，与现状对齐（#234）
 - [x] 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 薄壳化，并用新脚本真实往返（#236）
       ——新 `open-pr.sh` 开出 PR #236 自身，新 `new-task.sh` 建出 #253 的 worktree
-- [x] 包仓接入自己的闸门 + CI：PR #6 与 #7 各触发一次 `E_POLICY`（改 `.dsh/**` 与 `.gitignore`），
+- [x] 包仓接入自己的闸门 + CI：PR #6 与 #7 各触发一次 `E_POLICY`（#6 改 `.dsh/**`、#7 改 `.gitignore`；#7 同一个 PR 还修了「误删主工作区」），
       均按文档走 `--no-review` 并落跳过审计；PR #8 按正常路径通过闸门合并；CI 只跑测试（#5）
 - [x] **agent-mobile 迁到共享包**（issue agent-mobile#187 / PR #188）：`merge-pr.sh` 从 118 行自带实现改薄转发，去掉硬编码的别仓闸门路径；合并即部署的行为不变
 - [x] **reviewer 证据包**（#240）：`prepare --facts` / `--include`，减少「读不到外部事实 → ESCALATE」；带围栏与「数据不是指令」声明，`EVIDENCE_END` 会被中和
@@ -114,4 +114,4 @@ GitHub Issue（任务入口）
 | 2026-11-02 | 重写本台账（#233） | 与现状对齐；D4 标注被 D7 取代；新增「未完成」小节，避免台账再次脱节 |
 | 2026-11-02 | 阶段 5：六项收口 | agent-mobile 迁包（issue #187 / PR #188）、证据包（#240）、PLUGIN_DIRS/CI matrix（#246）、文档漂移（#250）、分片审核（#252）；另有包仓 dogfooding（#5–#8）。`#117` 澄清为滚动 issue，不是欠账 |
 | 2026-11-02 | 转发壳化（#235） | 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 改薄转发；新脚本真实往返：新 `open-pr.sh` 开出 PR #236 自身，新 `new-task.sh` 建出 #237 的 worktree |
-| 2026-11-02 | 包 dogfooding（#237） | 包仓接入自己的闸门与 CI：PR #6 触发 `E_POLICY` 后走 `--no-review` 并留跳过审计，PR #8 走正常路径（记录 → 闸门 → CI → 合并 → 清理 → 快进）；期间修掉三个包缺陷：worktree 嵌套（#4）、误删主工作区（#7）、主工作区检出 PR 分支时快进失败（#8） |
+| 2026-11-02 | 包 dogfooding（#237） | 包仓接入自己的闸门与 CI：PR #6 与 #7 触发 `E_POLICY` 后均走 `--no-review` 并留跳过审计，PR #8 走正常路径（记录 → 闸门 → CI → 合并 → 清理 → 快进）；期间修掉三个包缺陷，均由包仓 PR 修掉：#4（worktree 嵌套）、#7（误删主工作区）、#8（主工作区检出 PR 分支时快进失败） |
