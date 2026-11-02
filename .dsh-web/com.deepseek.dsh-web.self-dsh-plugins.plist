@@ -20,6 +20,8 @@
     <string>/Users/gubin/.nvm/versions/node/v24.21.0/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>HOME</key>
     <string>/Users/gubin</string>
+    <key>DSH_USAGE_PANEL_DATA_SOURCE</key>
+    <string>homebase</string>
     <key>DSH_HOME</key>
     <string>/Users/gubin/.dsh</string>
   </dict>
