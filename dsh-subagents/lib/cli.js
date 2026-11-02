@@ -31,6 +31,8 @@ import {
 
 const USAGE = `用法:
   dsh-subagents prepare --pr <号> [--out <文件>] [--root <仓库根>]
+                        [--facts <文件>] [--include <路径>[,<路径>...]]
+                                                        # 证据包：事实文本 / 附带文件（单文件 8 KB 上限）
   dsh-subagents prompt  --request <文件> [--out <文件>] [--role <角色>]  # 渲染审核提示词
   dsh-subagents recheck --request <新请求> --previous <上一轮记录> [--out <文件>]
                                                         # 渲染「同一会话复审」的任务书
@@ -93,8 +95,20 @@ function emit(value, flags) {
   else process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
+/** `--include` 是逗号分隔的路径列表；空值不是「没有」，是写错了。 */
+function parseInclude(value) {
+  if (value === undefined) return []
+  if (typeof value !== 'string') throw fail('E_BUDGET', '--include 需要一个或多个文件路径（逗号分隔）')
+  const paths = value.split(',').map((item) => item.trim()).filter(Boolean)
+  if (paths.length === 0) throw fail('E_BUDGET', '--include 需要一个或多个文件路径（逗号分隔）')
+  return paths
+}
+
 function cmdPrepare(flags) {
   if (!flags.pr) throw fail('E_BUDGET', '缺少 --pr')
+  if (flags.facts !== undefined && typeof flags.facts !== 'string') {
+    throw fail('E_BUDGET', '--facts 需要一个文件路径')
+  }
   const { request, stats } = prepareRequest({
     pr: flags.pr,
     cwd: root(flags),
@@ -102,6 +116,8 @@ function cmdPrepare(flags) {
     timeoutMs: flags.timeout ? Number(flags.timeout) : undefined,
     nonce: flags.nonce,
     model: flags.model,
+    factsFile: flags.facts,
+    include: parseInclude(flags.include),
   })
   const payload = { request, stats }
   if (flags.out) {

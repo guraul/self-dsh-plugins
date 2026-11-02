@@ -536,3 +536,108 @@ test('adjudicate：非 ESCALATE / 重复处置 / 缺参数都拒绝', () => {
   assert.match(run(['adjudicate', '--record', esc, '--decision', 'abandon', '--by', 'z', '--reason', 'w']).stderr, /已被 .* 处置过/)
   assert.match(run(['adjudicate', '--record', esc, '--decision', 'nope', '--by', 'x', '--reason', 'y']).stderr, /只能是 merge 或 abandon/)
 })
+
+/** prepare 的证据包只增加请求字段，不改 nonce / head_sha / diff。 */
+test('prepare: --facts / --include 写进请求的 facts 与 included', () => {
+  const { root } = sandbox()
+  const bin = mkdtempSync(join(tmpdir(), 'dsh-subagents-prep-'))
+  writeFileSync(
+    join(bin, 'gh'),
+    `#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  printf '%s' '{"number":42,"title":"t","body":"没有链接","headRefOid":"${SHA}","baseRefName":"main","files":[{"path":"a.js"}],"additions":1,"deletions":0}'
+  exit 0
+fi
+exit 1
+`,
+    { mode: 0o755 },
+  )
+  writeFileSync(join(bin, 'git'), '#!/bin/sh\nprintf "%s" "+++ b/a.js\n+hello"\n', { mode: 0o755 })
+  writeFileSync(join(root, 'facts.txt'), '人工确认：无外部依赖')
+  writeFileSync(join(root, 'a.md'), '文件 A')
+  writeFileSync(join(root, 'b.md'), '文件 B')
+
+  const out = run(
+    ['prepare', '--pr', '42', '--facts', 'facts.txt', '--include', 'a.md, b.md', '--root', root],
+    { PATH: `${bin}:${process.env.PATH}` },
+  )
+  assert.equal(out.code, 0, out.stderr)
+  const { request } = JSON.parse(out.stdout)
+  assert.equal(request.head_sha, SHA)
+  assert.equal(request.nonce.length, 12, 'nonce 仍由 prepare 生成')
+  assert.equal(request.facts, '人工确认：无外部依赖')
+  assert.deepEqual(request.included, [
+    { path: 'a.md', content: '文件 A' },
+    { path: 'b.md', content: '文件 B' },
+  ])
+})
+
+test('prepare: --include 文件不存在时退出 2 并指出是哪个', () => {
+  const { root } = sandbox()
+  const out = run(['prepare', '--pr', '42', '--include', 'missing.md', '--root', root])
+  assert.equal(out.code, 2)
+  assert.match(out.stderr, /--include 指定的文件不存在/)
+  assert.match(out.stderr, /missing\.md/)
+})
+
+test('prompt: 有证据包渲染两节，没有就完全不出现', () => {
+  const { root } = sandbox()
+  const packed = join(root, 'packed.json')
+  writeFileSync(
+    packed,
+    JSON.stringify({
+      request: {
+        pr: 7,
+        head_sha: SHA,
+        nonce: NONCE,
+        files: [],
+        issue: { body: 'b' },
+        diff: 'diff',
+        budget: { maxChars: 100 },
+        facts: '外部事实',
+        included: [{ path: 'a.md', content: '内容' }],
+      },
+    }),
+  )
+  const out = run(['prompt', '--request', packed])
+  assert.equal(out.code, 0, out.stderr)
+  assert.match(out.stdout, /## 控制面提供的事实/)
+  assert.match(out.stdout, /## 附带文件/)
+  assert.ok(out.stdout.indexOf('## 控制面提供的事实') < out.stdout.indexOf('输出要求'))
+
+  const plain = join(root, 'plain.json')
+  writeFileSync(
+    plain,
+    JSON.stringify({
+      request: { pr: 7, head_sha: SHA, nonce: NONCE, files: [], issue: { body: 'b' }, diff: 'diff', budget: { maxChars: 100 } },
+    }),
+  )
+  const plainOut = run(['prompt', '--request', plain])
+  assert.equal(plainOut.code, 0, plainOut.stderr)
+  assert.doesNotMatch(plainOut.stdout, /## 控制面提供的事实|## 附带文件/)
+})
+
+/** 证据包只是请求里的附加字段，记录契约不变。 */
+test('record: 带证据包的请求仍能正常落记录', () => {
+  const { root } = sandbox()
+  const request = join(root, 'req.json')
+  const response = join(root, 'res.txt')
+  writeFileSync(
+    request,
+    JSON.stringify({
+      request: {
+        pr: 7,
+        head_sha: SHA,
+        nonce: NONCE,
+        facts: '外部事实',
+        included: [{ path: 'a.md', content: '内容' }],
+      },
+    }),
+  )
+  writeFileSync(response, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
+
+  const stub = stubPackage({ stdout: `${jsonRecord()}\n` })
+  const out = run(['record', '--request', request, '--response', response, '--json', '--root', root], stub.env)
+  assert.equal(out.code, 0, out.stderr)
+  assert.equal(JSON.parse(out.stdout).verdict, 'APPROVE')
+})
