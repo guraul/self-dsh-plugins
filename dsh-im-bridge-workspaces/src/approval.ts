@@ -21,6 +21,11 @@ export const REJECT_PREFIX = 'reject:'
 export interface PendingApproval {
   /** Short id shown to the user and echoed in the button key. */
   id: string
+  /**
+   * 企微卡片的任务编号：同一个机器人**不能重复**，所以必须全局唯一
+   * （进程重启后自增 id 会从 1 重来，复用会被拒）。
+   */
+  taskId: string
   /** WeCom window the prompt belongs to (userid for 1:1, chatid for groups). */
   chatTarget: string
   /** `single` or `group`; decides who may decide. */
@@ -114,6 +119,17 @@ export function redactArguments(raw: string | undefined, maxLength = 160): strin
   return flat.length <= maxLength ? flat : `${flat.slice(0, maxLength - 1)}…`
 }
 
+/**
+ * 生成一个对同一个机器人永不重复的卡片任务编号。
+ * @param seed - 进程内自增序号，仅用于并发时避免撞车。
+ * @returns 时间戳 + 序号 + 随机后缀。
+ */
+export function makeTaskId(seed: number): string {
+  const stamp = Date.now().toString(36)
+  const suffix = Math.random().toString(36).slice(2, 6)
+  return `au${stamp}${seed.toString(36)}${suffix}`
+}
+
 /** Render the plain-text fallback prompt (used when cards fail). */
 export function formatApprovalText(
   entry: PendingApproval,
@@ -144,7 +160,7 @@ export function buildApprovalCard(entry: PendingApproval, timeoutMinutes: number
     : `${entry.reason}｜${entry.summary}`
   return {
     card_type: 'button_interaction',
-    task_id: entry.id,
+    task_id: entry.taskId,
     main_title: { title: '需要你批准一次操作', desc: entry.toolName },
     sub_title_text: `${subtitle.slice(0, 110)}（${String(timeoutMinutes)} 分钟内有效）`,
     button_list: [

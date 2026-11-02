@@ -84,6 +84,16 @@ function redactArguments(raw, maxLength = 160) {
 	const flat = oneLine(text);
 	return flat.length <= maxLength ? flat : `${flat.slice(0, maxLength - 1)}…`;
 }
+/**
+* 生成一个对同一个机器人永不重复的卡片任务编号。
+* @param seed - 进程内自增序号，仅用于并发时避免撞车。
+* @returns 时间戳 + 序号 + 随机后缀。
+*/
+function makeTaskId(seed) {
+	const stamp = Date.now().toString(36);
+	const suffix = Math.random().toString(36).slice(2, 6);
+	return `au${stamp}${seed.toString(36)}${suffix}`;
+}
 /** Render the plain-text fallback prompt (used when cards fail). */
 function formatApprovalText(entry, position, timeoutMinutes) {
 	const lines = [`🔐 需要你批准一次操作（${String(position.index)}/${String(position.total)}）`, `工具：${entry.toolName}`];
@@ -102,7 +112,7 @@ function buildApprovalCard(entry, timeoutMinutes) {
 	const subtitle = entry.reason === void 0 || entry.reason === "" ? entry.summary : `${entry.reason}｜${entry.summary}`;
 	return {
 		card_type: "button_interaction",
-		task_id: entry.id,
+		task_id: entry.taskId,
 		main_title: {
 			title: "需要你批准一次操作",
 			desc: entry.toolName
@@ -8946,6 +8956,25 @@ function emptyChatState() {
 		streamStatusTick: 0
 	};
 }
+/**
+* 把任意异常压成一行可读文本。
+*
+* 企微 SDK 拒收卡片时抛出的是普通对象（errcode/errmsg），直接拼接会变成
+* `[object Object]`，日志里什么都看不到。
+* @param error - 捕获到的任意值。
+* @returns 一行描述，最长 300 字。
+*/
+function describeError(error) {
+	let text;
+	if (error instanceof Error) text = `${error.name}: ${error.message}`;
+	else if (error !== null && typeof error === "object") try {
+		text = JSON.stringify(error);
+	} catch {
+		text = Object.prototype.toString.call(error);
+	}
+	else text = String(error);
+	return text.length > 300 ? `${text.slice(0, 300)}…` : text;
+}
 /** Join assistant text from one turn starting at `firstSeq`. */
 function summarize(events, firstSeq) {
 	let started = false;
@@ -10256,8 +10285,7 @@ function apply(ctx, config) {
 				msgtype: "template_card",
 				template_card: buildApprovalCard(entry, minutes)
 			};
-			/** 把异常压成一行，避免日志里出现整段堆栈。 */
-			const reason = (error) => error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+			const reason = describeError;
 			try {
 				await ws.sendMessage(entry.chatTarget, payload);
 				console.log(`[im-bridge] 审批卡片已发送 id=${entry.id} 目标=${entry.chatTarget}`);
@@ -10317,6 +10345,7 @@ function apply(ctx, config) {
 			approvalSeq += 1;
 			return {
 				id: String(approvalSeq),
+				taskId: makeTaskId(approvalSeq),
 				chatTarget,
 				kind: st.kind ?? "single",
 				initiator,
@@ -10424,10 +10453,10 @@ function apply(ctx, config) {
 		}
 		/** 卡片按钮点击。 */
 		/** 卡片结果态：点击后 5 秒内换掉，避免停在「待审批」的样子。 */
-		function approvalResultCard(id, title, desc, subTitle) {
+		function approvalResultCard(taskId, title, desc, subTitle) {
 			return {
 				card_type: "text_notice",
-				task_id: id,
+				task_id: taskId,
 				main_title: {
 					title,
 					desc
@@ -10453,7 +10482,7 @@ function apply(ctx, config) {
 			}
 			if (!approvals.settle(parsed.id, parsed.decision)) return;
 			const approved = parsed.decision === "allowed-once";
-			ws.updateTemplateCard(frame, approvalResultCard(entry.id, approved ? "✅ 已同意" : "🚫 已拒绝", entry.toolName, approved ? "本次操作已放行（只生效这一次）" : "本次操作已拒绝")).catch(() => {
+			ws.updateTemplateCard(frame, approvalResultCard(entry.taskId, approved ? "✅ 已同意" : "🚫 已拒绝", entry.toolName, approved ? "本次操作已放行（只生效这一次）" : "本次操作已拒绝")).catch(() => {
 				notifyChat(entry.chatTarget, approved ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`);
 			});
 		}));
