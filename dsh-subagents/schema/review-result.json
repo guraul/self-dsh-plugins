@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/guraul/self-dsh-plugins/dsh-subagents/schema/review-result.json",
   "title": "ReviewResult",
-  "description": "一次审核的结构化结果。单一真源：文档引用它，lib/contract.js 的 validateResult 按它实现。",
+  "description": "一次审核的结构化结果。单一真源：文档引用它，共享包 @guraul/dsh-pipeline 的校验器按它实现。",
   "type": "object",
   "additionalProperties": false,
   "required": [

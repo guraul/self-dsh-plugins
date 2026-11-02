@@ -14,7 +14,7 @@
 
 | 想改 | 改哪个文件 | 注意 |
 |---|---|---|
-| 判定行格式 / 解析规则 / 高风险路径 | `lib/contract.js` | 改完必须同步 `schema/review-result.json` 与 `REQ-001-design.md` §4 |
+| 判定行格式 / 解析规则 / 高风险路径 | 共享包 `tools/node_modules/dsh-pipeline`（`@guraul/dsh-pipeline`） | **插件端没有第二份实现**；改包要同步 `schema/review-result.json` 与 `REQ-001-design.md` §4 |
 | 请求组装、diff 围栏、预算 | `lib/request.js` | diff 走 git，元数据走 gh；`--diff-file` / `--meta-file` 留给测试 |
 | 记录落盘、traceId、熔断 | `lib/record.js` | 记录目录 `.dsh-web/reviews/` 已在 `.gitignore` 里忽略；**落在主工作区**（`mainWorktreeRoot`），不要改回 `cwd` |
 | 角色字段与加载 | `lib/roles.js` + `roles/*.json` | 非法值降级到最保守值，坏文件跳过 |

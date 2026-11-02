@@ -4,7 +4,7 @@
  *
  * 判定与合并分离是这里的硬约束：CLI 只产出记录，不执行合并。
  */
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -222,6 +222,23 @@ function cmdPrompt(flags) {
 }
 
 /**
+ * `--duration-ms` 只接受非负数字。裸 flag 会被 parseArgv 置成 true，
+ * `Number(true)===1` 会静默记成 1ms，非数字则会变成 NaN 写进记录；
+ * 两种都按 0 处理并明确告警，别让假数据混进审计证据。
+ */
+function parseDurationMs(flags) {
+  const raw = flags['duration-ms']
+  if (raw === undefined) return 0
+  const value = Number(raw)
+  if (typeof raw !== 'string' || !Number.isFinite(value) || value < 0) {
+    const shown = raw === true ? '(缺值)' : String(raw).replace(/\s+/g, ' ')
+    process.stderr.write(`⚠️  --duration-ms 需要非负数字，收到 ${shown}，按 0 记录\n`)
+    return 0
+  }
+  return value
+}
+
+/**
  * 记录落盘统一交给共享 pipeline 包：判定提取、findings 兜底、高风险策略与
  * policyVersion 都在包内决定，插件端只保留对外参数。
  */
@@ -254,11 +271,13 @@ function cmdRecord(flags) {
     root: root(flags),
     json: Boolean(flags.json),
     form: typeof flags.form === 'string' ? flags.form : undefined,
-    durationMs: Number(flags['duration-ms'] || 0),
+    durationMs: parseDurationMs(flags),
   })
   // 对外契约：0 通过 / 1 拒绝 / 2 参数或环境错误。包的成功退出码只说明「写完了」，
   // 判定必须由插件读回来翻译，否则 REJECT 会被脚本当成放行。
   if (outcome.status !== 0) return outcome.status
+  // 与旧实现一致：记录落盘但判定不是 APPROVE 也算一次失败，连续三次即熔断回人工。
+  if (outcome.record.verdict !== 'APPROVE') bumpCircuit(reviewsDir(root(flags)))
   return outcome.record.verdict === 'APPROVE' ? 0 : 1
 }
 
@@ -390,11 +409,13 @@ function cmdReview(flags) {
   }
 
   // 记录仍由共享包组装：把请求与响应落到临时文件，包读完即删。
+  // 文件里有完整 diff 与审核原文，所以落自己独占的 0700 目录，不放共享 /tmp。
   const trace = traceId()
-  const requestFile = join(tmpdir(), `review-${trace}.json`)
-  const responseFile = join(tmpdir(), `review-${trace}.txt`)
-  writeFileSync(requestFile, `${JSON.stringify({ request }, null, 2)}\n`, 'utf8')
-  writeFileSync(responseFile, text, 'utf8')
+  const tmpDir = mkdtempSync(join(tmpdir(), 'dsh-review-'))
+  const requestFile = join(tmpDir, `review-${trace}.json`)
+  const responseFile = join(tmpDir, `review-${trace}.txt`)
+  writeFileSync(requestFile, `${JSON.stringify({ request }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+  writeFileSync(responseFile, text, { encoding: 'utf8', mode: 0o600 })
 
   let outcome
   try {
@@ -410,8 +431,7 @@ function cmdReview(flags) {
       durationMs: meta.durationMs,
     })
   } finally {
-    rmSync(requestFile, { force: true })
-    rmSync(responseFile, { force: true })
+    rmSync(tmpDir, { recursive: true, force: true })
   }
 
   if (outcome.status !== 0) {

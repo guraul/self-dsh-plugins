@@ -144,7 +144,9 @@ export function recordViaPackage({
     record = null
   }
   if (record === null || typeof record !== 'object' || typeof record.verdict !== 'string') {
-    process.stderr.write('错误: 共享 pipeline 包的 --json 输出不是合法记录，无法确定判定\n')
+    process.stderr.write(
+      '错误: 共享 pipeline 包的 --json 输出不是合法记录，无法确定判定（记录可能已落盘，请检查 .dsh-web/reviews）\n',
+    )
     return { status: 2, record: null }
   }
 
