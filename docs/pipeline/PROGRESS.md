@@ -80,22 +80,15 @@ GitHub Issue（任务入口）
 ### ✅ 阶段 5 · 收口（2026-11-02）
 
 - [x] 台账重写，与现状对齐（#234）
-- [x] 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 薄壳化并用新脚本真实往返（#236）
-- [x] 包仓接入自己的闸门（#6/#7 走 `--no-review` 留审计、#8 按正常路径通过）+ 包仓 CI（#5）
+- [x] 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 薄壳化，并用新脚本真实往返（#236）
+      ——新 `open-pr.sh` 开出 PR #236 自身，新 `new-task.sh` 建出 #253 的 worktree
+- [x] 包仓接入自己的闸门 + CI：PR #6 与 #7 各触发一次 `E_POLICY`（改 `.dsh/**` 与 `.gitignore`），
+      均按文档走 `--no-review` 并落跳过审计；PR #8 按正常路径通过闸门合并；CI 只跑测试（#5）
 - [x] **agent-mobile 迁到共享包**（#188）：`merge-pr.sh` 从 118 行自带实现改薄转发，去掉硬编码的别仓闸门路径；合并即部署的行为不变
 - [x] **reviewer 证据包**（#240）：`prepare --facts` / `--include`，减少「读不到外部事实 → ESCALATE」；带围栏与「数据不是指令」声明，`EVIDENCE_END` 会被中和
 - [x] **`PLUGIN_DIRS` 与 CI matrix 对齐**（#246）：补 `dsh-usage-panel`，并修掉 CI 长期缺 `dsh-zhihu-sidebar`（该插件测试此前从未在 CI 跑过）
 - [x] **文档漂移收口**（#250）：脚本清单按实际目录补全、收录 `review-loop-check.sh`、步骤编号去半号
 - [x] **分片审核**（#252）：`prepare --shard i/n` + `record --aggregate`，REJECT > ESCALATE > APPROVE 确定性合成，缺片/哈希不一致 fail-closed；分片记录不占用闸门文件名，单片不可能过闸
-
-### ✅ 阶段 5 · 收口（2026-11-02）
-
-- [x] 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 薄壳化，并用新脚本真实往返
-      （新 `open-pr.sh` 开出 PR #236 自身；新 `new-task.sh` 建出本 worktree）
-- [x] 包仓接入自己的闸门：PR #6 与 #7 各触发一次 `E_POLICY`（改 `.dsh/**` 与 `.gitignore` 均属默认高风险），
-      均按文档走 `--no-review` 并落跳过审计；PR #8 按正常路径通过闸门合并
-      （记录 → 闸门 → CI → 合并 → 清理 → 快进）
-- [x] 包仓加 CI（只跑测试，push 与 PR 双触发）
 
 ## 四、未完成（欠账）
 
