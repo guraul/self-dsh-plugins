@@ -4,10 +4,13 @@
 #
 # 包管理：本仓库统一用 pnpm（全局约定禁用 npm / npx，npx 由 pnpm dlx 代替）。
 #
-# 另注：本仓库 .gitignore 是白名单，现已放行全部 10 个插件目录 + docs/ + scripts/ + .github/
-# （其中 9 个已入库；dsh-plugin-restart/ 目前只占白名单、尚无内容），
-# 因此 CI 检出后这些插件都在。下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底
-# （例如新插件目录还没加进白名单），命中它是预期行为，不是失败。
+# 另注：本仓库 .gitignore 是白名单，现已放行 10 个已入库插件目录 + docs/ + scripts/ + .github/
+# （另有 dsh-plugin-restart/ 只占白名单、尚无内容），因此 CI 检出后这些插件都在。
+# 下面的"目录不存在 → ::warning:: 跳过"分支保留作兜底（例如新插件目录还没加进白名单），
+# 命中它是预期行为，不是失败。
+#
+# ⚠️ matrix 必须与 scripts/pipeline/lib.sh 的 PLUGIN_DIRS 保持一一对应（issue #243）：
+#    漏一个目录不会报错，只会让那个插件的测试在 CI 里静默地从未跑过。
 #
 # dsh-im-bridge-workspaces：依赖已在 issue #3 修复，可正常 `pnpm install`（peer 为
 # `^0.2.1-rc.2 || ^0.2.1-rc.4`，rc.2 / rc.4 均验过；`0.2.2-alpha.2` 未放宽，见
@@ -93,6 +96,25 @@ jobs:
             entry: |
               lib/index.js
               lib/client.js
+          # issue #243：这一条长期缺失，导致该插件的测试在 CI 里从未跑过。
+          - dir: dsh-zhihu-sidebar
+            install: true
+            # 它没有 scripts.build（lib/* 是手写源码，不是产物），故不做新鲜度检查。
+            fresh: false
+            entry: |
+              lib/index.js
+              lib/client.js
+              lib/host/cli.js
+              lib/host/queue.js
+              lib/host/cache.js
+              lib/host/backoff.js
+              lib/host/quota.js
+              lib/host/parse.js
+              lib/host/http.js
+              lib/host/service.js
+              extension/content.js
+              extension/popup.js
+              extension/lib/logic.js
     steps:
       - uses: actions/checkout@v4
 
@@ -128,6 +150,7 @@ jobs:
           #   * dsh-plugin-product-subagents —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           #   * dsh-im-bridge-workspaces     —— 无 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
           #   * dsh-usage-panel             —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
+          #   * dsh-zhihu-sidebar           —— 无任何依赖、无 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
           # 本仓库只留 pnpm-lock.yaml：npm 的 package-lock.json 已按全局约定清掉，并被 .gitignore 挡下。
           #
           # ⚠️ CI 下 pnpm 默认 frozen-lockfile=true：兜底必须显式 --no-frozen-lockfile。
