@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { foldHomebaseRows, homebaseConfigFromEnv, parseTokenSyncEnv, readTokenSyncEnv } from '../src/host/external/homebase.ts'
+import { foldHomebaseRows, homebaseConfigFromEnv, loadCaContents, parseTokenSyncEnv, readTokenSyncEnv } from '../src/host/external/homebase.ts'
 
 // Point at a file that does not exist so the real ~/.dsh/token-sync.env never
 // leaks into assertions.
@@ -129,5 +129,20 @@ test('token-sync.env fallback: missing file falls back to local, env wins when b
   )
   assert.equal(cfg.url, 'https://from-env') // env wins
   assert.equal(cfg.token.length, 64) // token from file
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('loadCaContents: 返回 PEM 内容而不是路径；读不到返回 undefined', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-ca-'))
+  const file = path.join(dir, 'ca.pem')
+  const pem = '-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n'
+  fs.writeFileSync(file, pem)
+
+  // 关键：https.request 的 ca 需要内容；传路径等于没配（这就是生产 bug）。
+  assert.equal(loadCaContents(file), pem)
+  assert.notEqual(loadCaContents(file), file)
+
+  assert.equal(loadCaContents(path.join(dir, 'missing.pem')), undefined)
+  assert.equal(loadCaContents(null), undefined)
   fs.rmSync(dir, { recursive: true, force: true })
 })

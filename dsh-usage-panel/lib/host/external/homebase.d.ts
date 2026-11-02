@@ -35,6 +35,7 @@ interface QueryRow {
     first_at?: number;
     last_at?: number;
 }
+export declare function loadCaContents(caPath: string | null): string | undefined;
 /**
  * Fold homebase rows into one `SubagentExternal` per session id.
  *
