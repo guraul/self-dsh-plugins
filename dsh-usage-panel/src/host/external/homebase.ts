@@ -14,6 +14,9 @@
 // different keyspace, so that executor keeps reading local jsonl (see #208).
 import https from 'node:https'
 import http from 'node:http'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { URL } from 'node:url'
 import type { SubagentExternal, UsageTotals } from '../../shared/contract.ts'
 import { emptyTotals } from '../../shared/usage.ts'
@@ -30,12 +33,51 @@ export interface HomebaseConfig {
 
 const DEFAULT_TIMEOUT_MS = 8000
 
-/** Read config from env. `homebase` only when explicitly selected *and* fully configured. */
-export function homebaseConfigFromEnv(env: NodeJS.ProcessEnv = process.env): HomebaseConfig {
+/** `~/.dsh/token-sync.env` — the same file the collector writes/reads (600). */
+export function defaultTokenSyncEnvPath(home = os.homedir()): string {
+  return path.join(home, '.dsh', 'token-sync.env')
+}
+
+/** Parse KEY=VALUE lines; trims quotes and `~`. Never logs values. */
+export function parseTokenSyncEnv(content: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const raw of content.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    const key = line.slice(0, eq).trim()
+    let value = line.slice(eq + 1).trim()
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1)
+    }
+    if (value.startsWith('~/')) value = path.join(os.homedir(), value.slice(2))
+    out[key] = value
+  }
+  return out
+}
+
+/** Read the collector's env file; returns {} when absent/unreadable (caller falls back). */
+export function readTokenSyncEnv(file = defaultTokenSyncEnvPath()): Record<string, string> {
+  try {
+    return parseTokenSyncEnv(fs.readFileSync(file, 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Read config. Credentials come from process env first, then from the
+ * collector's `~/.dsh/token-sync.env` (single source of truth; the plist is
+ * committed to git and must never carry a token).
+ */
+export function homebaseConfigFromEnv(env: NodeJS.ProcessEnv = process.env, file?: string): HomebaseConfig {
   const raw = (env.DSH_USAGE_PANEL_DATA_SOURCE ?? '').trim().toLowerCase()
-  const url = (env.DSH_USAGE_PANEL_HOMEBASE_URL ?? '').trim()
-  const token = (env.DSH_USAGE_PANEL_HOMEBASE_TOKEN ?? '').trim()
-  const ca = (env.DSH_USAGE_PANEL_HOMEBASE_CA ?? '').trim() || null
+  const needsFile = !env.DSH_USAGE_PANEL_HOMEBASE_URL || !env.DSH_USAGE_PANEL_HOMEBASE_TOKEN
+  const fileEnv = needsFile ? readTokenSyncEnv(file) : {}
+  const url = ((env.DSH_USAGE_PANEL_HOMEBASE_URL ?? '') || fileEnv.HOMEBASE_URL || '').trim()
+  const token = ((env.DSH_USAGE_PANEL_HOMEBASE_TOKEN ?? '') || fileEnv.HOMEBASE_INTERNAL_TOKEN || '').trim()
+  const ca = ((env.DSH_USAGE_PANEL_HOMEBASE_CA ?? '') || fileEnv.HOMEBASE_CA || '').trim() || null
   const timeoutMs = Number(env.DSH_USAGE_PANEL_HOMEBASE_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS
   // Default local; 'homebase' without url+token silently stays local (the
   // caller logs why, so a typo is visible without breaking the page).

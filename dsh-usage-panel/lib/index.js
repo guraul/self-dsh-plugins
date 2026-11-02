@@ -533,8 +533,8 @@ function emptyOverview(now) {
 
 // src/host/external/collect.ts
 import { readFile as readFile2, stat } from "node:fs/promises";
-import os4 from "node:os";
-import path4 from "node:path";
+import os5 from "node:os";
+import path5 from "node:path";
 
 // src/host/external/codebuddy.ts
 import { createReadStream } from "node:fs";
@@ -692,13 +692,45 @@ async function readCodebuddySession(remoteId, cwd, options = {}) {
 // src/host/external/homebase.ts
 import https from "node:https";
 import http from "node:http";
+import fs from "node:fs";
+import os2 from "node:os";
+import path2 from "node:path";
 import { URL } from "node:url";
 var DEFAULT_TIMEOUT_MS = 8e3;
-function homebaseConfigFromEnv(env = process.env) {
+function defaultTokenSyncEnvPath(home = os2.homedir()) {
+  return path2.join(home, ".dsh", "token-sync.env");
+}
+function parseTokenSyncEnv(content) {
+  const out = {};
+  for (const raw of content.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+      value = value.slice(1, -1);
+    }
+    if (value.startsWith("~/")) value = path2.join(os2.homedir(), value.slice(2));
+    out[key] = value;
+  }
+  return out;
+}
+function readTokenSyncEnv(file = defaultTokenSyncEnvPath()) {
+  try {
+    return parseTokenSyncEnv(fs.readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
+}
+function homebaseConfigFromEnv(env = process.env, file) {
   const raw = (env.DSH_USAGE_PANEL_DATA_SOURCE ?? "").trim().toLowerCase();
-  const url = (env.DSH_USAGE_PANEL_HOMEBASE_URL ?? "").trim();
-  const token = (env.DSH_USAGE_PANEL_HOMEBASE_TOKEN ?? "").trim();
-  const ca = (env.DSH_USAGE_PANEL_HOMEBASE_CA ?? "").trim() || null;
+  const needsFile = !env.DSH_USAGE_PANEL_HOMEBASE_URL || !env.DSH_USAGE_PANEL_HOMEBASE_TOKEN;
+  const fileEnv = needsFile ? readTokenSyncEnv(file) : {};
+  const url = ((env.DSH_USAGE_PANEL_HOMEBASE_URL ?? "") || fileEnv.HOMEBASE_URL || "").trim();
+  const token = ((env.DSH_USAGE_PANEL_HOMEBASE_TOKEN ?? "") || fileEnv.HOMEBASE_INTERNAL_TOKEN || "").trim();
+  const ca = ((env.DSH_USAGE_PANEL_HOMEBASE_CA ?? "") || fileEnv.HOMEBASE_CA || "").trim() || null;
   const timeoutMs = Number(env.DSH_USAGE_PANEL_HOMEBASE_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
   const source = raw === "homebase" && url && token ? "homebase" : "local";
   return { source, url, token, ca, timeoutMs };
@@ -707,11 +739,11 @@ function num2(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
-function requestJson(config, path5) {
+function requestJson(config, path6) {
   return new Promise((resolve, reject) => {
     let url;
     try {
-      url = new URL(path5, config.url);
+      url = new URL(path6, config.url);
     } catch (error) {
       reject(error);
       return;
@@ -811,8 +843,8 @@ async function fetchHomebaseUsage(config, opts = {}) {
 
 // src/host/external/opencode.ts
 import { readdir } from "node:fs/promises";
-import os2 from "node:os";
-import path2 from "node:path";
+import os3 from "node:os";
+import path3 from "node:path";
 import { DatabaseSync } from "node:sqlite";
 var COLUMNS = "id, model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created, time_updated";
 function messageOf2(err) {
@@ -847,14 +879,14 @@ function parseOpencodeModel(raw) {
   return text;
 }
 async function defaultOpencodeDbPaths() {
-  const home = os2.homedir();
-  const paths = [path2.join(home, ".local", "share", "opencode", "opencode.db")];
-  const backupsDir = path2.join(home, "backups");
+  const home = os3.homedir();
+  const paths = [path3.join(home, ".local", "share", "opencode", "opencode.db")];
+  const backupsDir = path3.join(home, "backups");
   try {
     const entries = await readdir(backupsDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory() || !entry.name.startsWith("opencode-sessions-")) continue;
-      paths.push(path2.join(backupsDir, entry.name, "opencode.db"));
+      paths.push(path3.join(backupsDir, entry.name, "opencode.db"));
     }
   } catch {
   }
@@ -951,14 +983,14 @@ async function readOpencodeSessions(remoteIds, options = {}) {
 
 // src/host/external/registry.ts
 import { readFile } from "node:fs/promises";
-import os3 from "node:os";
-import path3 from "node:path";
+import os4 from "node:os";
+import path4 from "node:path";
 function normalizeSessionId(id) {
   return String(id ?? "").replace(/^session-/, "");
 }
 function defaultRegistryPath() {
-  const home = process.env.DSH_HOME || path3.join(os3.homedir(), ".dsh");
-  return path3.join(home, "product-subagents-registry.json");
+  const home = process.env.DSH_HOME || path4.join(os4.homedir(), ".dsh");
+  return path4.join(home, "product-subagents-registry.json");
 }
 function messageOf3(err) {
   return String(err?.message ?? err);
@@ -1022,8 +1054,8 @@ async function mapLimit(items, limit, fn) {
 }
 var cache = null;
 function defaultProjCacheDir() {
-  const home = process.env.DSH_HOME || path4.join(os4.homedir(), ".dsh");
-  return path4.join(home, "storages", "session_projcache", "sessions");
+  const home = process.env.DSH_HOME || path5.join(os5.homedir(), ".dsh");
+  return path5.join(home, "storages", "session_projcache", "sessions");
 }
 function num4(value) {
   const n = Number(value);
@@ -1044,7 +1076,7 @@ function record(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
 async function readProjCache(dir, sessionId) {
-  const filePath = path4.join(dir, sessionId + ".json");
+  const filePath = path5.join(dir, sessionId + ".json");
   let raw;
   try {
     raw = await readFile2(filePath, "utf8");
