@@ -146,3 +146,32 @@ test('loadCaContents: 返回 PEM 内容而不是路径；读不到返回 undefin
   assert.equal(loadCaContents(null), undefined)
   fs.rmSync(dir, { recursive: true, force: true })
 })
+
+test('fold: executor 与 source 随行的 source 走（codebuddy / opencode 同一张表）', () => {
+  const hits = foldHomebaseRows([
+    {
+      usage_date: '2026-10-31',
+      source: 'opencode',
+      provider: 'opencode',
+      model: 'deepseek-v4.1-flash-free',
+      session_id: 'ses_1',
+      total_tokens: 100,
+      first_at: 1,
+      last_at: 2,
+    },
+    {
+      usage_date: '2026-10-31',
+      source: 'codebuddy',
+      provider: 'codebuddy',
+      model: 'deepseek-v4.1-flash',
+      session_id: '01a191db-a69f-7fcf-bfbf-d7d857cdb361',
+      total_tokens: 900,
+      first_at: 3,
+      last_at: 4,
+    },
+  ]);
+  assert.equal(hits.get('ses_1')?.executor, 'opencode');
+  assert.equal(hits.get('ses_1')?.source, 'opencode-db');
+  assert.equal(hits.get('01a191db-a69f-7fcf-bfbf-d7d857cdb361')?.executor, 'codebuddy');
+  assert.equal(hits.get('01a191db-a69f-7fcf-bfbf-d7d857cdb361')?.source, 'codebuddy-jsonl');
+});

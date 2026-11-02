@@ -809,7 +809,8 @@ function foldHomebaseRows(rows) {
       calls: 0,
       first: 0,
       last: 0,
-      byModel: /* @__PURE__ */ new Map()
+      byModel: /* @__PURE__ */ new Map(),
+      source: row.source ?? "opencode"
     };
     cur.totals.input += num2(row.input_tokens);
     cur.totals.output += num2(row.output_tokens);
@@ -834,15 +835,16 @@ function foldHomebaseRows(rows) {
         model = name2;
       }
     }
+    const isCodebuddy = agg.source === "codebuddy";
     out.set(sessionId, {
-      executor: "opencode",
+      executor: isCodebuddy ? "codebuddy" : "opencode",
       remoteId: sessionId,
       model,
       totals: agg.totals,
       calls: agg.calls,
       startedAt: agg.first,
       endedAt: agg.last || null,
-      source: "opencode-db"
+      source: isCodebuddy ? "codebuddy-jsonl" : "opencode-db"
     });
   }
   return out;
@@ -851,11 +853,15 @@ async function fetchHomebaseUsage(config, opts = {}) {
   if (config.source !== "homebase") throw new Error("homebase source not enabled");
   if (!config.url || !config.token) throw new Error("homebase url/token missing");
   const limit = Math.min(Math.max(opts.limit ?? 2e3, 1), 2e3);
-  const payload = await requestJson(
-    config,
-    `/api/internal/token-usage/query?source=opencode&group_by=all&limit=${limit}`
-  );
-  return foldHomebaseRows(payload?.rows ?? []);
+  const [opencode, codebuddy] = await Promise.all([
+    requestJson(config, `/api/internal/token-usage/query?source=opencode&group_by=all&limit=${limit}`),
+    requestJson(config, `/api/internal/token-usage/query?source=codebuddy&group_by=all&limit=${limit}`)
+  ]);
+  const rows = [
+    ...opencode?.rows ?? [],
+    ...codebuddy?.rows ?? []
+  ];
+  return foldHomebaseRows(rows);
 }
 
 // src/host/external/opencode.ts
@@ -1233,6 +1239,8 @@ async function collectSubagents(deps) {
       return hit ? { ...hit, executor: executorOf(entry.product) } : null;
     }
     if (entry.product === "codebuddy") {
+      const fromApi = homebaseHits?.get(entry.remoteId);
+      if (fromApi) return fromApi;
       return codebuddyHits.get(codebuddyKey(entry.cwd, entry.remoteId)) ?? null;
     }
     return null;
