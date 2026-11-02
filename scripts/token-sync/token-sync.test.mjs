@@ -8,6 +8,7 @@ import path from 'node:path';
 import { enumerateDays, targetDays } from './collect.mjs';
 import { batchRows, parseEnvFile, MAX_BATCH_ROWS } from './upload.mjs';
 import { buildRemoteIndex, collectCodebuddy, shanghaiDay } from './sources/codebuddy.mjs';
+import { collectDsh } from './sources/dsh.mjs';
 
 test('targetDays: --date 优先，否则最近 N 天且不含今天', () => {
   const now = Date.parse('2026-11-01T12:00:00+08:00');
@@ -204,5 +205,34 @@ test('codebuddy 身份：projects 的 messageId 映射到 remoteId，traces 用 
   const byId = new Map(rows.map((r) => [r.session_id, r]));
   assert.ok(byId.has(remoteId), '命中映射的调用应归到 remoteId');
   assert.ok(byId.has('trace_x'), '未命中的调用退回 traceId，不丢数据');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('dsh: 从投影缓存读出会话标题；没有标题时为 null', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-sync-dsh-'));
+  const projDir = path.join(home, 'storages', 'session_projcache', 'sessions');
+  fs.mkdirSync(projDir, { recursive: true });
+  const mk = (id, label) => ({
+    record: {
+      rows: {
+        usagePanel: {
+          val: {
+            current: {
+              byDay: { '2026-10-30': { 'deepseek-v4.1-flash': { input: 10, output: 2, cacheRead: 5, cacheWrite: 0 } } },
+            },
+          },
+        },
+        ...(label === null ? {} : { subagent: { val: { identity: { label } } } }),
+      },
+    },
+  });
+  fs.writeFileSync(path.join(projDir, 'sess-with-title.json'), JSON.stringify(mk('sess-with-title', '查找 DSH token 消耗插件')));
+  fs.writeFileSync(path.join(projDir, 'sess-no-title.json'), JSON.stringify(mk('sess-no-title', null)));
+
+  const { rows, errors } = await collectDsh({ home, days: ['2026-10-30'] });
+  assert.deepEqual(errors, []);
+  const byId = new Map(rows.map((r) => [r.session_id, r]));
+  assert.equal(byId.get('sess-with-title').title, '查找 DSH token 消耗插件');
+  assert.equal(byId.get('sess-no-title').title, null);
   fs.rmSync(home, { recursive: true, force: true });
 });

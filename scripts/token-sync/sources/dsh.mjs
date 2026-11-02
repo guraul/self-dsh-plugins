@@ -116,6 +116,10 @@ export async function collectDsh(opts = {}) {
     const header = headers.get(sessionId)?.header;
     const parent = typeof header?.parentSession === 'string' ? header.parentSession : null;
     const rootSession = parent ?? sessionId;
+    // 会话标题（展示用，可空）：与插件 UI 读的是同一处，切到 API 后不会退化成裸 id。
+    const subagentMeta = rowsNode?.subagent?.val;
+    const rawTitle = subagentMeta?.identity?.label ?? subagentMeta?.label ?? null;
+    const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim().slice(0, 200) : null;
 
     for (const [day, modelMap] of dayModels) {
       if (wanted && !wanted.has(day)) continue;
@@ -133,6 +137,7 @@ export async function collectDsh(opts = {}) {
           model,
           session_id: sessionId,
           root_session: rootSession,
+          title,
           calls: num(b.calls),
           input_tokens: input,
           output_tokens: output,
