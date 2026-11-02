@@ -163,3 +163,35 @@ export async function collectOpencode(opts = {}) {
 
   return { rows: [...merged.values()], errors, stats: { dbs: dbs.length, rows: merged.size } };
 }
+
+/** 最早一天（用于 --all 的起点）。库不存在或无数据时返回 null。 */
+export async function earliestOpencodeDay(home = process.env.HOME ?? '') {
+  const dbs = listOpencodeDbs(home, false);
+  if (!dbs.length) return null;
+  const { DatabaseSync } = await import('node:sqlite');
+  let earliest = null;
+  for (const dbPath of dbs) {
+    let db;
+    try {
+      db = new DatabaseSync(dbPath, { readOnly: true });
+      const hasV2 = db
+        .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='session_message'")
+        .get();
+      const sql = hasV2
+        ? `SELECT MIN(date(json_extract(data,'$.time.created') / 1000, 'unixepoch', '+${SHANGHAI_OFFSET_SECONDS} seconds')) AS d
+             FROM session_message WHERE type='assistant'`
+        : `SELECT MIN(date(time_created / 1000, 'unixepoch', '+${SHANGHAI_OFFSET_SECONDS} seconds')) AS d FROM message`;
+      const row = db.prepare(sql).get();
+      if (row?.d && (!earliest || row.d < earliest)) earliest = row.d;
+    } catch {
+      // 单个库读不了就跳过
+    } finally {
+      try {
+        db?.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return earliest;
+}

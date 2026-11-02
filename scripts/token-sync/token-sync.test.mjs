@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { targetDays } from './collect.mjs';
+import { enumerateDays, targetDays } from './collect.mjs';
 import { batchRows, parseEnvFile, MAX_BATCH_ROWS } from './upload.mjs';
 import { shanghaiDay } from './sources/codebuddy.mjs';
 import { collectCodebuddy } from './sources/codebuddy.mjs';
@@ -135,4 +135,24 @@ test('codebuddy: 同一 trace 的多次调用合并成一行（否则服务端 U
   assert.equal(rows[0].output_tokens, 30);
   assert.equal(rows[0].total_tokens, 330);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('enumerateDays: 闭区间逐日展开', () => {
+  assert.deepEqual(enumerateDays('2026-10-30', '2026-11-01'), ['2026-10-30', '2026-10-31', '2026-11-01']);
+  assert.deepEqual(enumerateDays('2026-10-30', '2026-10-30'), ['2026-10-30']);
+  // 跨月边界
+  assert.deepEqual(enumerateDays('2026-10-31', '2026-11-01'), ['2026-10-31', '2026-11-01']);
+  assert.throws(() => enumerateDays('2026-01-01', '2026-12-31', 10), /日期范围过大/);
+});
+
+test('targetDays: --date > --from/--to > --all > --days', () => {
+  const now = Date.parse('2026-11-02T12:00:00+08:00');
+  assert.deepEqual(targetDays({ date: '2026-10-30', from: '2026-10-01', to: '2026-10-05' }, now), ['2026-10-30']);
+  assert.deepEqual(targetDays({ from: '2026-10-30', to: '2026-10-31' }, now), ['2026-10-30', '2026-10-31']);
+  assert.deepEqual(targetDays({ all: true, allFrom: '2026-10-30', to: '2026-10-31' }, now), ['2026-10-30', '2026-10-31']);
+  assert.deepEqual(targetDays({ days: 2 }, now), ['2026-11-01', '2026-10-31']);
+  // 只给 from 时末端默认到昨天
+  assert.deepEqual(targetDays({ from: '2026-10-31' }, now), ['2026-10-31', '2026-11-01']);
+  assert.throws(() => targetDays({ from: '2026-11-02', to: '2026-10-30' }, now), /晚于/);
+  assert.throws(() => targetDays({ all: true }, now), /最早日期/);
 });
