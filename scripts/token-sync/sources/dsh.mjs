@@ -149,3 +149,31 @@ export async function collectDsh(opts = {}) {
 
   return { rows, errors, stats: { sessions: files.length, files: files.length } };
 }
+
+/** 投影缓存里最早的一天（用于 --all 起点）。没有数据返回 null。 */
+export async function earliestDshDay(home = path.join(process.env.HOME ?? '', '.dsh')) {
+  const projDir = path.join(home, 'storages', 'session_projcache', 'sessions');
+  let files = [];
+  try {
+    files = fs.readdirSync(projDir).filter((f) => f.endsWith('.json'));
+  } catch {
+    return null;
+  }
+  let earliest = null;
+  for (const file of files) {
+    const root = readJson(path.join(projDir, file));
+    const panel = root?.record?.rows?.usagePanel?.val;
+    if (!panel) continue;
+    const segments = [];
+    if (Array.isArray(panel.epochs)) segments.push(...panel.epochs);
+    if (panel.current) segments.push(panel.current);
+    for (const segment of segments) {
+      const byDay = segment?.byDay;
+      if (!byDay || typeof byDay !== 'object') continue;
+      for (const day of Object.keys(byDay)) {
+        if (!earliest || day < earliest) earliest = day;
+      }
+    }
+  }
+  return earliest;
+}
