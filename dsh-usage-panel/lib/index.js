@@ -863,6 +863,131 @@ async function fetchHomebaseUsage(config, opts = {}) {
   ];
   return foldHomebaseRows(rows);
 }
+var TOP_SESSIONS = 10;
+function numOr0(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function foldOverviewByDay(rows) {
+  const byDay = {};
+  for (const row of rows) {
+    if (!row?.usage_date) continue;
+    const model = row.model || "unknown";
+    const day = byDay[row.usage_date] ??= {};
+    const cell = day[model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    cell.input += numOr0(row.input_tokens);
+    cell.output += numOr0(row.output_tokens);
+    cell.cacheRead += numOr0(row.cache_read);
+    cell.cacheWrite += numOr0(row.cache_write);
+  }
+  return byDay;
+}
+function totalsOf(rows) {
+  const totals2 = emptyTotals();
+  for (const row of rows) {
+    totals2.input += numOr0(row.input_tokens);
+    totals2.output += numOr0(row.output_tokens);
+    totals2.cacheRead += numOr0(row.cache_read);
+    totals2.cacheWrite += numOr0(row.cache_write);
+    totals2.total += numOr0(row.input_tokens) + numOr0(row.output_tokens) + numOr0(row.cache_read) + numOr0(row.cache_write);
+  }
+  return totals2;
+}
+function lastNDays(now, days) {
+  const out = /* @__PURE__ */ new Set();
+  for (let i = 0; i < days; i += 1) {
+    const d = new Date(now - i * 864e5);
+    out.add(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+function buildOverviewFromRows(rows, now = Date.now()) {
+  const byDay = foldOverviewByDay(rows);
+  const days = buildDayWindow(byDay, now);
+  const recentWindow = lastNDays(now, 30);
+  const recentRows = rows.filter((r) => recentWindow.has(r.usage_date));
+  const recentByModel = {};
+  for (const row of recentRows) {
+    const model = row.model || "unknown";
+    const cell = recentByModel[model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    cell.input += numOr0(row.input_tokens);
+    cell.output += numOr0(row.output_tokens);
+    cell.cacheRead += numOr0(row.cache_read);
+    cell.cacheWrite += numOr0(row.cache_write);
+  }
+  const byModel = sortedModels(recentByModel);
+  const totals2 = totalsOf(recentRows);
+  const recentSessions = new Set(recentRows.map((r) => r.session_id).filter(Boolean));
+  const allByModel = {};
+  for (const row of rows) {
+    const model = row.model || "unknown";
+    const cell = allByModel[model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    cell.input += numOr0(row.input_tokens);
+    cell.output += numOr0(row.output_tokens);
+    cell.cacheRead += numOr0(row.cache_read);
+    cell.cacheWrite += numOr0(row.cache_write);
+  }
+  const allTimeModels = sortedModels(allByModel);
+  const allSessions = new Set(rows.map((r) => r.session_id).filter(Boolean));
+  const sessionAgg = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    if (!row.session_id) continue;
+    const cur = sessionAgg.get(row.session_id) ?? { totals: emptyTotals(), title: null, last: 0 };
+    cur.totals.input += numOr0(row.input_tokens);
+    cur.totals.output += numOr0(row.output_tokens);
+    cur.totals.cacheRead += numOr0(row.cache_read);
+    cur.totals.cacheWrite += numOr0(row.cache_write);
+    cur.totals.total += numOr0(row.input_tokens) + numOr0(row.output_tokens) + numOr0(row.cache_read) + numOr0(row.cache_write);
+    if (!cur.title && typeof row.title === "string" && row.title.trim()) cur.title = row.title.trim();
+    cur.last = Math.max(cur.last, numOr0(row.last_at));
+    sessionAgg.set(row.session_id, cur);
+  }
+  const topSessions = [...sessionAgg.entries()].map(([id, agg]) => ({ id, title: agg.title, totals: agg.totals, lastActive: agg.last, depth: 0 })).sort((a, b) => b.totals.total - a.totals.total).slice(0, TOP_SESSIONS);
+  const providerAgg = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const id = row.provider || "unknown";
+    const cur = providerAgg.get(id) ?? emptyTotals();
+    cur.input += numOr0(row.input_tokens);
+    cur.output += numOr0(row.output_tokens);
+    cur.cacheRead += numOr0(row.cache_read);
+    cur.cacheWrite += numOr0(row.cache_write);
+    cur.total += numOr0(row.input_tokens) + numOr0(row.output_tokens) + numOr0(row.cache_read) + numOr0(row.cache_write);
+    providerAgg.set(id, cur);
+  }
+  const providers = [...providerAgg.entries()].map(([id, t]) => ({ id, name: id, totals: t })).sort((a, b) => b.totals.total - a.totals.total);
+  return {
+    days,
+    totals: totals2,
+    sessionCount: recentSessions.size,
+    byModel,
+    allTime: { totals: totalsOf(rows), sessionCount: allSessions.size, byModel: allTimeModels },
+    coverage: {
+      mode: "homebase",
+      timezone: "UTC",
+      sessionsTotal: allSessions.size,
+      sessionsOk: allSessions.size,
+      sessionsFailed: 0,
+      sessionsPending: 0,
+      eventsCounted: rows.length,
+      retries: 0,
+      compactionTokens: 0,
+      from: rows.length ? numOr0(rows[0]?.first_at) : null,
+      to: rows.length ? Math.max(...rows.map((r) => numOr0(r.last_at))) : null,
+      usageSessionsMain: allSessions.size,
+      usageSessionsSubagent: 0
+    },
+    topSessions,
+    providers,
+    updatedAt: now
+  };
+}
+async function fetchHomebaseOverview(config, opts = {}) {
+  if (config.source !== "homebase") throw new Error("homebase source not enabled");
+  if (!config.url || !config.token) throw new Error("homebase url/token missing");
+  const limit = Math.min(Math.max(opts.limit ?? 2e3, 1), 2e3);
+  const payload = await requestJson(config, `/api/internal/token-usage/query?group_by=all&limit=${limit}`);
+  return buildOverviewFromRows(payload?.rows ?? []);
+}
 
 // src/host/external/opencode.ts
 import { readdir } from "node:fs/promises";
@@ -881,7 +1006,7 @@ function timeOrNull(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
-function totalsOf(input, output, cacheRead, cacheWrite) {
+function totalsOf2(input, output, cacheRead, cacheWrite) {
   return { input, output, cacheRead, cacheWrite, total: input + output + cacheRead + cacheWrite };
 }
 function parseOpencodeModel(raw) {
@@ -953,7 +1078,7 @@ function toExternal(db, table, row) {
     executor: "opencode",
     remoteId,
     model: parseOpencodeModel(row.model),
-    totals: totalsOf(input, output, cacheRead, cacheWrite),
+    totals: totalsOf2(input, output, cacheRead, cacheWrite),
     calls: countCalls(db, table, remoteId),
     startedAt,
     endedAt: timeOrNull(row.time_updated),
@@ -1585,7 +1710,28 @@ function apply(ctx) {
     });
     return run;
   }
+  let homebaseCache = null;
+  const HOMEBASE_TTL_MS = 60 * 1e3;
   function overview(args) {
+    if (homebase.source === "homebase") {
+      const force = !!(args && args.force);
+      if (!force && homebaseCache && Date.now() - homebaseCache.at < HOMEBASE_TTL_MS) {
+        return Promise.resolve(homebaseCache.payload);
+      }
+      return fetchHomebaseOverview(homebase).then(
+        (payload) => {
+          homebaseCache = { at: Date.now(), payload };
+          return payload;
+        },
+        (err) => {
+          console.warn(tag, "homebase overview failed, falling back to local:", String(err?.message ?? err));
+          return overviewLocal(args);
+        }
+      );
+    }
+    return overviewLocal(args);
+  }
+  function overviewLocal(args) {
     const force = !!(args && args.force);
     if (!force && cache2) {
       if (Date.now() - cache2.at < STALE_MS) return Promise.resolve(cache2.payload);

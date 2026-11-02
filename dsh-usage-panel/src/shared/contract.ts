@@ -58,7 +58,7 @@ export interface DayRecord {
   models: DayModels
 }
 
-export type AggregationMode = 'projection' | 'scan' | 'none'
+export type AggregationMode = 'projection' | 'scan' | 'homebase' | 'none'
 
 /**
  * Honest coverage diagnostics: the overview never claims to be a complete
