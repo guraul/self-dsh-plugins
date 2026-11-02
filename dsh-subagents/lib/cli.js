@@ -4,24 +4,18 @@
  *
  * 判定与合并分离是这里的硬约束：CLI 只产出记录，不执行合并。
  */
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import {
-  ContractError,
-  highRiskHit,
-  makeNonce,
-  nonceInDiff,
-  parseVerdict,
-  validateResult,
-} from './contract.js'
+import { ContractError, makeNonce } from './contract.js'
 import { buildReviewPrompt, prepareRequest } from './request.js'
 import { renderCard } from './card.js'
-import { extractFindings, normalizeEvidence, normalizeFinding } from './findings.js'
 import { ghCommands, parseRemoteUrl, publishPlan } from './publish.js'
 import { renderComment, safeInline } from './comment.js'
 import { runProvider } from './bridge-cli.js'
 import { getRole, loadRoles } from './roles.js'
+import { recordViaPackage } from './record-bridge.js'
 import {
   bumpCircuit,
   findByTrace,
@@ -29,9 +23,9 @@ import {
   mainWorktreeRoot,
   readCircuit,
   readRecord,
+  recordFile,
   reviewsDir,
   traceId,
-  writeRecord,
   writeSkipAudit,
 } from './record.js'
 
@@ -43,7 +37,7 @@ const USAGE = `用法:
   dsh-subagents adjudicate --record <文件> --decision <merge|abandon> --by <人> --reason <文本>
                                                         # 给 ESCALATE 的判定留下人为处置
   dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>]
-                        [--round <1..3>] [--policy-version <版本>] [--root <仓库根>]
+                        [--round <1..3>] [--form <名>] [--duration-ms <毫秒>] [--json] [--root <仓库根>]
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
   dsh-subagents gate    --pr <号> [--record <文件>] [--head-sha <sha>] [--root <仓库根>]
                         [--no-review --reason <说明>]   # 跨仓共用闸门（合并脚本调用）
@@ -228,88 +222,17 @@ function cmdPrompt(flags) {
 }
 
 /**
- * 记录「这次按哪版闸门规则判的」。闸门在共享包 @guraul/dsh-pipeline 里，
- * 所以取本仓 tools/ 下安装的产物版本；取不到就写 unknown（不猜）。
+ * 记录落盘统一交给共享 pipeline 包：判定提取、findings 兜底、高风险策略与
+ * policyVersion 都在包内决定，插件端只保留对外参数。
  */
-function detectPolicyVersion(rootDir) {
-  const candidates = [
-    resolve(rootDir, 'tools/node_modules/dsh-pipeline/package.json'),
-    resolve(rootDir, 'dsh-pipeline/package.json'),
-  ]
-  for (const file of candidates) {
-    if (!existsSync(file)) continue
-    try {
-      const parsed = JSON.parse(readFileSync(file, 'utf8'))
-      if (typeof parsed.version === 'string') return parsed.version
-    } catch {
-      // 读到坏文件就继续找下一个，不因为一个损坏文件改变判定
-    }
-  }
-  return 'unknown'
-}
-
 function cmdRecord(flags) {
   if (!flags.request || !flags.response) throw fail('E_BUDGET', '缺少 --request 或 --response')
-  const request = JSON.parse(readFileSync(flags.request, 'utf8')).request
-  const raw = readFileSync(flags.response, 'utf8')
-  const meta = {
-    form: flags.form || 'cli',
-    provider: flags.provider || 'unknown',
-    model: flags.model || request.model || 'unknown',
-    durationMs: Number(flags['duration-ms'] || 0),
+  if (typeof flags.request !== 'string' || typeof flags.response !== 'string') {
+    throw fail('E_BUDGET', '--request 与 --response 需要文件路径')
   }
-
-  let parsed
-  try {
-    if (nonceInDiff(request.diff, request.nonce)) {
-      throw new ContractError('E_PARSE', 'diff 内出现随机标记，判定行可能来自被审内容')
-    }
-    parsed = parseVerdict(raw, { nonce: request.nonce, headSha: request.head_sha })
-  } catch (error) {
-    parsed = { verdict: 'ESCALATE', errorCode: error.code ?? 'E_PARSE', message: error.message }
+  if (flags.findings !== undefined && typeof flags.findings !== 'string') {
+    throw fail('E_PARSE', '--findings 需要一个文件路径')
   }
-
-  const policy = highRiskHit({
-    files: request.files,
-    addedLines: Number(flags['added-lines'] || 0),
-    diff: request.diff,
-  })
-
-  // findings 优先取 reviewer 输出的 ```json 代码块；没有则用 --findings 兜底。
-  // 两者都没有不算失败——审核结论仍然有效，只是没有明细。
-  const block = extractFindings(raw)
-  let findings = []
-  let evidence = []
-  if (block) {
-    findings = block.findings
-    evidence = block.evidence
-  } else if (flags.findings) {
-    if (flags.findings === true) throw fail('E_PARSE', '--findings 需要一个文件路径')
-    let fallback
-    try {
-      fallback = JSON.parse(readFileSync(flags.findings, 'utf8'))
-    } catch (error) {
-      throw fail('E_PARSE', `--findings 文件不可读或不是合法 JSON: ${error.message}`)
-    }
-    if (!Array.isArray(fallback?.findings)) throw fail('E_PARSE', '--findings 文件缺少 findings 数组')
-    findings = fallback.findings.map(normalizeFinding).filter(Boolean)
-    evidence = normalizeEvidence(fallback.evidence)
-  }
-
-  const result = {
-    verdict: policy.hit ? 'ESCALATE' : parsed.verdict,
-    head_sha: request.head_sha,
-    nonce: request.nonce,
-    findings,
-    evidence: [...(policy.hit ? policy.reasons : []), ...evidence, ...(parsed.message ? [parsed.message] : [])],
-    form: meta.form,
-    model: meta.model,
-    durationMs: meta.durationMs,
-    traceId: traceId(),
-    errorCode: policy.hit ? 'E_POLICY' : (parsed.errorCode ?? null),
-  }
-  const checked = validateResult(result)
-  if (!checked.ok) throw new ContractError('E_PARSE', `结果不合 schema: ${checked.errors.join('; ')}`)
 
   // round 由控制面计数（reviewer 自己不该知道第几轮）；越界直接拒绝
   // 裸 --round（不带值）会被 parseArgv 置为 true，Number(true)===1 会静默放行
@@ -320,31 +243,19 @@ function cmdRecord(flags) {
   if (!Number.isInteger(round) || round < 1 || round > 3) {
     throw fail('E_BUDGET', `--round 必须是 1..3 的整数，收到 ${flags.round}`)
   }
-  if (flags['policy-version'] !== undefined && typeof flags['policy-version'] !== 'string') {
-    throw fail('E_BUDGET', '--policy-version 需要一个值')
-  }
 
-  const record = {
-    schemaVersion: 1,
-    policyVersion: flags['policy-version'] ?? detectPolicyVersion(root(flags)),
+  return recordViaPackage({
+    requestFile: flags.request,
+    responseFile: flags.response,
+    findingsFile: typeof flags.findings === 'string' ? flags.findings : undefined,
+    provider: typeof flags.provider === 'string' ? flags.provider : undefined,
+    model: typeof flags.model === 'string' ? flags.model : undefined,
     round,
-    pr: request.pr,
-    ...result,
-    request: {
-      issue: request.issue?.number ?? null,
-      filesHash: `sha256:${request.files.join(',')}`,
-      diffChars: String(request.diff ?? '').length,
-      maxChars: request.budget?.maxChars ?? null,
-    },
-    policy,
-    createdAt: new Date().toISOString(),
-  }
-  const dir = reviewsDir(root(flags))
-  const file = writeRecord(dir, record)
-
-  if (result.verdict !== 'APPROVE') bumpCircuit(dir)
-  emit(flags.json ? record : `判定 ${result.verdict}（${result.errorCode ?? '无错误码'}）→ ${file}`, flags)
-  return result.verdict === 'APPROVE' ? 0 : 1
+    root: root(flags),
+    json: Boolean(flags.json),
+    form: typeof flags.form === 'string' ? flags.form : undefined,
+    durationMs: Number(flags['duration-ms'] || 0),
+  })
 }
 
 function currentHeadSha(flags) {
@@ -428,65 +339,6 @@ function cmdReview(flags) {
       'CLI 只支持 --form b：形态 A 需要会话内的父 agent，请由控制面用 subagent 工具发起',
     )
   }
-  const dir = reviewsDir(root(flags))
-  const circuit = readCircuit(dir)
-  if (circuit.tripped) {
-    throw fail('E_UNAVAILABLE', `熔断中：今天已连续失败 ${circuit.consecutiveFailures} 次，回退人工`)
-  }
-
-  const role = getRole(flags.role || 'reviewer')
-  const { request } = prepareRequest({
-    pr: flags.pr,
-    cwd: root(flags),
-    nonce: makeNonce(),
-  })
-  const prompt = buildReviewPrompt({ request, role })
-  let meta = {
-    form: 'cli',
-    provider: flags.provider || 'opencode',
-    model: flags.model || request.model || 'unknown',
-    durationMs: 0,
-  }
-  let parsed
-  try {
-    const run = runProvider({
-      provider: flags.provider || 'opencode',
-      model: flags.model,
-      prompt,
-      timeoutMs: request.budget.timeoutMs,
-      cwd: root(flags),
-    })
-    meta = { ...run.meta, text: run.text }
-    if (nonceInDiff(request.diff, request.nonce)) {
-      throw new ContractError('E_PARSE', 'diff 内出现随机标记')
-    }
-    parsed = parseVerdict(run.text, { nonce: request.nonce, headSha: request.head_sha })
-  } catch (error) {
-    parsed = { verdict: 'ESCALATE', errorCode: error.code ?? 'E_UNAVAILABLE', message: error.message }
-    if (typeof error.durationMs === 'number') meta.durationMs = error.durationMs
-  }
-
-  const policy = highRiskHit({ files: request.files, diff: request.diff })
-  const block = extractFindings(meta.text ?? '')
-  const result = {
-    verdict: policy.hit ? 'ESCALATE' : parsed.verdict,
-    head_sha: request.head_sha,
-    nonce: request.nonce,
-    findings: block?.findings ?? [],
-    evidence: [
-      ...(policy.hit ? policy.reasons : []),
-      ...(block?.evidence ?? []),
-      ...(parsed.message ? [parsed.message] : []),
-    ],
-    form: meta.form,
-    model: meta.model,
-    durationMs: meta.durationMs,
-    traceId: traceId(),
-    errorCode: policy.hit ? 'E_POLICY' : (parsed.errorCode ?? null),
-  }
-  const checked = validateResult(result)
-  if (!checked.ok) throw new ContractError('E_PARSE', `结果不合 schema: ${checked.errors.join('; ')}`)
-
   // round 由控制面计数（reviewer 自己不该知道第几轮）；越界直接拒绝
   // 裸 --round（不带值）会被 parseArgv 置为 true，Number(true)===1 会静默放行
   if (flags.round !== undefined && typeof flags.round !== 'string') {
@@ -496,24 +348,80 @@ function cmdReview(flags) {
   if (!Number.isInteger(round) || round < 1 || round > 3) {
     throw fail('E_BUDGET', `--round 必须是 1..3 的整数，收到 ${flags.round}`)
   }
-  if (flags['policy-version'] !== undefined && typeof flags['policy-version'] !== 'string') {
-    throw fail('E_BUDGET', '--policy-version 需要一个值')
+
+  const dir = reviewsDir(root(flags))
+  const circuit = readCircuit(dir)
+  if (circuit.tripped) {
+    throw fail('E_UNAVAILABLE', `熔断中：今天已连续失败 ${circuit.consecutiveFailures} 次，回退人工`)
   }
 
-  const record = {
-    schemaVersion: 1,
-    policyVersion: flags['policy-version'] ?? detectPolicyVersion(root(flags)),
-    round,
-    pr: request.pr,
-    ...result,
-    request: { issue: request.issue.number, diffChars: request.diff.length, maxChars: request.budget.maxChars },
-    policy,
-    createdAt: new Date().toISOString(),
+  const provider = flags.provider || 'opencode'
+  const role = getRole(flags.role || 'reviewer')
+  const { request } = prepareRequest({
+    pr: flags.pr,
+    cwd: root(flags),
+    nonce: makeNonce(),
+  })
+  const prompt = buildReviewPrompt({ request, role })
+  let meta = {
+    form: 'cli',
+    provider,
+    model: flags.model || request.model || 'unknown',
+    durationMs: 0,
+  }
+  let text = ''
+  try {
+    const run = runProvider({
+      provider,
+      model: flags.model,
+      prompt,
+      timeoutMs: request.budget.timeoutMs,
+      cwd: root(flags),
+    })
+    meta = run.meta
+    text = run.text
+  } catch (error) {
+    if (typeof error.durationMs === 'number') meta.durationMs = error.durationMs
+    process.stderr.write(`review: 审核调用失败: ${error.message}\n`)
   }
 
-  const file = writeRecord(dir, record)
+  // 记录仍由共享包组装：把请求与响应落到临时文件，包读完即删。
+  const trace = traceId()
+  const requestFile = join(tmpdir(), `review-${trace}.json`)
+  const responseFile = join(tmpdir(), `review-${trace}.txt`)
+  writeFileSync(requestFile, `${JSON.stringify({ request }, null, 2)}\n`, 'utf8')
+  writeFileSync(responseFile, text, 'utf8')
+
+  let code
+  try {
+    code = recordViaPackage({
+      requestFile,
+      responseFile,
+      provider: meta.provider,
+      model: meta.model,
+      round,
+      root: root(flags),
+      json: Boolean(flags.json),
+      form: meta.form,
+      durationMs: meta.durationMs,
+    })
+  } finally {
+    rmSync(requestFile, { force: true })
+    rmSync(responseFile, { force: true })
+  }
+
+  if (code !== 0) {
+    // 调用失败或响应无法落记录，同样计入熔断，避免无限重试。
+    bumpCircuit(dir)
+    return code
+  }
+
+  const file = recordFile(dir, request.pr, request.head_sha)
+  const record = readRecord(file)
   if (record.verdict !== 'APPROVE') bumpCircuit(dir)
-  emit(flags.json ? record : `判定 ${record.verdict}（${record.errorCode ?? '无错误码'}）→ ${file}`, flags)
+  if (!flags.json) {
+    emit(`判定 ${record.verdict}（${record.errorCode ?? '无错误码'}）→ ${file}`, flags)
+  }
   return record.verdict === 'APPROVE' ? 0 : 1
 }
 

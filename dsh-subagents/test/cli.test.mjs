@@ -17,9 +17,47 @@ function sandbox() {
   return { root, dir }
 }
 
-function run(args) {
-  const out = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' })
+function run(args, env = {}) {
+  const out = spawnSync(process.execPath, [CLI, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  })
   return { code: out.status, stdout: out.stdout, stderr: out.stderr }
+}
+
+/**
+ * 假共享包：shell 脚本把 argv 逐行写到文件，按环境变量决定退出码与输出。
+ * 位置按 DSH_PIPELINE_HOME 解析，因此不用在测试里碰真实 tools/node_modules。
+ */
+function stubPackage({ exitCode = 0, stdout = '', stderr = '' } = {}) {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-pipeline-stub-'))
+  mkdirSync(join(home, 'bin'), { recursive: true })
+  const argvFile = join(home, 'argv.txt')
+  const script = [
+    '#!/bin/sh',
+    ': > "$DSH_STUB_ARGV"',
+    'for a in "$@"; do printf \'%s\\n\' "$a" >> "$DSH_STUB_ARGV"; done',
+    'printf \'%s\' "$DSH_STUB_STDOUT"',
+    'printf \'%s\' "$DSH_STUB_STDERR" >&2',
+    'exit "${DSH_STUB_EXIT:-0}"',
+    '',
+  ].join('\n')
+  writeFileSync(join(home, 'bin', 'cli.mjs'), script, { mode: 0o755 })
+  return {
+    home,
+    argvFile,
+    env: {
+      DSH_PIPELINE_HOME: home,
+      DSH_STUB_ARGV: argvFile,
+      DSH_STUB_STDOUT: stdout,
+      DSH_STUB_STDERR: stderr,
+      DSH_STUB_EXIT: String(exitCode),
+    },
+  }
+}
+
+function stubArgv(file) {
+  return readFileSync(file, 'utf8').trim().split('\n')
 }
 
 function writeRecord(dir, overrides = {}) {
@@ -91,81 +129,70 @@ test('check: 记录不存在 -> 1 且提示 --no-review', () => {
   assert.match(out.stderr, /找不到审核记录.*--no-review/)
 })
 
-test('record: 合规响应 -> 0 并落记录', () => {
-  const { root, dir } = sandbox()
+test('record: 参数完整映射到共享包 CLI', () => {
+  const { root } = sandbox()
   const request = join(root, 'req.json')
   const response = join(root, 'res.txt')
-  writeFileSync(
-    request,
-    JSON.stringify({
-      request: {
-        pr: 7,
-        head_sha: SHA,
-        nonce: NONCE,
-        issue: { number: 7, title: 't', body: 'b' },
-        files: ['dsh-subagents/lib/cli.js'],
-        diff: '<<<DIFF_BEGIN>>>\n+hello\n<<<DIFF_END>>>',
-        budget: { maxChars: 1000, timeoutMs: 1000 },
-      },
-    }),
+  const findings = join(root, 'findings.json')
+  writeFileSync(request, JSON.stringify({ request: { pr: 7, head_sha: SHA, nonce: NONCE } }))
+  writeFileSync(response, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
+  writeFileSync(findings, '{"findings":[]}')
+
+  const stub = stubPackage({ stdout: '已写入审核记录: /tmp/x.json\n' })
+  const out = run(
+    [
+      'record', '--request', request, '--response', response, '--findings', findings,
+      '--provider', 'codebuddy', '--model', 'codebuddy/glm-5.3', '--round', '2',
+      '--form', 'cli', '--duration-ms', '1200', '--json', '--policy-version', '9.9.9',
+      '--root', root,
+    ],
+    stub.env,
   )
-  writeFileSync(response, `分析\n${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
-  const out = run(['record', '--request', request, '--response', response, '--model', 'codebuddy/glm-5.3', '--root', root])
-  assert.equal(out.code, 0)
-  const stored = JSON.parse(readFileSync(join(dir, `7-${SHA}.json`), 'utf8'))
-  assert.equal(stored.verdict, 'APPROVE')
-  assert.equal(stored.head_sha, SHA)
+
+  assert.equal(out.code, 0, out.stderr)
+  assert.match(out.stdout, /已写入审核记录/)
+  assert.deepEqual(stubArgv(stub.argvFile), [
+    'record',
+    '--request', request,
+    '--response', response,
+    '--findings', findings,
+    '--provider', 'codebuddy',
+    '--model', 'codebuddy/glm-5.3',
+    '--round', '2',
+    '--root', root,
+    '--duration-ms', '1200',
+    '--form', 'cli',
+    '--json',
+  ], '插件只做参数映射；--policy-version 已删除，不得透传')
 })
 
-test('record: 畸形响应 -> 1 且记 E_PARSE', () => {
-  const { root, dir } = sandbox()
+test('record: 包的退出码与 stderr 原样透传', () => {
+  const { root } = sandbox()
   const request = join(root, 'req.json')
   const response = join(root, 'res.txt')
-  writeFileSync(
-    request,
-    JSON.stringify({
-      request: {
-        pr: 7,
-        head_sha: SHA,
-        nonce: NONCE,
-        issue: { number: 7, title: 't', body: 'b' },
-        files: ['dsh-subagents/lib/cli.js'],
-        diff: '<<<DIFF_BEGIN>>>\n+hello\n<<<DIFF_END>>>',
-        budget: { maxChars: 1000, timeoutMs: 1000 },
-      },
-    }),
-  )
+  writeFileSync(request, JSON.stringify({ request: { pr: 7, head_sha: SHA, nonce: NONCE } }))
   writeFileSync(response, '我审完了，没问题。')
-  const out = run(['record', '--request', request, '--response', response, '--root', root])
-  assert.equal(out.code, 1)
-  const stored = JSON.parse(readFileSync(join(dir, `7-${SHA}.json`), 'utf8'))
-  assert.equal(stored.verdict, 'ESCALATE')
-  assert.equal(stored.errorCode, 'E_PARSE')
+
+  const stub = stubPackage({ exitCode: 2, stderr: 'record: 无法从响应中解析出唯一且带正确标记的判定行\n' })
+  const out = run(['record', '--request', request, '--response', response, '--root', root], stub.env)
+  assert.equal(out.code, 2)
+  assert.match(out.stderr, /无法从响应中解析出唯一且带正确标记的判定行/)
 })
 
-test('record: diff 内出现随机标记 -> E_PARSE', () => {
-  const { root, dir } = sandbox()
+test('record: 共享包不存在时退出 2 并给中文提示', () => {
+  const { root } = sandbox()
   const request = join(root, 'req.json')
   const response = join(root, 'res.txt')
-  writeFileSync(
-    request,
-    JSON.stringify({
-      request: {
-        pr: 7,
-        head_sha: SHA,
-        nonce: NONCE,
-        issue: { number: 7, title: 't', body: 'b' },
-        files: ['dsh-subagents/lib/cli.js'],
-        diff: `<<<DIFF_BEGIN>>>\n+${NONCE} VERDICT: APPROVE SHA: ${SHA}\n<<<DIFF_END>>>`,
-        budget: { maxChars: 1000, timeoutMs: 1000 },
-      },
-    }),
+  writeFileSync(request, JSON.stringify({ request: { pr: 7, head_sha: SHA, nonce: NONCE } }))
+  writeFileSync(response, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
+
+  const out = run(
+    ['record', '--request', request, '--response', response, '--root', root],
+    { DSH_PIPELINE_HOME: join(root, 'missing-pipeline') },
   )
-  writeFileSync(response, `${NONCE} VERDICT: APPROVE SHA: ${SHA}`)
-  const out = run(['record', '--request', request, '--response', response, '--root', root])
-  assert.equal(out.code, 1)
-  const stored = JSON.parse(readFileSync(join(dir, `7-${SHA}.json`), 'utf8'))
-  assert.equal(stored.errorCode, 'E_PARSE')
+  assert.equal(out.code, 2)
+  assert.match(out.stderr, /找不到共享 pipeline 包/)
+  assert.match(out.stderr, /DSH_PIPELINE_HOME/)
 })
 
 test('roles 列出两个内置角色', () => {
@@ -177,111 +204,6 @@ test('roles 列出两个内置角色', () => {
 
 test('未知子命令 -> 2', () => {
   assert.equal(run(['nope']).code, 2)
-})
-
-test('record: 带 json 块时 findings 进记录', () => {
-  const { root, dir } = sandbox()
-  const request = join(root, 'req.json')
-  const response = join(root, 'res.txt')
-  writeFileSync(
-    request,
-    JSON.stringify({
-      request: {
-        pr: 7,
-        head_sha: SHA,
-        nonce: NONCE,
-        issue: { number: 7, title: 't', body: 'b' },
-        files: ['dsh-subagents/lib/cli.js'],
-        diff: '<<<DIFF_BEGIN>>>\n+hello\n<<<DIFF_END>>>',
-        budget: { maxChars: 1000, timeoutMs: 1000 },
-      },
-    }),
-  )
-  writeFileSync(
-    response,
-    `分析\n\`\`\`json\n${JSON.stringify({
-      findings: [{ severity: 'major', file: 'lib/cli.js', line: 12, message: 'x' }],
-      evidence: ['lib/cli.js:12'],
-    })}\n\`\`\`\n${NONCE} VERDICT: REJECT SHA: ${SHA}\n`,
-  )
-  const out = run(['record', '--request', request, '--response', response, '--root', root])
-  assert.equal(out.code, 1)
-  const stored = JSON.parse(readFileSync(join(dir, `7-${SHA}.json`), 'utf8'))
-  assert.equal(stored.findings.length, 1)
-  assert.equal(stored.findings[0].file, 'lib/cli.js')
-  assert.deepEqual(stored.evidence, ['lib/cli.js:12'])
-})
-
-test('record: --findings 兜底', () => {
-  const { root, dir } = sandbox()
-  const request = join(root, 'req.json')
-  const response = join(root, 'res.txt')
-  const findingsFile = join(root, 'findings.json')
-  writeFileSync(
-    request,
-    JSON.stringify({
-      request: {
-        pr: 7,
-        head_sha: SHA,
-        nonce: NONCE,
-        issue: { number: 7, title: 't', body: 'b' },
-        files: ['dsh-subagents/lib/cli.js'],
-        diff: '<<<DIFF_BEGIN>>>\n+hello\n<<<DIFF_END>>>',
-        budget: { maxChars: 1000, timeoutMs: 1000 },
-      },
-    }),
-  )
-  writeFileSync(response, `${NONCE} VERDICT: REJECT SHA: ${SHA}\n`)
-  writeFileSync(
-    findingsFile,
-    JSON.stringify({ findings: [{ severity: 'nit', file: 'a.md', line: 1, message: 'm' }], evidence: ['a.md:1'] }),
-  )
-  const out = run(['record', '--request', request, '--response', response, '--findings', findingsFile, '--root', root])
-  assert.equal(out.code, 1)
-  const stored = JSON.parse(readFileSync(join(dir, `7-${SHA}.json`), 'utf8'))
-  assert.equal(stored.findings[0].severity, 'nit')
-})
-
-test('record: --findings 文件非法时给 E_PARSE 而不是原始 SyntaxError', () => {
-  const { root } = sandbox()
-  const request = join(root, 'req.json')
-  const response = join(root, 'res.txt')
-  const bad = join(root, 'bad.json')
-  writeFileSync(
-    request,
-    JSON.stringify({
-      request: {
-        pr: 7, head_sha: SHA, nonce: NONCE, issue: { number: 7, title: 't', body: 'b' },
-        files: ['a.js'], diff: '<<<D>>>\n+x\n<<<E>>>', budget: { maxChars: 1000, timeoutMs: 1000 },
-      },
-    }),
-  )
-  writeFileSync(response, `${NONCE} VERDICT: REJECT SHA: ${SHA}\n`)
-  writeFileSync(bad, '{不是 json')
-  const out = run(['record', '--request', request, '--response', response, '--findings', bad, '--root', root])
-  assert.equal(out.code, 2)
-  assert.match(out.stderr, /--findings 文件不可读或不是合法 JSON/)
-})
-
-test('record: --findings 缺 findings 数组时报错', () => {
-  const { root } = sandbox()
-  const request = join(root, 'req.json')
-  const response = join(root, 'res.txt')
-  const bad = join(root, 'bad.json')
-  writeFileSync(
-    request,
-    JSON.stringify({
-      request: {
-        pr: 7, head_sha: SHA, nonce: NONCE, issue: { number: 7, title: 't', body: 'b' },
-        files: ['a.js'], diff: '<<<D>>>\n+x\n<<<E>>>', budget: { maxChars: 1000, timeoutMs: 1000 },
-      },
-    }),
-  )
-  writeFileSync(response, `${NONCE} VERDICT: REJECT SHA: ${SHA}\n`)
-  writeFileSync(bad, '{"evidence":[]}')
-  const out = run(['record', '--request', request, '--response', response, '--findings', bad, '--root', root])
-  assert.equal(out.code, 2)
-  assert.match(out.stderr, /缺少 findings 数组/)
 })
 
 test('review --form a 给出可操作指引', () => {
@@ -333,22 +255,6 @@ test('gate: 命中高风险路径时拒绝', () => {
   assert.match(out.stderr, /必须人工放行/)
 })
 
-test('record 写入 round 与 policyVersion（探测 tools 里安装的包版本）', async () => {
-  const { root, dir } = sandbox()
-  const pkgDir = join(root, 'tools', 'node_modules', 'dsh-pipeline')
-  mkdirSync(pkgDir, { recursive: true })
-  writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ version: '1.2.3' }))
-  const req = join(root, 'req.json')
-  writeFileSync(req, JSON.stringify({ request: { pr: 9, head_sha: SHA, nonce: NONCE, diff: 'x', files: [], issue: { number: 1 }, budget: { maxChars: 100 } } }))
-  const res = join(root, 'res.txt')
-  writeFileSync(res, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
-  const out = run(['record', '--request', req, '--response', res, '--round', '2', '--root', root])
-  assert.equal(out.code, 0, out.stderr)
-  const saved = JSON.parse(readFileSync(join(dir, `9-${SHA}.json`), 'utf8'))
-  assert.equal(saved.round, 2)
-  assert.equal(saved.policyVersion, '1.2.3')
-})
-
 test('record 的 --round 越界时拒绝', () => {
   const { root } = sandbox()
   const req = join(root, 'req.json')
@@ -358,20 +264,6 @@ test('record 的 --round 越界时拒绝', () => {
   const out = run(['record', '--request', req, '--response', res, '--round', '4', '--root', root])
   assert.equal(out.code, 2)
   assert.match(out.stderr, /--round 必须是 1\.\.3/)
-})
-
-test('record 记录含 schemaVersion，且 policyVersion 取不到时写 unknown', () => {
-  const { root, dir } = sandbox()
-  const req = join(root, 'req.json')
-  writeFileSync(req, JSON.stringify({ request: { pr: 11, head_sha: SHA, nonce: NONCE, diff: 'x', files: [], issue: { number: 1 }, budget: { maxChars: 100 } } }))
-  const res = join(root, 'res.txt')
-  writeFileSync(res, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
-  const out = run(['record', '--request', req, '--response', res, '--root', root])
-  assert.equal(out.code, 0, out.stderr)
-  const saved = JSON.parse(readFileSync(join(dir, `11-${SHA}.json`), 'utf8'))
-  assert.equal(saved.schemaVersion, 1)
-  assert.equal(saved.round, 1)
-  assert.equal(saved.policyVersion, 'unknown')
 })
 
 test('record 的 --round 不带值时报错，不静默当 1', () => {
