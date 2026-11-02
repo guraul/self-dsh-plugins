@@ -169,7 +169,7 @@ scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎
 |---|---|
 | 行为（包侧） | 定位 PR → CI checks 未过则拒绝 → 审核闸门未过则拒绝 → `gh pr merge --squash` → 删远端分支 → 删本地分支（`-D`）→ 移除对应 worktree → `worktree prune` → 主工作区快进（`ff_main()`：`git fetch --prune origin main` + `git merge --ff-only origin/main`，**显式命名 merge head** 以绕开 `FETCH_HEAD` 竞态，仍绝不做非快进合并；失败时**先确认无分叉才自动重试一次**，真分叉则拒绝并提示不要用 `--force`） |
 | 幂等 | PR 已是 `MERGED` → 跳过合并，只清理现场并快进 main |
-| 退出码 | 原样透传包侧退出码：**0** 成功（`--check-only` 通过也是 0）；**1** 审核闸门未过 / CI 未过（含 `--checks-file` 判定失败），或壳找不到共享包；**2** 参数非法（含 `--no-review` 缺 `--reason`、`--record` 与 `--no-review` 同用）/ PR 状态不符 / git·gh 操作失败 |
+| 退出码 | **0 / 1 / 2**，与另两个转发壳同为「业务拒绝 vs 用法·环境错误」两分：**0** 成功（`--check-only` 通过也是 0）；**1** 业务拒绝——审核闸门未过（含判定非 `APPROVE`、记录与 PR/提交不符、超出时效）/ CI 未过（含 `--checks-file` 判定失败）；**2** 用法或环境错误——参数非法（含未知参数、`--no-review` 缺 `--reason`、`--record` 与 `--no-review` 同用）/ 找不到 PR / 找不到共享包 / PR 状态不符 / git·gh 操作失败。壳自身的 `die` 一律 exit 2（含找不到共享包、未知参数） |
 
 审核闸门排在 `--check-only` **之前**——演练模式恰恰最该验证闸门拦不拦得住。闸门由共享包调用
 `node dsh-subagents/lib/cli.js check`，判定、SHA 绑定、时效、高风险路径都由它负责，包只负责
