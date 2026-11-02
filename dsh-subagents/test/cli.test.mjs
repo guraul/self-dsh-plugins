@@ -60,6 +60,31 @@ function stubArgv(file) {
   return readFileSync(file, 'utf8').trim().split('\n')
 }
 
+/**
+ * 包在 `--json` 下的 stdout：一行完整记录。插件靠它把判定翻译成对外退出码，
+ * 所以桩包必须按真包的形状输出，而不是中文提示。
+ */
+function jsonRecord(overrides = {}) {
+  return JSON.stringify({
+    schemaVersion: 1,
+    policyVersion: '0.1.0',
+    pr: 7,
+    round: 2,
+    verdict: 'APPROVE',
+    head_sha: SHA,
+    nonce: NONCE,
+    findings: [],
+    evidence: [],
+    form: 'cli',
+    provider: 'codebuddy',
+    model: 'codebuddy/glm-5.3',
+    durationMs: 1200,
+    policy: { hit: false, reasons: [] },
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  })
+}
+
 function writeRecord(dir, overrides = {}) {
   const record = {
     schemaVersion: 1,
@@ -138,7 +163,7 @@ test('record: 参数完整映射到共享包 CLI', () => {
   writeFileSync(response, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
   writeFileSync(findings, '{"findings":[]}')
 
-  const stub = stubPackage({ stdout: '已写入审核记录: /tmp/x.json\n' })
+  const stub = stubPackage({ stdout: `${jsonRecord()}\n` })
   const out = run(
     [
       'record', '--request', request, '--response', response, '--findings', findings,
@@ -150,7 +175,7 @@ test('record: 参数完整映射到共享包 CLI', () => {
   )
 
   assert.equal(out.code, 0, out.stderr)
-  assert.match(out.stdout, /已写入审核记录/)
+  assert.equal(JSON.parse(out.stdout).verdict, 'APPROVE', '--json 时插件透出记录本体')
   assert.deepEqual(stubArgv(stub.argvFile), [
     'record',
     '--request', request,
@@ -177,6 +202,51 @@ test('record: 包的退出码与 stderr 原样透传', () => {
   const out = run(['record', '--request', request, '--response', response, '--root', root], stub.env)
   assert.equal(out.code, 2)
   assert.match(out.stderr, /无法从响应中解析出唯一且带正确标记的判定行/)
+})
+
+/**
+ * 对外契约（README）是 0 通过 / 1 拒绝 / 2 参数或环境错误：
+ * 包落盘成功即 0，插件必须把判定读回来翻译，否则脚本会把 REJECT 当放行。
+ */
+test('record: 判定决定插件退出码（APPROVE→0，REJECT/ESCALATE→1）', () => {
+  const { root } = sandbox()
+  const request = join(root, 'req.json')
+  const response = join(root, 'res.txt')
+  writeFileSync(request, JSON.stringify({ request: { pr: 7, head_sha: SHA, nonce: NONCE } }))
+  writeFileSync(response, `${NONCE} VERDICT: REJECT SHA: ${SHA}\n`)
+
+  for (const [verdict, expected] of [['APPROVE', 0], ['REJECT', 1], ['ESCALATE', 1]]) {
+    const stub = stubPackage({ stdout: `${jsonRecord({ verdict })}\n` })
+    const out = run(['record', '--request', request, '--response', response, '--root', root], stub.env)
+    assert.equal(out.code, expected, `${verdict} 应退出 ${expected}，实际 ${out.code}：${out.stderr}`)
+  }
+})
+
+test('record: 包始终以 --json 调起，成功时输出落盘路径', () => {
+  const { root } = sandbox()
+  const request = join(root, 'req.json')
+  const response = join(root, 'res.txt')
+  writeFileSync(request, JSON.stringify({ request: { pr: 7, head_sha: SHA, nonce: NONCE } }))
+  writeFileSync(response, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
+
+  const stub = stubPackage({ stdout: `${jsonRecord()}\n` })
+  const out = run(['record', '--request', request, '--response', response, '--root', root], stub.env)
+  assert.equal(out.code, 0, out.stderr)
+  assert.ok(stubArgv(stub.argvFile).includes('--json'), '必须带 --json 才能读回判定')
+  assert.match(out.stdout, /已写入审核记录: .*7-.+\.json/)
+})
+
+test('record: 包输出不是合法记录时退出 2，不猜判定', () => {
+  const { root } = sandbox()
+  const request = join(root, 'req.json')
+  const response = join(root, 'res.txt')
+  writeFileSync(request, JSON.stringify({ request: { pr: 7, head_sha: SHA, nonce: NONCE } }))
+  writeFileSync(response, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
+
+  const stub = stubPackage({ stdout: '已写入审核记录: /tmp/x.json\n' })
+  const out = run(['record', '--request', request, '--response', response, '--root', root], stub.env)
+  assert.equal(out.code, 2)
+  assert.match(out.stderr, /--json 输出不是合法记录/)
 })
 
 test('record: 共享包不存在时退出 2 并给中文提示', () => {

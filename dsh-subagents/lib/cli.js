@@ -49,7 +49,7 @@ const USAGE = `用法:
                                                         # 发评论 + 按判定提交 review 状态
   dsh-subagents roles   [--roles-dir <目录>]
 
-退出码: 0 通过（record 落盘成功即 0，判定可能是 REJECT）/ 1 拒绝（闸门或 review 判定不是 APPROVE）/ 2 参数或环境错误`
+退出码: 0 通过（判定 APPROVE）/ 1 拒绝（记录已落盘但判定不是 APPROVE，含 REJECT/ESCALATE）/ 2 参数或环境错误`
 
 function parseArgv(argv) {
   const flags = {}
@@ -244,7 +244,7 @@ function cmdRecord(flags) {
     throw fail('E_BUDGET', `--round 必须是 1..3 的整数，收到 ${flags.round}`)
   }
 
-  return recordViaPackage({
+  const outcome = recordViaPackage({
     requestFile: flags.request,
     responseFile: flags.response,
     findingsFile: typeof flags.findings === 'string' ? flags.findings : undefined,
@@ -256,6 +256,10 @@ function cmdRecord(flags) {
     form: typeof flags.form === 'string' ? flags.form : undefined,
     durationMs: Number(flags['duration-ms'] || 0),
   })
+  // 对外契约：0 通过 / 1 拒绝 / 2 参数或环境错误。包的成功退出码只说明「写完了」，
+  // 判定必须由插件读回来翻译，否则 REJECT 会被脚本当成放行。
+  if (outcome.status !== 0) return outcome.status
+  return outcome.record.verdict === 'APPROVE' ? 0 : 1
 }
 
 function currentHeadSha(flags) {
@@ -392,9 +396,9 @@ function cmdReview(flags) {
   writeFileSync(requestFile, `${JSON.stringify({ request }, null, 2)}\n`, 'utf8')
   writeFileSync(responseFile, text, 'utf8')
 
-  let code
+  let outcome
   try {
-    code = recordViaPackage({
+    outcome = recordViaPackage({
       requestFile,
       responseFile,
       provider: meta.provider,
@@ -410,10 +414,10 @@ function cmdReview(flags) {
     rmSync(responseFile, { force: true })
   }
 
-  if (code !== 0) {
+  if (outcome.status !== 0) {
     // 调用失败或响应无法落记录，同样计入熔断，避免无限重试。
     bumpCircuit(dir)
-    return code
+    return outcome.status
   }
 
   const file = recordFile(dir, request.pr, request.head_sha)
