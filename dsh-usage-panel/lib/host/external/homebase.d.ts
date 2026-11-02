@@ -1,4 +1,4 @@
-import type { SubagentExternal } from '../../shared/contract.ts';
+import type { Overview, SubagentExternal } from '../../shared/contract.ts';
 export type ExternalSource = 'local' | 'homebase';
 export interface HomebaseConfig {
     source: ExternalSource;
@@ -48,4 +48,20 @@ export declare function foldHomebaseRows(rows: readonly QueryRow[]): Map<string,
 export declare function fetchHomebaseUsage(config: HomebaseConfig, opts?: {
     limit?: number;
 }): Promise<Map<string, SubagentExternal>>;
+interface OverviewRawRow extends QueryRow {
+    title?: string | null;
+}
+/** 把 rows 折成 byDay: {day: {model: Buckets}}，供 buildDayWindow 复用。 */
+export declare function foldOverviewByDay(rows: readonly OverviewRawRow[]): Record<string, Record<string, {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+}>>;
+/** 纯函数装配：便于单测，不发请求。 */
+export declare function buildOverviewFromRows(rows: readonly OverviewRawRow[], now?: number): Overview;
+/** 拉全量 rows 并装配 Overview。任何失败向上抛，由调用方回退本地。 */
+export declare function fetchHomebaseOverview(config: HomebaseConfig, opts?: {
+    limit?: number;
+}): Promise<Overview>;
 export {};

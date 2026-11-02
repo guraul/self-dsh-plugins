@@ -27,7 +27,7 @@ import {
 } from '../shared/contract.ts'
 import { emptyAggregate, emptyOverview, finalizeOverview, mergeSessionValue, rankSessions } from './aggregate.ts'
 import { collectSubagents } from './external/collect.ts'
-import { homebaseConfigFromEnv } from './external/homebase.ts'
+import { fetchHomebaseOverview, homebaseConfigFromEnv } from './external/homebase.ts'
 import { usagePanelProjectionDefinition } from './projection-unit.ts'
 import { scanFallback } from './scan.ts'
 import type { HostConnection, HostLlm, HostWorkspaceRegistry } from './types.ts'
@@ -219,7 +219,32 @@ export function apply(ctx: Context): void {
     return run
   }
 
+  // homebase 模式下的 overview 缓存（60s）：远端请求比本地投影贵，但不该阻断首屏。
+  let homebaseCache: { at: number; payload: Overview } | null = null
+  const HOMEBASE_TTL_MS = 60 * 1000
+
   function overview(args: { force?: boolean } | undefined): Promise<Overview> {
+    if (homebase.source === 'homebase') {
+      const force = !!(args && args.force)
+      if (!force && homebaseCache && Date.now() - homebaseCache.at < HOMEBASE_TTL_MS) {
+        return Promise.resolve(homebaseCache.payload)
+      }
+      return fetchHomebaseOverview(homebase).then(
+        (payload) => {
+          homebaseCache = { at: Date.now(), payload }
+          return payload
+        },
+        (err) => {
+          // overview 是首屏：远端失败必须回退本地，不能让页面空掉。
+          console.warn(tag, 'homebase overview failed, falling back to local:', String((err as Error)?.message ?? err))
+          return overviewLocal(args)
+        },
+      )
+    }
+    return overviewLocal(args)
+  }
+
+  function overviewLocal(args: { force?: boolean } | undefined): Promise<Overview> {
     const force = !!(args && args.force)
     if (!force && cache) {
       if (Date.now() - cache.at < STALE_MS) return Promise.resolve(cache.payload)

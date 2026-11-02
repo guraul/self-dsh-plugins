@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { foldHomebaseRows, homebaseConfigFromEnv, loadCaContents, parseTokenSyncEnv, readTokenSyncEnv } from '../src/host/external/homebase.ts'
+import { buildOverviewFromRows, foldHomebaseRows, homebaseConfigFromEnv, loadCaContents, parseTokenSyncEnv, readTokenSyncEnv } from '../src/host/external/homebase.ts'
 
 // Point at a file that does not exist so the real ~/.dsh/token-sync.env never
 // leaks into assertions.
@@ -175,3 +175,42 @@ test('fold: executor 与 source 随行的 source 走（codebuddy / opencode 同�
   assert.equal(hits.get('01a191db-a69f-7fcf-bfbf-d7d857cdb361')?.executor, 'codebuddy');
   assert.equal(hits.get('01a191db-a69f-7fcf-bfbf-d7d857cdb361')?.source, 'codebuddy-jsonl');
 });
+
+test('overview: rows 装配成 days / totals / byModel / topSessions / providers', () => {
+  const now = Date.parse('2026-11-02T12:00:00Z')
+  const day = '2026-10-31'
+  const rows = [
+    { usage_date: day, source: 'dsh', provider: 'opencode-go', model: 'deepseek-v4.1-flash', session_id: 's1', title: '会话一', input_tokens: 100, output_tokens: 10, cache_read: 900, cache_write: 0, total_tokens: 1010, first_at: 1, last_at: 2 },
+    { usage_date: day, source: 'dsh', provider: 'opencode-go', model: 'deepseek-v4.1-flash', session_id: 's2', title: '会话二', input_tokens: 50, output_tokens: 5, cache_read: 0, cache_write: 0, total_tokens: 55, first_at: 3, last_at: 4 },
+    { usage_date: day, source: 'dsh', provider: 'deepseek-official', model: 'mimo-v2.6-flash', session_id: 's1', title: '会话一', input_tokens: 20, output_tokens: 2, cache_read: 0, cache_write: 0, total_tokens: 22, first_at: 1, last_at: 5 },
+  ] as any
+
+  const ov = buildOverviewFromRows(rows, now)
+  assert.equal(ov.coverage.mode, 'homebase')
+  // 近 30 天（now 前 30 天窗口包含 10-31）
+  assert.equal(ov.totals.input, 170)
+  assert.equal(ov.totals.cacheRead, 900)
+  assert.equal(ov.totals.total, 1010 + 55 + 22)
+  assert.equal(ov.sessionCount, 2)
+  // allTime 与近 30 天在此用例里相同
+  assert.equal(ov.allTime.totals.total, 1010 + 55 + 22)
+  // 模型按总量降序
+  assert.equal(ov.byModel[0].model, 'deepseek-v4.1-flash')
+  // 会话排行：s1 合计 1032 > s2 55，标题取自 rows
+  assert.equal(ov.topSessions[0].id, 's1')
+  assert.equal(ov.topSessions[0].title, '会话一')
+  assert.equal(ov.topSessions[1].id, 's2')
+  // Provider 分布
+  assert.equal(ov.providers[0].id, 'opencode-go')
+  assert.equal(ov.providers[0].totals.total, 1010 + 55)
+  // 热力图窗口有该日
+  assert.ok(ov.days.some((d) => d.date === day && d.total > 0))
+})
+
+test('overview: 空数据返回 0 而不是崩溃', () => {
+  const ov = buildOverviewFromRows([], Date.parse('2026-11-02T12:00:00Z'))
+  assert.equal(ov.totals.total, 0)
+  assert.equal(ov.sessionCount, 0)
+  assert.deepEqual(ov.topSessions, [])
+  assert.deepEqual(ov.providers, [])
+})

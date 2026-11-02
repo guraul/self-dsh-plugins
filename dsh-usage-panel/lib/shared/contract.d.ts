@@ -47,7 +47,7 @@ export interface DayRecord {
     total: number;
     models: DayModels;
 }
-export type AggregationMode = 'projection' | 'scan' | 'none';
+export type AggregationMode = 'projection' | 'scan' | 'homebase' | 'none';
 /**
  * Honest coverage diagnostics: the overview never claims to be a complete
  * bill when part of the corpus could not be scanned. `sessionsPending` =

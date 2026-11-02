@@ -18,8 +18,16 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { URL } from 'node:url'
-import type { SubagentExternal, UsageTotals } from '../../shared/contract.ts'
-import { emptyTotals } from '../../shared/usage.ts'
+import type {
+  DayRecord,
+  ModelItem,
+  Overview,
+  ProviderItem,
+  SessionSummary,
+  SubagentExternal,
+  UsageTotals,
+} from '../../shared/contract.ts'
+import { buildDayWindow, emptyTotals, sortedModels, totalsFromModels } from '../../shared/usage.ts'
 
 export type ExternalSource = 'local' | 'homebase'
 
@@ -250,4 +258,171 @@ export async function fetchHomebaseUsage(config: HomebaseConfig, opts: { limit?:
     ...(((codebuddy as { rows?: QueryRow[] })?.rows) ?? []),
   ]
   return foldHomebaseRows(rows)
+}
+
+
+// ── overview 装配（self-dsh-plugins#241）─────────────────────────────────────
+//
+// 把 homebase 的逐行数据折成与本地投影同 shape 的 Overview，让客户端零改动。
+// 口径与本地一致：半年窗口按 UTC 日切、近 30 天窗口、会话排行按总量降序。
+
+/** topSessions 默认取多少条（与本地路径一致）。 */
+const TOP_SESSIONS = 10
+
+interface OverviewRawRow extends QueryRow {
+  title?: string | null
+}
+
+function numOr0(value: unknown): number {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+/** 把 rows 折成 byDay: {day: {model: Buckets}}，供 buildDayWindow 复用。 */
+export function foldOverviewByDay(rows: readonly OverviewRawRow[]): Record<string, Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>> {
+  const byDay: Record<string, Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>> = {}
+  for (const row of rows) {
+    if (!row?.usage_date) continue
+    const model = row.model || 'unknown'
+    const day = (byDay[row.usage_date] ??= {})
+    const cell = (day[model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+    cell.input += numOr0(row.input_tokens)
+    cell.output += numOr0(row.output_tokens)
+    cell.cacheRead += numOr0(row.cache_read)
+    cell.cacheWrite += numOr0(row.cache_write)
+  }
+  return byDay
+}
+
+function totalsOf(rows: readonly OverviewRawRow[]): UsageTotals {
+  const totals = emptyTotals()
+  for (const row of rows) {
+    totals.input += numOr0(row.input_tokens)
+    totals.output += numOr0(row.output_tokens)
+    totals.cacheRead += numOr0(row.cache_read)
+    totals.cacheWrite += numOr0(row.cache_write)
+    totals.total +=
+      numOr0(row.input_tokens) +
+      numOr0(row.output_tokens) +
+      numOr0(row.cache_read) +
+      numOr0(row.cache_write)
+  }
+  return totals
+}
+
+function lastNDays(now: number, days: number): Set<string> {
+  const out = new Set<string>()
+  for (let i = 0; i < days; i += 1) {
+    const d = new Date(now - i * 86400000)
+    out.add(d.toISOString().slice(0, 10))
+  }
+  return out
+}
+
+/** 纯函数装配：便于单测，不发请求。 */
+export function buildOverviewFromRows(rows: readonly OverviewRawRow[], now = Date.now()): Overview {
+  const byDay = foldOverviewByDay(rows)
+  const days: DayRecord[] = buildDayWindow(byDay, now)
+
+  const recentWindow = lastNDays(now, 30)
+  const recentRows = rows.filter((r) => recentWindow.has(r.usage_date))
+  const recentByModel: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {}
+  for (const row of recentRows) {
+    const model = row.model || 'unknown'
+    const cell = (recentByModel[model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+    cell.input += numOr0(row.input_tokens)
+    cell.output += numOr0(row.output_tokens)
+    cell.cacheRead += numOr0(row.cache_read)
+    cell.cacheWrite += numOr0(row.cache_write)
+  }
+  const byModel: ModelItem[] = sortedModels(recentByModel)
+  const totals = totalsOf(recentRows)
+  const recentSessions = new Set(recentRows.map((r) => r.session_id).filter(Boolean))
+
+  // allTime 与 byModel 同口径，只是窗口不同。
+  const allByModel: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {}
+  for (const row of rows) {
+    const model = row.model || 'unknown'
+    const cell = (allByModel[model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+    cell.input += numOr0(row.input_tokens)
+    cell.output += numOr0(row.output_tokens)
+    cell.cacheRead += numOr0(row.cache_read)
+    cell.cacheWrite += numOr0(row.cache_write)
+  }
+  const allTimeModels = sortedModels(allByModel)
+  const allSessions = new Set(rows.map((r) => r.session_id).filter(Boolean))
+
+  // 会话排行：按会话聚合后取前 N，标题取该会话首个非空。
+  const sessionAgg = new Map<string, { totals: UsageTotals; title: string | null; last: number }>()
+  for (const row of rows) {
+    if (!row.session_id) continue
+    const cur = sessionAgg.get(row.session_id) ?? { totals: emptyTotals(), title: null, last: 0 }
+    cur.totals.input += numOr0(row.input_tokens)
+    cur.totals.output += numOr0(row.output_tokens)
+    cur.totals.cacheRead += numOr0(row.cache_read)
+    cur.totals.cacheWrite += numOr0(row.cache_write)
+    cur.totals.total +=
+      numOr0(row.input_tokens) + numOr0(row.output_tokens) + numOr0(row.cache_read) + numOr0(row.cache_write)
+    if (!cur.title && typeof row.title === 'string' && row.title.trim()) cur.title = row.title.trim()
+    cur.last = Math.max(cur.last, numOr0(row.last_at))
+    sessionAgg.set(row.session_id, cur)
+  }
+  const topSessions: SessionSummary[] = [...sessionAgg.entries()]
+    .map(([id, agg]) => ({ id, title: agg.title, totals: agg.totals, lastActive: agg.last, depth: 0 }))
+    .sort((a, b) => b.totals.total - a.totals.total)
+    .slice(0, TOP_SESSIONS)
+
+  // Provider 分布
+  const providerAgg = new Map<string, UsageTotals>()
+  for (const row of rows) {
+    const id = row.provider || 'unknown'
+    const cur = providerAgg.get(id) ?? emptyTotals()
+    cur.input += numOr0(row.input_tokens)
+    cur.output += numOr0(row.output_tokens)
+    cur.cacheRead += numOr0(row.cache_read)
+    cur.cacheWrite += numOr0(row.cache_write)
+    cur.total +=
+      numOr0(row.input_tokens) + numOr0(row.output_tokens) + numOr0(row.cache_read) + numOr0(row.cache_write)
+    providerAgg.set(id, cur)
+  }
+  const providers: ProviderItem[] = [...providerAgg.entries()]
+    .map(([id, t]) => ({ id, name: id, totals: t }))
+    .sort((a, b) => b.totals.total - a.totals.total)
+
+  return {
+    days,
+    totals,
+    sessionCount: recentSessions.size,
+    byModel,
+    allTime: { totals: totalsOf(rows), sessionCount: allSessions.size, byModel: allTimeModels },
+    coverage: {
+      mode: 'homebase',
+      timezone: 'UTC',
+      sessionsTotal: allSessions.size,
+      sessionsOk: allSessions.size,
+      sessionsFailed: 0,
+      sessionsPending: 0,
+      eventsCounted: rows.length,
+      retries: 0,
+      compactionTokens: 0,
+      from: rows.length ? numOr0(rows[0]?.first_at) : null,
+      to: rows.length ? Math.max(...rows.map((r) => numOr0(r.last_at))) : null,
+      usageSessionsMain: allSessions.size,
+      usageSessionsSubagent: 0,
+    },
+    topSessions,
+    providers,
+    updatedAt: now,
+  }
+}
+
+/** 拉全量 rows 并装配 Overview。任何失败向上抛，由调用方回退本地。 */
+export async function fetchHomebaseOverview(config: HomebaseConfig, opts: { limit?: number } = {}): Promise<Overview> {
+  if (config.source !== 'homebase') throw new Error('homebase source not enabled')
+  if (!config.url || !config.token) throw new Error('homebase url/token missing')
+  const limit = Math.min(Math.max(opts.limit ?? 2000, 1), 2000)
+  const payload = (await requestJson(config, `/api/internal/token-usage/query?group_by=all&limit=${limit}`)) as {
+    rows?: OverviewRawRow[]
+  }
+  return buildOverviewFromRows(payload?.rows ?? [])
 }
