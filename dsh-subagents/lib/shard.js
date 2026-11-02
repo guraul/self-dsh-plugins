@@ -36,20 +36,132 @@ export function parseShardSpec(value) {
   return { index, total }
 }
 
-/** 从 `+++ b/路径` / `--- a/路径` / `diff --git a/x b/x` 里取仓库相对路径。 */
-function pathFromSection(lines) {
-  for (const line of lines) {
-    if (line.startsWith('+++ ') && !line.startsWith('+++ /dev/null')) {
-      return line.slice(4).replace(/^b\//, '').trim()
+const C_ESCAPES = Object.freeze({
+  a: '\x07',
+  b: '\b',
+  f: '\f',
+  n: '\n',
+  r: '\r',
+  t: '\t',
+  v: '\v',
+  '\\': '\\',
+  '"': '"',
+})
+
+/**
+ * 还原 git 的 C 风格引号路径（`core.quotePath`）。含空格不必引号，
+ * 含制表符 / 引号 / 反斜杠 / 非 ASCII 时 git 会写成 `"b/…\t…\344\270\255"`。
+ * 八进制转义是**字节**，逐个拼回再按 UTF-8 解码，否则多字节文件名会碎。
+ *
+ * @param {string} value
+ * @returns {string} 非引号路径原样返回
+ */
+export function unquoteGitPath(value) {
+  const text = String(value ?? '')
+  if (text.length < 2 || !text.startsWith('"') || !text.endsWith('"')) return text
+  const body = text.slice(1, -1)
+  const bytes = []
+  for (let i = 0; i < body.length; i += 1) {
+    const char = body[i]
+    if (char !== '\\') {
+      bytes.push(...Buffer.from(char, 'utf8'))
+      continue
     }
-    if (line.startsWith('--- ') && !line.startsWith('--- /dev/null')) {
-      return line.slice(4).replace(/^a\//, '').trim()
+    const next = body[i + 1]
+    if (next === undefined) break
+    if (/[0-7]/.test(next)) {
+      let digits = next
+      i += 1
+      while (digits.length < 3 && /[0-7]/.test(body[i + 1] ?? '')) {
+        digits += body[i + 1]
+        i += 1
+      }
+      bytes.push(parseInt(digits, 8) & 0xff)
+      continue
     }
+    i += 1
+    bytes.push(...Buffer.from(C_ESCAPES[next] ?? next, 'utf8'))
   }
+  return Buffer.from(bytes).toString('utf8')
+}
+
+/** 找未转义的结束引号；找不到返回 -1。 */
+function closingQuote(text, from) {
+  for (let i = from + 1; i < text.length; i += 1) {
+    if (text[i] === '\\') {
+      i += 1
+      continue
+    }
+    if (text[i] === '"') return i
+  }
+  return -1
+}
+
+/** `+++ b/路径` / `--- a/路径`：整行都是路径（引号路径后面可能跟制表符时间戳）。 */
+function markerPath(line, marker, prefix) {
+  let raw = line.slice(marker.length).replace(/\r$/, '')
+  if (raw.startsWith('"')) {
+    const end = closingQuote(raw, 0)
+    if (end === -1) return ''
+    raw = raw.slice(0, end + 1)
+  } else {
+    const tab = raw.indexOf('\t')
+    if (tab !== -1) raw = raw.slice(0, tab)
+  }
+  const path = unquoteGitPath(raw)
+  if (path === '/dev/null') return ''
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path
+}
+
+/** 引号或裸路径都接受；路径必须完整覆盖 text 且带预期前缀。 */
+function headerToken(text, prefix) {
+  if (text.length === 0) return null
+  if (text.startsWith('"')) {
+    if (closingQuote(text, 0) !== text.length - 1) return null
+    const path = unquoteGitPath(text)
+    return path.startsWith(prefix) ? path.slice(prefix.length) : null
+  }
+  return text.startsWith(prefix) ? text.slice(prefix.length) : null
+}
+
+/**
+ * 从 `diff --git a/x b/x` 取 b 侧路径。含空格的路径 git **不加引号**，
+ * 所以不能按空白切：逐个空格试切，要求两侧各自带 a/、b/ 前缀；
+ * 两侧同名的那一刀优先（重命名时退化为第一刀）。
+ */
+function headerPath(header) {
+  const rest = header.slice('diff --git '.length).replace(/\r$/, '')
+  let fallback = null
+  for (let i = 0; i < rest.length; i += 1) {
+    if (rest[i] !== ' ') continue
+    const left = headerToken(rest.slice(0, i), 'a/')
+    const right = headerToken(rest.slice(i + 1), 'b/')
+    if (left === null || right === null) continue
+    if (left === right) return right
+    if (fallback === null) fallback = right
+  }
+  return fallback ?? ''
+}
+
+/**
+ * 从段落里取仓库相对路径：优先 `+++`（变更后的路径，重命名时才对得上
+ * `files`），再 `---`，最后退回 `diff --git` 头。
+ */
+function pathFromSection(lines) {
+  const marker = (prefix) => {
+    for (const line of lines) {
+      if (!line.startsWith(`${prefix} `)) continue
+      const path = markerPath(line, `${prefix} `, prefix === '+++' ? 'b/' : 'a/')
+      if (path) return path
+    }
+    return ''
+  }
+  const after = marker('+++')
+  if (after) return after
+  const before = marker('---')
+  if (before) return before
   const header = lines.find((line) => line.startsWith('diff --git '))
-  if (!header) return ''
-  const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(header)
-  return match ? match[2].trim() : ''
+  return header ? headerPath(header) : ''
 }
 
 /**
@@ -174,6 +286,10 @@ export function collectShardRecords(dir, pr, headSha) {
   for (const name of readdirSync(dir).sort()) {
     const parsed = parseShardRecordName(name)
     if (!parsed || parsed.pr !== target || parsed.headSha !== headSha) continue
+    // 文件名本身就写着片号与总片数：越界不是「缺片」，是记录坏了，直接点名。
+    if (parsed.index < 1 || parsed.index > parsed.total) {
+      throw new ContractError('E_RECORD', `分片记录文件名越界：第 ${parsed.index} 片（共 ${parsed.total} 片）: ${name}`)
+    }
     if (total === null) total = parsed.total
     else if (total !== parsed.total) {
       throw new ContractError(
@@ -229,10 +345,25 @@ function unique(values) {
  */
 export function aggregateShardRecords({ total, entries, missing }) {
   const absent = missing ?? []
+  const outOfRange = entries.filter(
+    (entry) => !Number.isInteger(entry.index) || entry.index < 1 || entry.index > total,
+  )
+  if (outOfRange.length > 0) {
+    throw new ContractError(
+      'E_RECORD',
+      `分片记录里有越界片号：第 ${outOfRange.map((entry) => entry.index).join('、')} 片（共 ${total} 片），拒绝合成`,
+    )
+  }
   if (absent.length > 0 || entries.length !== total) {
     const list = absent.length > 0 ? absent : Array.from({ length: total }, (_, i) => i + 1).filter(
       (index) => !entries.some((entry) => entry.index === index),
     )
+    if (list.length === 0) {
+      throw new ContractError(
+        'E_RECORD',
+        `分片记录数量与总片数不符（${entries.length} 条 / 共 ${total} 片），且有重复片号，拒绝合成`,
+      )
+    }
     throw new ContractError(
       'E_RECORD',
       `分片记录缺第 ${list.join('、')} 片（共 ${total} 片），拒绝合成`,
@@ -248,6 +379,22 @@ export function aggregateShardRecords({ total, entries, missing }) {
         `分片记录的轮次不一致：第 ${entry.index} 片是第 ${entry.record.round} 轮，其余是第 ${round} 轮`,
       )
     }
+  }
+
+  // 各片必须来自同一次 diff。哈希用的是整份 diff（不是切片后的）：切片哈希
+  // 天然片片不同，只有「整份」这个共同基准才能证明没人在中途换了 base。
+  const hashes = ordered.map((entry) => entry.record?.shard?.diffSha256)
+  const withoutHash = ordered.filter((_, i) => typeof hashes[i] !== 'string' || hashes[i].length === 0)
+  if (withoutHash.length > 0) {
+    throw new ContractError(
+      'E_RECORD',
+      `分片记录缺少 diff 哈希（第 ${withoutHash.map((entry) => entry.index).join('、')} 片），无法确认各片来自同一次 diff，拒绝合成`,
+    )
+  }
+  const bases = unique(hashes)
+  if (bases.length > 1) {
+    const shown = bases.map((hash) => `${hash.slice(0, 15)}…`).join(' / ')
+    throw new ContractError('E_RECORD', `分片记录来自不同的 diff（${shown}），拒绝合成`)
   }
 
   const verdicts = ordered.map((entry) => entry.record.verdict)
@@ -319,11 +466,14 @@ export function writeAggregateRecord(dir, record) {
  *
  * 任何一步失败都要保证规范文件名不残留——没有记录，闸门就拒绝。
  */
-export function finalizeShardRecord(dir, record, { index, total }) {
+export function finalizeShardRecord(dir, record, { index, total, diffSha256 }) {
   const canonical = recordFile(dir, record.pr, record.head_sha)
   const target = join(dir, shardRecordName(record.pr, record.head_sha, { index, total }))
   const tmp = `${target}.${process.pid}.tmp`
-  const sharded = { ...record, shard: { index, total } }
+  const sharded = {
+    ...record,
+    shard: { index, total, ...(diffSha256 ? { diffSha256 } : {}) },
+  }
   try {
     writeFileSync(tmp, `${JSON.stringify(sharded, null, 2)}\n`, 'utf8')
     renameSync(tmp, target)

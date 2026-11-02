@@ -276,11 +276,15 @@ function requestShard(file) {
   }
   const shard = payload?.request?.shard
   if (shard === undefined) return null
-  const { index, total } = shard ?? {}
+  const { index, total, diffSha256 } = shard ?? {}
   if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || index < 1 || index > total) {
     throw fail('E_BUDGET', `请求里的 shard 非法: ${JSON.stringify(shard)}`)
   }
-  return { index, total }
+  // 没有哈希就无法证明各片基于同一次 diff；宁可退回重切，也不产出无法合成的记录。
+  if (typeof diffSha256 !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(diffSha256)) {
+    throw fail('E_BUDGET', `请求里的 shard 缺少合法的 diffSha256: ${file}`)
+  }
+  return { index, total, diffSha256 }
 }
 
 /**
@@ -300,7 +304,20 @@ function cmdAggregate(flags) {
   const dir = reviewsDir(root(flags))
   const collected = collectShardRecords(dir, pr, flags['head-sha'])
   const record = aggregateShardRecords(collected)
+  const canonical = recordFile(dir, pr, flags['head-sha'])
+  // 同一 PR 同一轮只计一次：分片记录自己不计，合成时按最终判定计一次；
+  // 重复跑 aggregate（或本轮已合成过）不再累加。
+  let previous = null
+  if (existsSync(canonical)) {
+    try {
+      previous = readRecord(canonical)
+    } catch {
+      previous = null
+    }
+  }
+  const alreadyCounted = previous?.round === record.round && previous?.head_sha === record.head_sha
   const file = writeAggregateRecord(dir, record)
+  if (record.verdict !== 'APPROVE' && !alreadyCounted) bumpCircuit(dir)
   emit(flags.json ? record : `已写入合成审核记录: ${file}（${record.verdict}）`, flags)
   return record.verdict === 'APPROVE' ? 0 : 1
 }
@@ -360,7 +377,8 @@ function cmdRecord(flags) {
     else process.stdout.write(`已写入分片审核记录: ${written.file}\n`)
   }
   // 与旧实现一致：记录落盘但判定不是 APPROVE 也算一次失败，连续三次即熔断回人工。
-  if (outcome.record.verdict !== 'APPROVE') bumpCircuit(reviewsDir(root(flags)))
+  // 分片记录不计：一轮 N 片会把熔断放大 N 倍，改由 `record --aggregate` 计一次。
+  if (!shard && outcome.record.verdict !== 'APPROVE') bumpCircuit(reviewsDir(root(flags)))
   return outcome.record.verdict === 'APPROVE' ? 0 : 1
 }
 

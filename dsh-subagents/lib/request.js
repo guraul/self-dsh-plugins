@@ -182,11 +182,14 @@ export function prepareRequest({
 
   // 分片在预算检查之前切：每片各自算预算，切完仍超才失败。
   // 片内只保留该片的文件与 hunk，`files` 也只列该片——reviewer 不该看到别的片。
+  // 哈希取**切之前的整份 diff**：它才是各片共同的基准；切片哈希片片不同，
+  // 合成时无法用来判断「各片是不是同一次 diff」。
+  const baseDiffSha256 = sha256(diff)
   if (shard) {
     const picked = pickShard(splitDiffByFile(diff), shard)
     diff = picked.text
     files = picked.files
-    shardField = { index: shard.index, total: shard.total, files: picked.files }
+    shardField = { index: shard.index, total: shard.total, files: picked.files, diffSha256: baseDiffSha256 }
   }
 
   if (diff.length > maxChars) {
