@@ -286,24 +286,26 @@ node --test scripts/pipeline/audit-subagents.test.mjs           # 单测 + 两�
 
 ### pre-push-main-guard.sh / install-hooks.sh
 
-本地兜底的 **git pre-push 钩子**：拦「直推 `origin/main`」，让「所有改动走 pipeline」不只靠自律。它只是本地护栏——`--no-verify` 能绕过，真正的闸门仍是 `merge-pr.sh` 的审核记录。
+本地兜底的 **git pre-push 钩子**：拦「直推 / 删除 `origin/main`」，让「所有改动走 pipeline」不只靠自律。它只是本地护栏——`--no-verify` 能绕过，真正的闸门仍是 `merge-pr.sh` 的审核记录。
 
 ```bash
 scripts/pipeline/install-hooks.sh     # 幂等，可重复执行
 ```
 
 - **装在哪**：`$(git rev-parse --git-common-dir)/hooks/pre-push`。worktree 里 `.git` 是文件，脚本按 common dir 推算，所以**装一次所有 worktree 共用**，新开的 worktree 无需重装。
-- **默认拦什么**：stdin 任一行 remote ref 为 `refs/heads/main` 且远端名为 `origin` → 打印中文拒绝原因（引 `~/.dsh/AGENTS.md` §7.1）并 `exit 1`。
-- **放行什么**：任务分支（如 `refs/heads/task/222-*`）、删除远程分支（local sha 全 0，git 也传 `(delete)`）、非 `origin` 远端。
+- **默认拦什么**：stdin 任一行 remote ref 为 `refs/heads/main` 且远端名为 `origin` → 打印中文拒绝原因（引 `~/.dsh/AGENTS.md` §7.1）并 `exit 1`。**推和删都拦**：`git push origin main` 与 `git push origin :main`（`--delete main`）同样被拒。
+- **放行什么**：任务分支（如 `refs/heads/task/222-*`）、删除**其它**远端分支（local sha 全 0，git 也传 `(delete)`）、非 `origin` 远端。
+- **覆盖已有钩子**：`install-hooks.sh` 发现 `.git/hooks/pre-push` 已存在且内容不同，会先打警告并备份成 `pre-push.bak.<时间戳>`，再覆盖。
+- **`core.hooksPath`**：若配置了该值，钩子装到 `$(git rev-parse --git-common-dir)/hooks` **不会生效**；脚本会提示并回显该配置值，但仍按原逻辑安装（**不擅自改用户配置**）。
 - **例外**：确实要临时直推时
 
   ```bash
   ALLOW_DIRECT_MAIN=1 git push origin main
   ```
 
-  放行并打印一行警告。这是**一次性、显式**的绕过，不写任何留痕；事后请确认该直推是否该补 PR / 补审核记录。
+  放行（推与删都放行）并打印一行警告。这是**一次性、显式**的绕过，不写任何留痕；事后请确认该操作是否该补 PR / 补审核记录。
 - **卸载**：`rm "$(git rev-parse --git-common-dir)/hooks/pre-push"`。
-- **兼容**：bash 3.2（macOS 自带）。注意 `while IFS= read -r a b c d` 在 3.2 里会把整行塞进第一个变量，脚本事先用过 `bash -n` + 真实 `git push` 验证。
+- **兼容**：bash 3.2（macOS 自带）。读 stdin 时**不加** `IFS=` 前缀——只有默认 IFS 才会把一行按空白切成 4 个字段；`IFS=` 置空后 read 不做字段切分，`REMOTE_REF` 拿不到值，判定就失效。脚本事先用过 `bash -n` + stdin 喂样例验证。
 
 ## 三、worktree 与分支命名契约
 
