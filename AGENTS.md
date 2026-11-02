@@ -100,3 +100,5 @@ macOS 环境与并发纪律的通用条目见 `~/.dsh/AGENTS.md` §12（bash 3.2
 - **改了 profile 的 `link:` 目标路径后，必须在 `~/.dsh/profiles/web` 跑一次 `pnpm install`**，
   否则 `node_modules/<包名>` 软链悬空、插件加载失败。
 - **不要 `rm -rf` 已装插件的目录**：正在运行的宿主已把模块载入内存，但任何重组合 / 重启都会失败。
+- **刷新 `tools/` 里的共享包不能靠 `pnpm update`**（会复用旧缓存，装出旧包）；锁文件不入库，
+  正确做法见 [pipeline 手册「刷新共享包」](./docs/pipeline/README.md#刷新共享包tools)。
