@@ -78,7 +78,9 @@
    [`docs/pipeline/README.md`](./docs/pipeline/README.md) 与 [`docs/pipeline/review-loop.md`](./docs/pipeline/review-loop.md)。
 4. **subagent 委派约定**：通用规则见 `~/.dsh/AGENTS.md` §8 / §9（跨项目单一真源）；本条只写本仓特有部分。
    - **本仓特有**：
-     - 门禁：`node --test` + `node scripts/lint.js`；CI 见 `.github/workflows/`。
+     - 门禁：**按插件跑** `pnpm test` 与 `pnpm run lint`——两者各自按插件 `package.json` 里有没有
+       `scripts.test` / `scripts.lint` 决定跑不跑；根目录**没有**统一入口（也没有 `scripts/lint.js`）；
+       CI 见 `.github/workflows/`（matrix 逐插件执行）。
      - **执行面合规审计**：`node scripts/pipeline/audit-subagents.mjs --hours 24`（确定性、只读、不花模型调用）——检「preset 漂移」「子代理本地自执行」「未走产品路径」，异常 exit 1。模板 `.dsh-web/com.deepseek.dsh-audit.plist` **未自动加载**，需手动装 LaunchAgent。
      - **打断语义**：`interrupt_agent` 会让远端**立刻停**（发 ACP `session/cancel`），但进程按 `idleTimeoutMs`（默认 10 分钟）回收——**别把 `opencode acp` 赖着当泄漏**；详见 `dsh-plugin-product-subagents/README.md` §Interrupting a delegation（issue #12 实测）。
 5. **宿主安全**：禁止随意重启 dsh web（会终止当前会话）——需要时用
