@@ -59,6 +59,16 @@ node lib/cli.js card    --input .tmp/review/116/card.json
 node lib/cli.js comment --record .dsh-web/reviews/116-<sha>.json --round 2
 ```
 
+**分片审核**（变更太大、一次审不完时）：`prepare --shard 2/3` 把变更文件按行数均分，
+只产出第 2 片的 request（同一 `head_sha`、独立 `nonce`、`diff` / `files` 只含该片，
+并带 `shard: {index,total,files,diffSha256}`，其中 `diffSha256` 是**整份 diff** 的哈希）；
+每片的 `record` 写成 `.dsh-web/reviews/<pr>-<sha>.shard-2-of-3.json`，**不占用**闸门读的规范文件名。
+全部片审完后用 `record --aggregate --pr <号> --head-sha <sha> --root <仓库根>` 合成：
+缺片、越界片号直接退出 `2` 并点名第几片；各片 `diffSha256` 缺失或不一致（中途换了 base）同样退出 `2`。
+判定按 `REJECT > ESCALATE > APPROVE` 收紧，`findings` / `evidence` 拼接并带 `[i/n]` 前缀，
+合成记录不带 `shard` 字段（闸门只认这条）。熔断只在合成时按最终判定计一次——
+3 片全 `REJECT` 也只是「这一轮失败 1 次」，不会被分片数放大；重复合成同一轮不再累加。
+
 退出码：`0` 通过 / `1` 拒绝（闸门不过或判定不是 `APPROVE`）/ `2` 参数或环境错误。
 
 **证据包**（`prepare --facts` / `--include`）解决 reviewer 读不到外部事实就只能 `ESCALATE` 的问题：
@@ -163,8 +173,8 @@ reviewer 要在判定行之前输出一个 json 代码块，`record` 会把它�
 
 - **只有形态 B，且是一次性调用**：不移植 ACP 会话，因此没有「续接」（`product_submit` / `product_wait` 不存在）。
 - **与旧插件不能同时挂载**：provider 名相同，重名会让 profile 插件树启动失败。
-- **不分片**：diff 超过预算直接 `E_BUDGET`，交回人工。分片的合成规则（全过才算过 /
-  多数 / 任一否决）是新的判定语义，一期不做。
+- **分片不自动决定片数**：`--shard i/n` 的片数由控制面按预算给；插件不自动重切、
+  不自动重试，也不合并不同 `head_sha` 或不同 base 的分片（后者直接退出 `2`）。
 - **不自动换模型**：`review` 必须显式给 `--model`；模型不可用就失败，不降级。
 - **reviewer 与实现者同族**：独立模型家族的第二意见要等接入第二个家族。
 - **`prepare` 依赖 `gh`**：受限沙盒下 `gh` 会报「令牌无效」，那是系统钥匙串被拦，
