@@ -7,8 +7,18 @@ export interface HomebaseConfig {
     ca: string | null;
     timeoutMs: number;
 }
-/** Read config from env. `homebase` only when explicitly selected *and* fully configured. */
-export declare function homebaseConfigFromEnv(env?: NodeJS.ProcessEnv): HomebaseConfig;
+/** `~/.dsh/token-sync.env` — the same file the collector writes/reads (600). */
+export declare function defaultTokenSyncEnvPath(home?: string): string;
+/** Parse KEY=VALUE lines; trims quotes and `~`. Never logs values. */
+export declare function parseTokenSyncEnv(content: string): Record<string, string>;
+/** Read the collector's env file; returns {} when absent/unreadable (caller falls back). */
+export declare function readTokenSyncEnv(file?: string): Record<string, string>;
+/**
+ * Read config. Credentials come from process env first, then from the
+ * collector's `~/.dsh/token-sync.env` (single source of truth; the plist is
+ * committed to git and must never carry a token).
+ */
+export declare function homebaseConfigFromEnv(env?: NodeJS.ProcessEnv, file?: string): HomebaseConfig;
 interface QueryRow {
     usage_date: string;
     source: string;

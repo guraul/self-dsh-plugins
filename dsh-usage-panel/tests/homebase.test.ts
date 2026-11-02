@@ -3,31 +3,44 @@
 // turns per-(day, model) rows back into one record per remote session.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { foldHomebaseRows, homebaseConfigFromEnv } from '../src/host/external/homebase.ts'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { foldHomebaseRows, homebaseConfigFromEnv, parseTokenSyncEnv, readTokenSyncEnv } from '../src/host/external/homebase.ts'
+
+// Point at a file that does not exist so the real ~/.dsh/token-sync.env never
+// leaks into assertions.
+const NO_FILE = '/nonexistent/token-sync.env'
 
 test('config: defaults to local with no env at all', () => {
-  const cfg = homebaseConfigFromEnv({})
+  const cfg = homebaseConfigFromEnv({}, NO_FILE)
   assert.equal(cfg.source, 'local')
   assert.equal(cfg.timeoutMs, 8000)
 })
 
 test('config: homebase is only selected when explicitly asked AND fully configured', () => {
-  const full = homebaseConfigFromEnv({
-    DSH_USAGE_PANEL_DATA_SOURCE: 'homebase',
-    DSH_USAGE_PANEL_HOMEBASE_URL: 'https://106.13.181.13',
-    DSH_USAGE_PANEL_HOMEBASE_TOKEN: 'x'.repeat(64),
-  })
+  const full = homebaseConfigFromEnv(
+    {
+      DSH_USAGE_PANEL_DATA_SOURCE: 'homebase',
+      DSH_USAGE_PANEL_HOMEBASE_URL: 'https://106.13.181.13',
+      DSH_USAGE_PANEL_HOMEBASE_TOKEN: 'x'.repeat(64),
+    },
+    NO_FILE,
+  )
   assert.equal(full.source, 'homebase')
   assert.equal(full.url, 'https://106.13.181.13')
 
   // Missing token → stays local (a typo must not blank the panel).
-  const noToken = homebaseConfigFromEnv({
-    DSH_USAGE_PANEL_DATA_SOURCE: 'homebase',
-    DSH_USAGE_PANEL_HOMEBASE_URL: 'https://106.13.181.13',
-  })
+  const noToken = homebaseConfigFromEnv(
+    {
+      DSH_USAGE_PANEL_DATA_SOURCE: 'homebase',
+      DSH_USAGE_PANEL_HOMEBASE_URL: 'https://106.13.181.13',
+    },
+    NO_FILE,
+  )
   assert.equal(noToken.source, 'local')
 
-  const typo = homebaseConfigFromEnv({ DSH_USAGE_PANEL_DATA_SOURCE: 'homebse' })
+  const typo = homebaseConfigFromEnv({ DSH_USAGE_PANEL_DATA_SOURCE: 'homebse' }, NO_FILE)
   assert.equal(typo.source, 'local')
 })
 
@@ -84,4 +97,37 @@ test('fold: rows without a session id are skipped, not crashed on', () => {
   ])
   assert.equal(hits.size, 1)
   assert.equal(hits.get('ses_b')?.totals.total, 5)
+})
+
+test('token-sync.env fallback: only DATA_SOURCE is needed when the file carries the rest', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-env-'))
+  const file = path.join(dir, 'token-sync.env')
+  fs.writeFileSync(
+    file,
+    '# collector config\nHOMEBASE_URL=https://106.13.181.13\nHOMEBASE_INTERNAL_TOKEN=' + 'y'.repeat(64) + '\nHOMEBASE_CA="~/certs/ca.pem"\n',
+  )
+  const cfg = homebaseConfigFromEnv({ DSH_USAGE_PANEL_DATA_SOURCE: 'homebase' }, file)
+  assert.equal(cfg.source, 'homebase')
+  assert.equal(cfg.url, 'https://106.13.181.13')
+  assert.equal(cfg.token.length, 64)
+  // ~ must expand so the CA path is usable.
+  assert.equal(cfg.ca, path.join(os.homedir(), 'certs/ca.pem'))
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('token-sync.env fallback: missing file falls back to local, env wins when both exist', () => {
+  assert.equal(homebaseConfigFromEnv({ DSH_USAGE_PANEL_DATA_SOURCE: 'homebase' }, NO_FILE).source, 'local')
+  assert.deepEqual(readTokenSyncEnv(NO_FILE), {})
+  assert.deepEqual(parseTokenSyncEnv(''), {})
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-env2-'))
+  const file = path.join(dir, 'token-sync.env')
+  fs.writeFileSync(file, 'HOMEBASE_URL=https://from-file\nHOMEBASE_INTERNAL_TOKEN=' + 'z'.repeat(64) + '\n')
+  const cfg = homebaseConfigFromEnv(
+    { DSH_USAGE_PANEL_DATA_SOURCE: 'homebase', DSH_USAGE_PANEL_HOMEBASE_URL: 'https://from-env' },
+    file,
+  )
+  assert.equal(cfg.url, 'https://from-env') // env wins
+  assert.equal(cfg.token.length, 64) // token from file
+  fs.rmSync(dir, { recursive: true, force: true })
 })
