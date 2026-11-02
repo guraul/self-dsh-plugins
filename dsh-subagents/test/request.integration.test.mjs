@@ -89,3 +89,93 @@ test('diff 超预算时抛 E_BUDGET', (t) => {
     },
   )
 })
+
+/**
+ * 证据包只增加 facts / included 两个字段；nonce、diff、head_sha 必须与
+ * 不带证据包时完全相同，否则判定行与记录契约会被悄悄改掉。
+ */
+test('prepareRequest 带证据包时 nonce/diff/head_sha 不变', (t) => {
+  const { dir, gh, git } = sandbox(t)
+  writeFileSync(join(dir, 'facts.txt'), '人工确认：无外部依赖')
+  writeFileSync(join(dir, 'notes.md'), '# 背景\n设计细节')
+
+  const base = prepareRequest({ pr: 42, cwd: dir, ghBin: gh, gitBin: git, nonce: 'ABCDEFGH2345' }).request
+  const packed = prepareRequest({
+    pr: 42,
+    cwd: dir,
+    ghBin: gh,
+    gitBin: git,
+    nonce: 'ABCDEFGH2345',
+    factsFile: 'facts.txt',
+    include: ['notes.md'],
+  }).request
+
+  assert.equal(packed.nonce, base.nonce)
+  assert.equal(packed.diff, base.diff)
+  assert.equal(packed.head_sha, base.head_sha)
+  assert.deepEqual(packed.files, base.files)
+  assert.equal(packed.facts, '人工确认：无外部依赖')
+  assert.deepEqual(packed.included, [{ path: 'notes.md', content: '# 背景\n设计细节' }])
+  assert.equal('facts' in base, false, '不带证据包时不该出现 facts 键')
+  assert.equal('included' in base, false, '不带证据包时不该出现 included 键')
+})
+
+test('prepareRequest 缺 --include 文件时在调用 gh 之前失败', (t) => {
+  const { dir, git } = sandbox(t)
+  assert.throws(
+    () => prepareRequest({ pr: 42, cwd: dir, ghBin: join(dir, 'no-such-gh'), gitBin: git, include: ['missing.md'] }),
+    (error) => {
+      assert.equal(error.code, 'E_UNAVAILABLE')
+      assert.match(error.message, /--include 指定的文件不存在: .*missing\.md/)
+      return true
+    },
+  )
+})
+
+/** 证据包与 diff 共用 maxChars：facts + include 的总字节数超了就直接失败，不静默截断。 */
+test('prepareRequest 证据包超预算时抛 E_BUDGET（且不调用 gh）', (t) => {
+  const { dir, git } = sandbox(t)
+  writeFileSync(join(dir, 'facts.txt'), 'x'.repeat(100))
+  writeFileSync(join(dir, 'notes.md'), 'y'.repeat(100))
+
+  for (const input of [
+    { factsFile: 'facts.txt', maxChars: 99 },
+    { factsFile: 'facts.txt', include: ['notes.md'], maxChars: 150 },
+    { include: ['notes.md'], maxChars: 99 },
+  ]) {
+    assert.throws(
+      () =>
+        prepareRequest({
+          pr: 42,
+          cwd: dir,
+          ghBin: join(dir, 'no-such-gh'),
+          gitBin: git,
+          ...input,
+        }),
+      (error) => {
+        assert.equal(error.code, 'E_BUDGET')
+        return true
+      },
+      `${JSON.stringify(input)} 的证据包总量应超预算`,
+    )
+  }
+
+  // 恰好等于预算时必须放行（此时 gh 桩不可用，但错误码不能是 E_BUDGET）
+  assert.throws(
+    () =>
+      prepareRequest({
+        pr: 42,
+        cwd: dir,
+        ghBin: join(dir, 'no-such-gh'),
+        gitBin: git,
+        maxChars: 200,
+        factsFile: 'facts.txt',
+        include: ['notes.md'],
+      }),
+    (error) => {
+      assert.notEqual(error.code, 'E_BUDGET')
+      return true
+    },
+    '等于预算不该按超预算处理',
+  )
+})
