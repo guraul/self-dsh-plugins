@@ -1,44 +1,38 @@
 #!/usr/bin/env bash
-# open-pr.sh — 推送当前分支并开 PR（在对应 worktree 目录内运行）
+# open-pr.sh — 薄转发：本仓的开 PR 入口交给共享包 @guraul/dsh-pipeline
 #
-# 用法: cd .worktrees/<号>-<slug> && scripts/pipeline/open-pr.sh
-# 约定: 分支名必须为 task/<号>-<slug>；PR body 首行 Closes #<号>
-# 幂等: 分支已推送则重推；PR 已存在则只打印链接，不新建
+# 为什么只有几十行: 自 issue #235 起，「校验 task 分支 → 推送 → 拼 PR body → 幂等开 PR」的
+#   **唯一实现**是共享包 @guraul/dsh-pipeline 的 `pr` 子命令；本仓只保留一个
+#   「文件名与参数都不变」的转发壳，免得两份实现各自漂移。
+#
+# 用法（与旧脚本一致）:
+#   cd .worktrees/<号>-<slug> && scripts/pipeline/open-pr.sh
+#
+# 约定（由包侧执行）：当前分支必须是 task/<号>-<slug>，PR body 首行 Closes #<号>；
+#   工作区必须干净；PR 已存在则只打印链接，不重推、不新建。
+#
+# 包位置（顺序固定，解析只在 lib.sh 的 resolve_pipeline_cli 里实现一次）:
+#   ① $DSH_PIPELINE_HOME；② 主工作区 tools/node_modules/dsh-pipeline（worktree 场景）；
+#   ③ 当前仓 tools/node_modules/dsh-pipeline（非 worktree）。
+#   注意：装的是 `dist/latest.tgz` 的**打包产物**（见 tools/package.json），不是源码 checkout。
+#
+# 退出码: 原样透传包侧退出码：0 成功 / PR 已存在；2 用法或环境错误（含不在 task 分支、
+#   脏工作区、issue 无法访问）。
 source "$(dirname "$0")/lib.sh"
+set -u   # lib.sh 已设过，这里显式重申：本脚本靠它保护变量存在性判断
+
+# lib.sh 的 die 退出 1；本壳的失败一律是「用法/环境错误」，按包侧语义退出 2
+die() { echo "✗ $*" >&2; exit 2; }
+
 require_gh
+require_pipeline_pkg
 
-BRANCH=$(git -C "${REPO_ROOT}" branch --show-current) || BRANCH=""
-BRANCH_DISPLAY="${BRANCH}"
-if [[ -z "${BRANCH_DISPLAY}" ]]; then BRANCH_DISPLAY="<detached>"; fi
-[[ "${BRANCH}" == task/* ]] \
-  || die "当前不在 task/* 分支上（应在对应 worktree 里运行本脚本）: ${BRANCH_DISPLAY}"
-ISSUE=$(printf '%s' "${BRANCH}" | sed -E 's|^task/([0-9]+)-.*|\1|')
-is_issue_number "${ISSUE}" || die "无法从分支名解析 issue 号: ${BRANCH}"
+# —— 参数原样转发（不做任何解析：分支校验 / 脏工作区 / PR body 全在包里做）——
+info "已切换到共享 pipeline 包：${PIPELINE_HOME}"
+info "转发: node ${PIPELINE_CLI_PATH} pr $*"
 
-TITLE=$(gh issue view "${ISSUE}" --repo "${GH_REPO}" --json title -q .title) \
-  || die "issue #${ISSUE} 无法访问"
-
-if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain)" ]]; then
-  die "工作区有未提交改动，先 commit（或 stash）"
-fi
-
-# —— 幂等：PR 已存在就只报告 ——
-EXIST=$(gh pr view "${BRANCH}" --repo "${GH_REPO}" --json url -q .url 2>/dev/null) || EXIST=""
-if [[ -n "${EXIST}" ]]; then
-  ok "PR 已存在: ${EXIST}"
-  exit 0
-fi
-
-info "推送 ${BRANCH}"
-git -C "${REPO_ROOT}" push -u origin "${BRANCH}"
-
-info "创建 PR（base: main ← ${BRANCH} ）"
-BODY="Closes #${ISSUE}
-
----
-由 scripts/pipeline/open-pr.sh 创建。
-合并前提：(1) CI 通过；(2) 审核闸门通过——reviewer 判 APPROVE 且未命中高风险 → 直接合并；
-命中高风险 / ESCALATE / 轮次超限时才需要用户点头（见 docs/pipeline/README.md §四 第 1 条）。"
-gh pr create --repo "${GH_REPO}" --base main --head "${BRANCH}" \
-  --title "${TITLE} (#${ISSUE})" --body "${BODY}"
-ok "PR 已创建；等 CI 与审核判定（APPROVE 且未命中高风险可直接 merge-pr.sh）"
+set +e
+node "${PIPELINE_CLI_PATH}" pr "$@"
+RC=$?
+set -e
+exit "${RC}"

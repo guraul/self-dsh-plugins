@@ -66,7 +66,7 @@
 # 不直接执行；被其他脚本 source
 source scripts/pipeline/lib.sh
 ```
-公共常量（`REPO_ROOT` / `GH_REPO` / `FETCH_RETRY` / `PLUGIN_DIRS`）、日志函数（`die` / `info` / `ok` / `mark`）、工具函数（`slugify` / `is_issue_number` / `pkg_script` / `pkg_name` / `worktree_for_branch` / `main_worktree` / `require_gh`）。
+公共常量（`REPO_ROOT` / `GH_REPO` / `FETCH_RETRY` / `PLUGIN_DIRS`）、日志函数（`die` / `info` / `ok` / `mark`）、工具函数（`slugify` / `is_issue_number` / `pkg_script` / `pkg_name` / `worktree_for_branch` / `main_worktree` / `require_gh` / `resolve_pipeline_cli` / `require_pipeline_pkg`）。
 
 `PLUGIN_DIRS` 是**插件目录名白名单**，`status.sh` / `check-all.sh` / `install-check.sh` 全部只从这里取插件。包名不另存副本——需要时用 `pkg_name()` 从各插件 `package.json` 现读。
 
@@ -84,29 +84,37 @@ source scripts/pipeline/lib.sh
 
 ### new-task.sh
 
+**本仓的 `scripts/pipeline/new-task.sh` 是一条薄转发壳**（issue #235 起）：slug 计算、分支/worktree
+创建、git 身份写入的**唯一实现**在共享包 `@guraul/dsh-pipeline` 的 `task` 子命令里，本壳只负责
+定位包并把 `<issue号>` 原样转发。
+
 ```bash
 scripts/pipeline/new-task.sh 12
 ```
 | 项 | 说明 |
 |---|---|
-| 参数 | `<issue号>`（正整数，必填） |
-| 效果 | `task/<号>-<slug>` + `.worktrees/<号>-<slug>`，基于 `origin/main`；新 worktree 内写入当前 git 身份（worktree 局部配置，不动全局） |
+| 参数 | `<issue号>`（正整数，必填；原样转发给包） |
+| 效果（包侧） | `task/<号>-<slug>` + `.worktrees/<号>-<slug>`，基于 `origin/main`；新 worktree 内写入当前 git 身份（worktree 局部配置，不动全局） |
 | 幂等 | worktree 已存在 → 直接打印路径退出（**不 fetch、不改动现场**）；路径被占但不是本仓库 worktree → 报错停下 |
-| 退出码 | 0 成功；1 参数非法 / issue 不可访问 / fetch 连续失败 |
+| 退出码 | 原样透传包侧退出码：0 成功；2 用法或环境错误（参数非法 / issue 不可访问 / fetch 连续失败） |
 
-`<slug>` 由 issue 标题小写化并只保留 `[a-z0-9-]`（截断 40）——**中文标题会被清空并兜底为 `task`**。
+`<slug>` 由包侧从 issue 标题计算：小写化并只保留 `[a-z0-9-]`（截断 40）；中文标题会被清空，
+兜底为标题 sha1 的前 8 位（确定性——同一 issue 重跑得到同一分支名）。
 
 ### open-pr.sh
+
+**本仓的 `scripts/pipeline/open-pr.sh` 是一条薄转发壳**（issue #235 起）：分支校验、推送、PR body
+与幂等判断的**唯一实现**在共享包 `@guraul/dsh-pipeline` 的 `pr` 子命令里，本壳只负责定位包并转发。
 
 ```bash
 cd .worktrees/12-xxx && scripts/pipeline/open-pr.sh
 ```
 | 项 | 说明 |
 |---|---|
-| 参数 | 无（从当前分支名反解 issue 号） |
-| 前置 | 分支名必须是 `task/<号>-<slug>`；工作区必须干净（有未提交改动直接拒绝） |
+| 参数 | 无（包侧从当前分支名反解 issue 号） |
+| 前置（包侧） | 分支名必须是 `task/<号>-<slug>`；工作区必须干净（有未提交改动直接拒绝） |
 | 幂等 | 分支已推送则重推；**PR 已存在则只打印链接，不新建** |
-| 退出码 | 0 成功 / PR 已存在；1 分支名不合规、脏工作区、issue 不可访问 |
+| 退出码 | 原样透传包侧退出码：0 成功 / PR 已存在；2 用法或环境错误（分支名不合规、脏工作区、issue 不可访问） |
 
 ### merge-pr.sh
 
@@ -121,8 +129,16 @@ scripts/pipeline/merge-pr.sh <PR号> --check-only  # 演练：跑到闸门 / CI 
 scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎用）
 ```
 
-**包位置解析**：优先 `$DSH_PIPELINE_HOME`，未设置则用本仓 `tools/node_modules/dsh-pipeline`（由 `tools/package.json` 从 `dist/latest.tgz` 安装的**打包产物**，不是源码 checkout），取
-`<包根>/bin/cli.mjs`；两者都找不到 `cli.mjs` 就报错退出（提示设置 `DSH_PIPELINE_HOME`）。
+**包位置解析**（`lib.sh` 的 `resolve_pipeline_cli`，`new-task.sh` / `open-pr.sh` / `merge-pr.sh` 共用一份）：
+
+1. `$DSH_PIPELINE_HOME`（显式覆盖：**设置了就不再回退**，指错也直接报错，避免静默用到别的包）；
+2. `<主工作区>/tools/node_modules/dsh-pipeline`——主工作区取 `git rev-parse --git-common-dir` 的父目录，
+   因此**在 worktree 里运行也能找到装在主工作区的包**（issue #235）；
+3. `<当前目录所在仓>/tools/node_modules/dsh-pipeline`（非 worktree 的常规场景）。
+
+包是由 `tools/package.json` 从 `dist/latest.tgz` 安装的**打包产物**，不是源码 checkout；取
+`<包根>/bin/cli.mjs`。都落空时报错退出 2，并逐条列出试过的路径（提示在主工作区 `tools/` 里跑
+`pnpm install`，或设置 `DSH_PIPELINE_HOME`）。
 
 **参数转发**（壳只做映射，不做任何判定）：
 
@@ -153,7 +169,7 @@ scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎
 |---|---|
 | 行为（包侧） | 定位 PR → CI checks 未过则拒绝 → 审核闸门未过则拒绝 → `gh pr merge --squash` → 删远端分支 → 删本地分支（`-D`）→ 移除对应 worktree → `worktree prune` → 主工作区快进（`ff_main()`：`git fetch --prune origin main` + `git merge --ff-only origin/main`，**显式命名 merge head** 以绕开 `FETCH_HEAD` 竞态，仍绝不做非快进合并；失败时**先确认无分叉才自动重试一次**，真分叉则拒绝并提示不要用 `--force`） |
 | 幂等 | PR 已是 `MERGED` → 跳过合并，只清理现场并快进 main |
-| 退出码 | 原样透传包侧退出码：**0** 成功（`--check-only` 通过也是 0）；**1** 审核闸门未过 / CI 未过（含 `--checks-file` 判定失败），或壳找不到共享包；**2** 参数非法（含 `--no-review` 缺 `--reason`、`--record` 与 `--no-review` 同用）/ PR 状态不符 / git·gh 操作失败 |
+| 退出码 | **0 / 1 / 2**，与另两个转发壳同为「业务拒绝 vs 用法·环境错误」两分：**0** 成功（`--check-only` 通过也是 0）；**1** 业务拒绝——审核闸门未过（含判定非 `APPROVE`、记录与 PR/提交不符、超出时效）/ CI 未过（含 `--checks-file` 判定失败）；**2** 用法或环境错误——参数非法（含未知参数、`--no-review` 缺 `--reason`、`--record` 与 `--no-review` 同用）/ 找不到 PR / 找不到共享包 / PR 状态不符 / git·gh 操作失败。壳自身的 `die` 一律 exit 2（含找不到共享包、未知参数） |
 
 审核闸门排在 `--check-only` **之前**——演练模式恰恰最该验证闸门拦不拦得住。闸门由共享包调用
 `node dsh-subagents/lib/cli.js check`，判定、SHA 绑定、时效、高风险路径都由它负责，包只负责

@@ -17,7 +17,9 @@
 # 参数映射: --review-record=<f> → 包里的 --record <f>；--no-review / --reason / --check-only /
 #   --checks-file / --force 原样传；--dry-run 是 --check-only 的旧别名。
 #
-# 包位置: 优先 $DSH_PIPELINE_HOME，缺省 <repo>/tools/node_modules/dsh-pipeline。
+# 包位置（顺序固定，解析只在 lib.sh 的 resolve_pipeline_cli 里实现一次）:
+#   ① $DSH_PIPELINE_HOME；② 主工作区 tools/node_modules/dsh-pipeline（worktree 场景）；
+#   ③ 当前仓 tools/node_modules/dsh-pipeline（非 worktree）。
 #   注意：装的是 `dist/latest.tgz` 的**打包产物**（见 tools/package.json），不是源码 checkout——
 #   否则「包门禁通过才发布」这道护栏就形同虚设（ADR-0003 §4）。
 #
@@ -27,6 +29,9 @@
 #   * DSH_REVIEWER=off 不再自动跳过审核；要跳过请显式 --no-review --reason=<文本>。
 source "$(dirname "$0")/lib.sh"
 set -u   # lib.sh 已设过，这里显式重申：本脚本靠它保护变量存在性判断
+
+# lib.sh 的 die 退出 1；本壳的失败一律是「用法/环境错误」，按包侧语义退出 2（与另两个转发壳一致）
+die() { echo "✗ $*" >&2; exit 2; }
 
 TARGET=""; CHECK_ONLY=0; CHECKS_FILE=""; RECORD=""; NO_REVIEW=0; REASON=""; FORCE=0
 HAS_CHECKS=0; HAS_RECORD=0; HAS_REASON=0
@@ -53,13 +58,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # —— 共享包位置 ——
-PKG_HOME=""
-if [[ -n "${DSH_PIPELINE_HOME+x}" ]]; then PKG_HOME="${DSH_PIPELINE_HOME}"; fi
-if [[ -z "${PKG_HOME}" ]]; then PKG_HOME="${REPO_ROOT}/tools/node_modules/dsh-pipeline"; fi
-CLI="${PKG_HOME}/bin/cli.mjs"
-[[ -f "${CLI}" ]] \
-  || die "找不到共享 pipeline 包: ${CLI} （在 tools/ 里跑 pnpm install，或设置 DSH_PIPELINE_HOME）"
-command -v node >/dev/null 2>&1 || die "需要 node：共享包是 Node CLI"
+require_pipeline_pkg
 
 # —— 主工作区（记录落在这里，不是 worktree） ——
 MAIN_WT=$(git -C "${REPO_ROOT}" worktree list --porcelain | awk '/^worktree /{print $2; exit}')
@@ -91,11 +90,11 @@ if [[ "${NO_REVIEW}" -eq 1 ]]; then set -- "$@" --no-review; fi
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then set -- "$@" --check-only; fi
 if [[ "${FORCE}" -eq 1 ]]; then set -- "$@" --force; fi
 
-info "已切换到共享 pipeline 包：${PKG_HOME}"
-info "转发: node ${CLI} $*"
+info "已切换到共享 pipeline 包：${PIPELINE_HOME}"
+info "转发: node ${PIPELINE_CLI_PATH} $*"
 
 set +e
-node "${CLI}" "$@"
+node "${PIPELINE_CLI_PATH}" "$@"
 RC=$?
 set -e
 exit "${RC}"

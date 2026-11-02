@@ -52,7 +52,9 @@ scripts/pipeline/merge-pr.sh 173 --review-record=.dsh-web/reviews/173-<sha>.json
 ```
 
 **合并脚本已改为转发共享包**（issue #187）：`merge-pr.sh` 只是薄壳，真正的闸门 / CI / squash 合并 /
-清理都在 `@guraul/dsh-pipeline`（优先 `$DSH_PIPELINE_HOME`，否则本仓 `tools/node_modules/dsh-pipeline`——装的是 `dist/latest.tgz` 产物）。
+清理都在 `@guraul/dsh-pipeline`（`lib.sh` 的 `resolve_pipeline_cli` 依次找：`$DSH_PIPELINE_HOME` →
+**主工作区** `tools/node_modules/dsh-pipeline` → 当前仓 `tools/node_modules/dsh-pipeline`；装的是 `dist/latest.tgz` 产物，
+因此在 worktree 里也能用）。
 因此有三点与旧脚本不同，写命令时别用旧写法：
 
 | 差异 | 新语义 |

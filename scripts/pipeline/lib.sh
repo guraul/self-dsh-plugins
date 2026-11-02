@@ -94,6 +94,67 @@ main_worktree() {
   printf ''
 }
 
+# —— 共享 pipeline 包（@guraul/dsh-pipeline）解析 ——
+# 为什么需要集中解析: 转发壳可能在 worktree 里被调用，而依赖装在**主工作区**的
+#   tools/node_modules；用 REPO_ROOT（= 当前 worktree 根）拼路径会落空（issue #235）。
+# 查找顺序（三个转发壳共用，别再各写一份）：
+#   ① $DSH_PIPELINE_HOME（显式覆盖：设了就是权威来源，不再回退——免得设错却静默用到别的包）
+#   ② <主工作区>/tools/node_modules/dsh-pipeline
+#      （主工作区 = git common dir 的父目录；worktree 里 common dir 指向主仓 .git）
+#   ③ <当前目录所在仓>/tools/node_modules/dsh-pipeline（非 worktree 的常规场景）
+# 结果: 成功设置 PIPELINE_CLI_PATH；失败返回 1，并把试过的路径逐行写进 PIPELINE_TRIED
+#   （用全局变量而不是 stdout：调用方若在 $(...) 里取值，子 shell 里改的变量传不回来）。
+PIPELINE_CLI_PATH=""
+PIPELINE_HOME=""
+PIPELINE_TRIED=""
+
+_pipeline_cli_candidates() {
+  local common main
+  if [[ -n "${DSH_PIPELINE_HOME:-}" ]]; then
+    printf '%s\n' "${DSH_PIPELINE_HOME%/}/bin/cli.mjs"
+    return 0
+  fi
+  # 旧 git 可能返回相对路径（主工作区里就是 `.git`），统一折成绝对路径再取父目录
+  common=$(git rev-parse --git-common-dir 2>/dev/null) || common=""
+  if [[ -n "${common}" ]]; then
+    common=$( (cd "${common}" 2>/dev/null && pwd -P) ) || common=""
+  fi
+  if [[ -n "${common}" ]]; then
+    main=$(dirname "${common}")
+    printf '%s\n' "${main}/tools/node_modules/dsh-pipeline/bin/cli.mjs"
+  fi
+  printf '%s\n' "${REPO_ROOT}/tools/node_modules/dsh-pipeline/bin/cli.mjs"
+}
+
+resolve_pipeline_cli() {
+  local candidate seen=""
+  PIPELINE_CLI_PATH=""
+  PIPELINE_TRIED=""
+  while IFS= read -r candidate; do
+    [[ -n "${candidate}" ]] || continue
+    # 主工作区 == 当前仓时候选会重复，只报一次
+    case "${seen}" in *"|${candidate}|"*) continue ;; esac
+    seen="${seen}|${candidate}|"
+    if [[ -f "${candidate}" ]]; then
+      PIPELINE_CLI_PATH="${candidate}"
+      return 0
+    fi
+    PIPELINE_TRIED="${PIPELINE_TRIED}${candidate}"$'\n'
+  done < <(_pipeline_cli_candidates)
+  return 1
+}
+
+# 供转发壳调用：成功则设置 PIPELINE_CLI_PATH / PIPELINE_HOME；失败 die（壳侧把 die 映射成 exit 2）
+require_pipeline_pkg() {
+  if ! resolve_pipeline_cli; then
+    die "找不到共享 pipeline 包（dsh-pipeline）。已尝试以下路径:
+$(printf '%s' "${PIPELINE_TRIED}" | sed 's/^/  - /')
+请在主工作区的 tools/ 里跑 pnpm install，或设置 DSH_PIPELINE_HOME 指向包目录"
+  fi
+  PIPELINE_HOME=$(dirname "$(dirname "${PIPELINE_CLI_PATH}")")
+  command -v node >/dev/null 2>&1 || die "需要 node：共享包是 Node CLI"
+}
+
 # 高亮一行安装/检查结论（只渲染，不改变退出码）
 mark() {
   case "$1" in
