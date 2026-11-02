@@ -49,7 +49,7 @@ const USAGE = `用法:
                                                         # 发评论 + 按判定提交 review 状态
   dsh-subagents roles   [--roles-dir <目录>]
 
-退出码: 0 通过 / 1 拒绝（闸门或判定不是 APPROVE）/ 2 参数或环境错误`
+退出码: 0 通过（record 落盘成功即 0，判定可能是 REJECT）/ 1 拒绝（闸门或 review 判定不是 APPROVE）/ 2 参数或环境错误`
 
 function parseArgv(argv) {
   const flags = {}
