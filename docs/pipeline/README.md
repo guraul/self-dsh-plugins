@@ -163,6 +163,35 @@ scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎
 > （允许裸 `--no-review`、`--checks-file` 读 `gh pr checks` 原文、`DSH_REVIEWER=off` 仍生效），
 > 平时不要用它；只有共享包出问题时才临时回滚到它。
 
+### 刷新共享包（`tools/`）
+
+`tools/package.json` 依赖的是本机 `dsh-pipeline` 仓打包出的 `dist/latest.tgz`（`file:` 依赖）。
+该产物**不入库、每次重新打包内容都会变**，锁里的 integrity 因此永远对不上；锁文件也跟着**不入库**
+（`.gitignore` 已忽略 `/tools/pnpm-lock.yaml`）。锁钉不住一个刻意不钉版本的本地构建物，硬留只会
+让 `pnpm` 复用旧缓存、装出旧包（issue #231 实测）。
+
+唯一可靠的做法是**把依赖目录和锁文件一起删掉重装**：
+
+```bash
+cd tools
+rm -rf node_modules pnpm-lock.yaml
+pnpm install
+```
+
+**不要用 `pnpm update`**：它可能复用本机的旧 tarball 缓存，命令成功但装出来的还是旧版包。
+装完验证版本（两个报错互斥，按第一句报错判断）：
+
+```bash
+node node_modules/dsh-pipeline/bin/cli.mjs record --request /dev/null --response /dev/null --root /tmp
+```
+
+| 报错 | 含义 |
+|---|---|
+| 「请求文件不是合法 JSON」 | **新版**：已认识 `--root`，只是 `/dev/null` 不是合法 JSON |
+| 「未知选项: --root」 | **旧版**：该版本还没有 `--root`，回到上面的清理重装 |
+
+重新生成的 `pnpm-lock.yaml` 只留在本机，**不要提交**。
+
 ### status.sh
 
 ```bash

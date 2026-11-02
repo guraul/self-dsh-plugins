@@ -50,6 +50,8 @@
 护栏：**包自己的门禁（单测 + 契约测试）通过，才替换 `latest.tgz`**。统一最新的代价由这道门禁承担。
 
 产物落在 `dsh-pipeline/dist/`，**不入库**（`.gitignore` 忽略全部 `*.tgz`）；`latest.tgz` 与编号 tarball 都在本机保留。
+同理，消费仓的锁文件**不入库**（本仓已移除 `tools/pnpm-lock.yaml`）：依赖的是本地构建物、每次重打包
+内容就变，锁里的 integrity 只会过期并让 `pnpm` 复用旧缓存，钉住的反而可能是旧包。
 
 否决：
 - **git tag 依赖**（`git+file://…#v1.2.0`）：依赖 pnpm 对 `git+file` 的支持细节，CI 上还要能 clone；

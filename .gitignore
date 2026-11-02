@@ -23,9 +23,12 @@
 /.dsh/*
 !/.dsh/pipeline.json
 
-# 工具依赖目录：只放行清单与锁文件，node_modules 仍忽略
+# 工具依赖目录：只放行清单，node_modules 与锁文件仍忽略。
+# 锁文件不入库：依赖的是本机重新打包的 dist/latest.tgz，内容每次变，
+# 锁里的 integrity 必然过期，反而会钉住旧包（issue #231）。
 !/tools/
 /tools/node_modules/
+/tools/pnpm-lock.yaml
 
 # —— 运维脚本与 LaunchAgent ——
 !/upgrade-dsh.sh
