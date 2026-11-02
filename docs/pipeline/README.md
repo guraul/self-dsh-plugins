@@ -410,7 +410,7 @@ scripts/pipeline/install-hooks.sh     # 幂等，可重复执行
 | 文档 | 用途 |
 |---|---|
 | [`review-loop.md`](./review-loop.md) | 把 executor 从旧插件切到 `dsh-subagents` 的步骤、验证与回滚；一期缺口清单 |
-| [`PROGRESS.md`](./PROGRESS.md) | 进度台账与已定决策（D1–D6） |
+| [`PROGRESS.md`](./PROGRESS.md) | 进度台账与已定决策（D1–D11，含取代关系） |
 
 ## 七、阶段状态
 

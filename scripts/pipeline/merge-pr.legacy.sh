@@ -10,7 +10,7 @@
 # 审核闸门（fail-closed）：合并前必须有审核记录（--review-record=<文件>），由
 #   dsh-subagents 校验判定、提交绑定、时效与高风险路径。要绕过必须**显式**声明：
 #   --no-review 或 DSH_REVIEWER=off——绕过会打印警告并写一条跳过审计（可查）。
-#   用户对本次 review 的明确同意仍是调用纪律（脚本不替用户做决定），但它不再是唯一闸门。
+#   判定 APPROVE 且未命中高风险 → 直接合并；ESCALATE / 命中高风险 / 轮次超限才叫人（D7）。
 #
 # 用法:
 #   cd <worktree> && scripts/pipeline/merge-pr.sh        # 在 worktree 内：自动识别当前分支的 PR
