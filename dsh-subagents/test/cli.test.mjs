@@ -1,12 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const CLI = fileURLToPath(new URL('../lib/cli.js', import.meta.url))
+const PLUGIN_DIR = fileURLToPath(new URL('..', import.meta.url))
 const SHA = 'e'.repeat(40)
 const NONCE = 'ABCDEFGH2345'
 
@@ -256,13 +257,20 @@ test('record: 共享包不存在时退出 2 并给中文提示', () => {
   writeFileSync(request, JSON.stringify({ request: { pr: 7, head_sha: SHA, nonce: NONCE } }))
   writeFileSync(response, `${NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
 
-  const out = run(
-    ['record', '--request', request, '--response', response, '--root', root],
-    { DSH_PIPELINE_HOME: join(root, 'missing-pipeline') },
+  // 桥会从插件自身位置向上找包，所以这里必须跑隔离副本：直接在仓里跑会命中
+  // 开发机 / CI 上已装的 tools/node_modules，测不到「都没有」这条路径。
+  const isolated = mkdtempSync(join(tmpdir(), 'dsh-subagents-isolated-'))
+  const plugin = join(isolated, 'dsh-subagents')
+  cpSync(PLUGIN_DIR, plugin, { recursive: true, filter: (src) => !src.includes('node_modules') })
+  const out = spawnSync(
+    process.execPath,
+    [join(plugin, 'lib', 'cli.js'), 'record', '--request', request, '--response', response, '--root', root],
+    { encoding: 'utf8', env: { ...process.env, DSH_PIPELINE_HOME: join(root, 'missing-pipeline') } },
   )
-  assert.equal(out.code, 2)
+  assert.equal(out.status, 2)
   assert.match(out.stderr, /找不到共享 pipeline 包/)
   assert.match(out.stderr, /DSH_PIPELINE_HOME/)
+  assert.match(out.stderr, /已尝试/, '错误信息要列出试过的路径')
 })
 
 test('roles 列出两个内置角色', () => {

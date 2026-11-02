@@ -4,22 +4,69 @@
  * 插件端不再保留第二份组装逻辑——记录结构、判定提取与策略版本只有一个真源
  * （@guraul/dsh-pipeline）。这里只做参数映射与输出透传。
  *
- * 包位置解析与 scripts/pipeline/merge-pr.sh 保持一致：
- *   优先 $DSH_PIPELINE_HOME，缺省 <仓库根>/tools/node_modules/dsh-pipeline。
+ * 包位置解析顺序（跨仓审核时 `--root` 是被审仓，包却装在插件自己所在的仓）：
+ *   1. $DSH_PIPELINE_HOME
+ *   2. 从插件自身 lib 目录向上最多 4 层找 tools/node_modules/dsh-pipeline
+ *      ——主仓与 worktree 都能命中；worktree 没装 tools 时继续向上命中主仓
+ *   3. <root>/tools/node_modules/dsh-pipeline（目标仓自带也认）
+ *   4. 都没有才报错，错误信息里列出所有试过的路径
  */
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { recordFile, reviewsDir } from './record.js'
 
-function pipelineHome(root = process.cwd()) {
-  const fromEnv = process.env.DSH_PIPELINE_HOME
-  if (typeof fromEnv === 'string' && fromEnv.length > 0) return fromEnv
-  return resolve(root, 'tools', 'node_modules', 'dsh-pipeline')
+/** 本文件所在目录 = 插件的 lib 目录；跨仓时这是唯一可靠的定位锚点。 */
+export const PLUGIN_LIB_DIR = dirname(fileURLToPath(import.meta.url))
+
+const RELATIVE_CLI = join('tools', 'node_modules', 'dsh-pipeline', 'bin', 'cli.mjs')
+const MAX_ASCEND = 4
+
+/**
+ * 按解析顺序列出候选 CLI 路径（去重、保序，不判断存在性）。
+ *
+ * @param {object} [options]
+ * @param {string} [options.root] 目标仓根（被审仓）
+ * @param {string} [options.from] 向上查找的起点，默认插件自身 lib 目录
+ * @param {NodeJS.ProcessEnv} [options.env] 默认 process.env
+ * @returns {string[]}
+ */
+export function pipelineCliCandidates({ root, from = PLUGIN_LIB_DIR, env = process.env } = {}) {
+  const candidates = []
+  const push = (candidate) => {
+    if (typeof candidate === 'string' && candidate.length > 0 && !candidates.includes(candidate)) {
+      candidates.push(candidate)
+    }
+  }
+
+  const home = env.DSH_PIPELINE_HOME
+  if (typeof home === 'string' && home.length > 0) push(join(home, 'bin', 'cli.mjs'))
+
+  let dir = resolve(from)
+  push(join(dir, RELATIVE_CLI))
+  for (let level = 0; level < MAX_ASCEND; level += 1) {
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+    push(join(dir, RELATIVE_CLI))
+  }
+
+  if (typeof root === 'string' && root.length > 0) push(join(resolve(root), RELATIVE_CLI))
+
+  return candidates
 }
 
-function pipelineCli(root = process.cwd()) {
-  return join(pipelineHome(root), 'bin', 'cli.mjs')
+/**
+ * 命中第一个存在的候选；都没有时 `cli` 为 null，`tried` 供报错信息使用。
+ *
+ * @param {object} [options] 同 {@link pipelineCliCandidates}
+ * @returns {{ cli: string | null, tried: string[] }}
+ */
+export function resolvePipelineCli(options = {}) {
+  const tried = pipelineCliCandidates(options)
+  const cli = tried.find((candidate) => existsSync(candidate))
+  return { cli: cli ?? null, tried }
 }
 
 function optionalArg(args, name, value) {
@@ -58,10 +105,12 @@ export function recordViaPackage({
   durationMs,
 } = {}) {
   const cwd = root || process.cwd()
-  const cli = pipelineCli(cwd)
-  if (!existsSync(cli)) {
+  const { cli, tried } = resolvePipelineCli({ root: cwd })
+  if (cli === null) {
     process.stderr.write(
-      `错误: 找不到共享 pipeline 包: ${cli} （在 tools/ 里跑 pnpm install，或设置 DSH_PIPELINE_HOME）\n`,
+      `错误: 找不到共享 pipeline 包（在 tools/ 里跑 pnpm install，或设置 DSH_PIPELINE_HOME）。已尝试:\n${tried
+        .map((candidate) => `  - ${candidate}`)
+        .join('\n')}\n`,
     )
     return { status: 2, record: null }
   }
