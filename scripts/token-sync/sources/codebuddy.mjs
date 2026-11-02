@@ -21,6 +21,61 @@ export function shanghaiDay(epochMs) {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * 扫 projects/*.jsonl 建「messageId → remoteId」映射。
+ *
+ * 关键事实（实测）：projects 里 `providerData.messageId` 就是 traces 里
+ * `toolOutput[].id`（completion id），交集 10163/10640 = 99.95%。
+ * 所以身份不需要靠时间猜，直接按 id 精确查。
+ *
+ * 只读 id，不读 usage：projects 的 usage 是流式快照且大量缺失，
+ * 用它统计会低估约 30 倍（traces 才是完整源）。
+ */
+export function buildRemoteIndex(projectsRoot) {
+  const byMessageId = new Map(); // messageId -> remoteId
+  let dirs = [];
+  try {
+    dirs = fs.readdirSync(projectsRoot, { withFileTypes: true }).filter((e) => e.isDirectory());
+  } catch {
+    return { byMessageId, sessions: 0 };
+  }
+  let sessions = 0;
+  for (const dir of dirs) {
+    let files = [];
+    try {
+      files = fs.readdirSync(path.join(projectsRoot, dir.name)).filter((f) => f.endsWith('.jsonl'));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      const remoteId = file.slice(0, -'.jsonl'.length);
+      let text;
+      try {
+        text = fs.readFileSync(path.join(projectsRoot, dir.name, file), 'utf8');
+      } catch {
+        continue;
+      }
+      let used = false;
+      for (const line of text.split('\n')) {
+        if (!line.trim() || !line.includes('messageId')) continue;
+        let record;
+        try {
+          record = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const messageId = record?.providerData?.messageId;
+        if (typeof messageId === 'string' && messageId) {
+          byMessageId.set(messageId, remoteId);
+          used = true;
+        }
+      }
+      if (used) sessions += 1;
+    }
+  }
+  return { byMessageId, sessions };
+}
+
 function listTraceFiles(root) {
   const out = [];
   let dirs = [];
@@ -48,7 +103,11 @@ function listTraceFiles(root) {
  */
 export async function collectCodebuddy(opts = {}) {
   const root = opts.tracesRoot ?? path.join(process.env.HOME ?? '', '.codebuddy', 'traces');
+  const projectsRoot = opts.projectsRoot ?? path.join(process.env.HOME ?? '', '.codebuddy', 'projects');
   const wanted = opts.days ? new Set(opts.days) : null;
+  // 身份索引：traces 只有 traceId，projects 才有 remoteId；靠时间戳把两者缝起来。
+  const remoteIndex = buildRemoteIndex(projectsRoot);
+  const match = { matched: 0, unmatched: 0, ambiguous: 0 };
   const errors = [];
   const rows = [];
   const seen = new Set(); // completion id 去重：同一响应可能被多处引用
@@ -82,6 +141,17 @@ export async function collectCodebuddy(opts = {}) {
         }
         continue;
       }
+      // 每个 span 自带时间：用它做身份匹配与日期切分，比 trace_start 更准。
+      const spanEnd = event?.span?.endedAt;
+      const spanStart = event?.span?.startedAt;
+      let spanMs = startedAt;
+      if (typeof spanEnd === 'string') {
+        const ms = Date.parse(spanEnd);
+        if (Number.isFinite(ms)) spanMs = ms;
+      } else if (typeof spanStart === 'string') {
+        const ms = Date.parse(spanStart);
+        if (Number.isFinite(ms)) spanMs = ms;
+      }
       const output = event?.span?.toolOutput;
       if (typeof output !== 'string' || !output.includes('prompt_tokens')) continue;
       let parsed;
@@ -100,7 +170,7 @@ export async function collectCodebuddy(opts = {}) {
           if (seen.has(completionId)) continue;
           seen.add(completionId);
         }
-        const day = startedAt ? shanghaiDay(startedAt) : null;
+        const day = spanMs ? shanghaiDay(spanMs) : null;
         if (!day) continue;
         if (wanted && !wanted.has(day)) continue;
 
@@ -114,12 +184,17 @@ export async function collectCodebuddy(opts = {}) {
         const completionDetails = usage.completion_tokens_details ?? {};
         const reasoning = num(completionDetails.reasoning_tokens);
 
+        // 身份：completion id（item.id）= projects 的 messageId → remoteId。
+        const remoteId = completionId ? remoteIndex.byMessageId.get(completionId) ?? null : null;
+        if (remoteId) match.matched += 1;
+        else match.unmatched += 1;
+
         rows.push({
           usage_date: day,
           source: 'codebuddy',
           provider: 'codebuddy',
           model: typeof item.model === 'string' && item.model ? item.model : 'unknown',
-          session_id: traceId ?? filenameOf(file),
+          session_id: remoteId ?? traceId ?? filenameOf(file),
           root_session: null,
           calls: 1,
           input_tokens: input,
@@ -128,8 +203,8 @@ export async function collectCodebuddy(opts = {}) {
           cache_read: cacheRead,
           cache_write: 0,
           total_tokens: input + outputTok + reasoning + cacheRead,
-          first_at: startedAt ?? 0,
-          last_at: startedAt ?? 0,
+          first_at: spanMs ?? 0,
+          last_at: spanMs ?? 0,
         });
         calls += 1;
       }
@@ -156,9 +231,23 @@ export async function collectCodebuddy(opts = {}) {
     prev.total_tokens = prev.input_tokens + prev.output_tokens + prev.reasoning_tokens + prev.cache_read + prev.cache_write;
     prev.first_at = Math.min(prev.first_at || Infinity, row.first_at || Infinity) || 0;
     prev.last_at = Math.max(prev.last_at || 0, row.last_at || 0);
+    // 同一天同模型下，若一行有 remoteId 而另一行没有，优先保留有身份的。
+    if (!prev.session_id?.startsWith('01') && row.session_id?.startsWith('01')) {
+      prev.session_id = row.session_id;
+    }
   }
 
-  return { rows: [...merged.values()], errors, stats: { files: files.length, calls, aggregated: merged.size } };
+  return {
+    rows: [...merged.values()],
+    errors,
+    stats: {
+      files: files.length,
+      calls,
+      aggregated: merged.size,
+      remoteSessions: remoteIndex.sessions,
+      ...match,
+    },
+  };
 }
 
 function filenameOf(file) {

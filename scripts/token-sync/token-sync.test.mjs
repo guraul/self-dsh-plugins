@@ -7,8 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { enumerateDays, targetDays } from './collect.mjs';
 import { batchRows, parseEnvFile, MAX_BATCH_ROWS } from './upload.mjs';
-import { shanghaiDay } from './sources/codebuddy.mjs';
-import { collectCodebuddy } from './sources/codebuddy.mjs';
+import { buildRemoteIndex, collectCodebuddy, shanghaiDay } from './sources/codebuddy.mjs';
 
 test('targetDays: --date 优先，否则最近 N 天且不含今天', () => {
   const now = Date.parse('2026-11-01T12:00:00+08:00');
@@ -155,4 +154,55 @@ test('targetDays: --date > --from/--to > --all > --days', () => {
   assert.deepEqual(targetDays({ from: '2026-10-31' }, now), ['2026-10-31', '2026-11-01']);
   assert.throws(() => targetDays({ from: '2026-11-02', to: '2026-10-30' }, now), /晚于/);
   assert.throws(() => targetDays({ all: true }, now), /最早日期/);
+});
+
+test('codebuddy 身份：projects 的 messageId 映射到 remoteId，traces 用 completion id 反查', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-sync-ident-'));
+  const projects = path.join(home, 'projects', '-Users-me-proj');
+  const traces = path.join(home, 'traces', '1234');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.mkdirSync(traces, { recursive: true });
+
+  const remoteId = '01a191db-a69f-7fcf-bfbf-d7d857cdb361';
+  // projects：每条 assistant 带 providerData.messageId（这是与 traces 的唯一可靠连接）
+  fs.writeFileSync(
+    path.join(projects, remoteId + '.jsonl'),
+    [
+      JSON.stringify({ type: 'message', role: 'user', timestamp: 1000 }),
+      JSON.stringify({ type: 'message', role: 'assistant', providerData: { messageId: 'msg-1' }, message: { usage: { inputTokens: 999 } } }),
+      JSON.stringify({ type: 'message', role: 'assistant', providerData: { messageId: 'msg-2' }, message: {} }),
+    ].join('\n'),
+  );
+
+  const index = buildRemoteIndex(path.join(home, 'projects'));
+  assert.equal(index.byMessageId.get('msg-1'), remoteId);
+  assert.equal(index.byMessageId.get('msg-2'), remoteId);
+  assert.equal(index.sessions, 1);
+
+  // traces：completion id = messageId，usage 完整
+  const completion = (id, prompt, out) => ({
+    id,
+    model: 'deepseek-v4.1-flash',
+    usage: { prompt_tokens: prompt, completion_tokens: out, prompt_cache_hit_tokens: 0, prompt_tokens_details: { cached_tokens: 0 } },
+  });
+  fs.writeFileSync(
+    path.join(traces, 'trace_a.jsonl'),
+    [
+      JSON.stringify({ type: 'trace_start', trace: { traceId: 'trace_x', startedAt: '2026-10-30T04:00:00.000Z' } }),
+      JSON.stringify({ type: 'span_end', span: { type: 'generation', endedAt: '2026-10-30T04:00:10.000Z', toolOutput: JSON.stringify([completion('msg-1', 100, 10)]) } }),
+      JSON.stringify({ type: 'span_end', span: { type: 'generation', endedAt: '2026-10-30T04:00:20.000Z', toolOutput: JSON.stringify([completion('msg-unknown', 200, 20)]) } }),
+    ].join('\n'),
+  );
+
+  const { rows, stats } = await collectCodebuddy({
+    tracesRoot: path.join(home, 'traces'),
+    projectsRoot: path.join(home, 'projects'),
+    days: ['2026-10-30'],
+  });
+  assert.equal(stats.matched, 1);
+  assert.equal(stats.unmatched, 1);
+  const byId = new Map(rows.map((r) => [r.session_id, r]));
+  assert.ok(byId.has(remoteId), '命中映射的调用应归到 remoteId');
+  assert.ok(byId.has('trace_x'), '未命中的调用退回 traceId，不丢数据');
+  fs.rmSync(home, { recursive: true, force: true });
 });

@@ -137,6 +137,12 @@ async function main() {
   const errors = [...dsh.errors, ...codebuddy.errors, ...opencode.errors];
 
   console.log('[token-sync] 采集结果:');
+  if (codebuddy.stats) {
+    const st = codebuddy.stats;
+    console.log(
+      `  codebuddy 身份匹配: matched=${st.matched} unmatched=${st.unmatched} ambiguous=${st.ambiguous}（projects 会话 ${st.remoteSessions}）`,
+    );
+  }
   for (const item of summarize(all)) {
     console.log(`  ${item.source.padEnd(10)} rows=${String(item.rows).padStart(5)} models=${String(item.models).padStart(3)} total=${item.total_tokens}`);
   }
