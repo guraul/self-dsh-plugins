@@ -1,68 +1,103 @@
 # Pipeline 建设 · 总体进度记录（self-dsh-plugins）
 
-> 本文件是本仓库 pipeline 建设的**唯一进度台账**：做了什么、为什么、下一步是什么。
-> **怎么用**：每完成一项就把对应 checkbox 打勾，并在 §四 变更记录追加一行；决策变更要写明日期与理由。
-> 流程手册见 [README.md](README.md)。
+> 本文件是本仓库 pipeline 建设的**唯一进度台账**：做了什么、为什么、还欠什么。
+> **怎么用**：每完成一项就勾选，并在 §五 变更记录追加一行；决策被取代时**不要删**，标注「已被取代」并指向新决策。
+> 流程手册见 [README.md](README.md)；审核循环细节见 [review-loop.md](review-loop.md)；跨仓共用的实现见 [`dsh-pipeline`](https://github.com/guraul/dsh-pipeline)。
 
 ## 一、目标
-
-把 [agent-mobile](https://github.com/guraul/agent-mobile) 的 pipeline 机制**照抄并适配**到本仓库：
 
 ```
 GitHub Issue（任务入口）
   → worktree 开发（scripts/pipeline/new-task.sh）
-  → 本地自测（check-all.sh 跑测试 / install-check.sh 验证装配）
-  → PR（Closes #N）→ CI（只跑测试）→ 用户 review → squash 合并
-  → 清理 worktree + 快进 main（**没有部署**）
+  → 本地门禁（按插件 pnpm test / pnpm run lint）
+  → PR（Closes #N）→ CI（只跑测试）
+  → reviewer 子代理判 APPROVE / REJECT / ESCALATE
+  → 闸门放行 → squash 合并 → 清理 worktree + 快进 main
 ```
 
-范围：**只做脚手架，不改任何插件代码**。本仓库没有服务器、没有部署，交付物是"插件被本机 DSH profile 正确装配"。
+**当前形态**：交付流程、审核判定、记录与闸门都已实现，且**闸门与合并逻辑已抽成跨仓共享的 `dsh-pipeline` 包**，本仓只留薄转发。本仓库没有服务器、没有部署，交付物是「插件被本机 DSH profile 正确装配」。
 
 ## 二、已定决策
 
-| # | 决策 | 日期 |
-|---|------|------|
-| D1 | 只移植**流程**（issue → worktree → PR → squash merge → 清理），不移植任何部署侧能力（无 `deploy.sh` / `rollback.sh` / `deploy-web.yml` / rsync / systemd / 线上验证） | 2026-10-17 |
-| D2 | 本仓库的"交付物"是插件被本机 DSH profile 正确装配；对应验证脚本是 `install-check.sh`（一次性 `DSH_HOME`，**绝不碰真实 `~/.dsh`**） | 2026-10-17 |
-| D3 | CI 只跑测试与语法检查（`pnpm test` / `node --check`），**零部署步骤**；另有 `typecheck` / `lint` 时一并跑 | 2026-10-17 |
-| D4 | 保留**人在环唯一一步**：agent 开 PR 后必须问用户"review 是否完成"，用户回 ok 才允许跑 `merge-pr.sh` | 2026-10-17 |
-| D5 | 修掉 agent-mobile `merge-pr.sh` 的已知缺陷（其 AGENTS.md 规定 15 ④ / issue #102：从主工作区运行会跳过 worktree 清理与 main 快进）——本仓库版本从主工作区运行也会反查并移除该分支的 worktree，再快进 main | 2026-10-17 |
-| D6 | 文档一律中文；脚本按 macOS 自带 bash 3.2 编写（不用关联数组 / `mapfile` / `${var^^}` / `declare -A` / `${VAR:-默认值}`） | 2026-10-17 |
+| # | 决策 | 日期 | 状态 |
+|---|------|------|------|
+| D1 | 只移植**流程**，不移植部署侧能力（无 `deploy.sh` / `rollback.sh` / rsync / systemd / 线上验证） | 2026-10-17 | 有效 |
+| D2 | 本仓库的「交付物」= 插件被本机 profile 正确装配；验证脚本 `install-check.sh` 用一次性 `DSH_HOME`，**绝不碰真实 `~/.dsh`** | 2026-10-17 | 有效 |
+| D3 | CI 只跑测试与语法检查，**零部署** | 2026-10-17 | 有效 |
+| D4 | ~~merge 前必须问用户「review 是否完成」~~ | 2026-10-17 | **已被取代**（见 D7） |
+| D5 | `merge-pr.sh` 修掉 agent-mobile 版本的缺陷：从主工作区运行也要反查并移除对应 worktree，再快进 main | 2026-10-17 | 有效 |
+| D6 | 文档中文；脚本按 macOS 自带 bash 3.2 写（不用关联数组 / `mapfile` / `${var^^}` / `declare -A` / `${VAR:-默认值}`） | 2026-10-17 | 有效 |
+| D7 | **人在环改为条件触发**：判定 `APPROVE` 且未命中高风险 → 直接合并；人只在 `ESCALATE`、命中高风险、轮次超限时介入 | 2026-11-01 | 有效（取代 D4） |
+| D8 | **闸门只在本地跑**，不进 GitHub Actions（包产物不入库，Actions 拿不到） | 2026-11-01 | 有效（ADR-0003 §5） |
+| D9 | 判定与合并逻辑**抽成独立包 `dsh-pipeline`**，本仓等消费方只留薄转发 | 2026-11-01 | 有效（ADR-0003） |
+| D10 | **记录写入只有一个真源**：包的 `record`；插件侧不再自己组装记录 | 2026-11-02 | 有效（ADR-0003 补充） |
+| D11 | 依赖本地构建产物的消费方，**锁文件不入库**（产物内容会变，锁必然过期） | 2026-11-02 | 有效（全局 §3） |
 
 ## 三、进度台账
 
-### 🔨 阶段 0：脚手架（当前）
+### ✅ 阶段 0 · 脚手架（2026-10-17）
 
-- [x] `scripts/pipeline/lib.sh`（公共常量与工具）
-- [x] `scripts/pipeline/new-task.sh`（issue → worktree + 分支）
-- [x] `scripts/pipeline/open-pr.sh`（推送 + 开 PR，自动 `Closes #N`）
-- [x] `scripts/pipeline/merge-pr.sh`（squash 合并 + 清理现场 + 快进 main）
-- [x] `scripts/pipeline/status.sh`（只读状态一览）
-- [x] `scripts/pipeline/check-all.sh`（测试 / check / typecheck 遍历）
-- [x] `scripts/pipeline/install-check.sh`（一次性 `DSH_HOME` 装配验证）
-- [x] `docs/pipeline/README.md`（工作手册）+ `docs/pipeline/PROGRESS.md`（本台账）
-- [x] `.github/workflows/ci.yml`（测试 + 语法检查，无部署）
-- [x] `.gitignore` 追加 `.worktrees/`
-- [ ] 7 个脚本 `bash -n` 语法检查全过（本轮）
-- [ ] 把 `scripts/`、`docs/pipeline/`、`.github/` 纳入顶层白名单 `.gitignore`（**尚未决定**：当前白名单只收录 `dsh-auto-upgrade/`，不改的话这些文件不入库、CI 里 4 个插件只有 1 个会被检出）
+- [x] `scripts/pipeline/` 七个脚本：`lib.sh` / `new-task.sh` / `open-pr.sh` / `merge-pr.sh` / `status.sh` / `check-all.sh` / `install-check.sh`
+- [x] `docs/pipeline/README.md`（工作手册）+ 本台账
+- [x] `.github/workflows/ci.yml`（按插件 matrix 跑测试 + 语法检查，无部署）
+- [x] `.gitignore` 纳入 `.worktrees/`、`.dsh-web/reviews/`、`.tmp/`
+- [x] 白名单问题已解决：`scripts/`、`docs/`、`.github/` 均已入库，CI 能检出全部插件
 
-### ⬜ 阶段 1：首次实跑
+### ✅ 阶段 1 · 首次实跑（2026-10-18）
 
-- [ ] 开一个真实 issue，走完 `new-task.sh` → 开发 → `check-all.sh` → `open-pr.sh`
-- [ ] 确认 CI（`ci.yml`）真的跑到该插件的测试
-- [ ] 用户 review 同意后跑 `merge-pr.sh`，确认 worktree 与本地分支被清理、main 被快进
-- [ ] 记录 CI 首跑暴露的问题（尤其：非白名单目录不会被检出）
+- [x] 真实 issue 走完 `new-task.sh` → 开发 → `open-pr.sh`
+- [x] CI 确实跑到对应插件的测试
+- [x] 用户同意后 `merge-pr.sh`：worktree 与本地分支被清理、main 被快进
+- [x] 修掉两个真实缺陷：CI 门禁误报（#5）、快进 main 的 `FETCH_HEAD` 竞态（#22）
 
-### ⬜ 阶段 2：常态化
+### ✅ 阶段 2 · reviewer 子代理（2026-11-01）
 
-- [ ] 每个插件补齐可跑的检查（`dsh-external-discuss` 目前无 lockfile / 无 `node_modules`）
-- [ ] 决定是否给插件加 `check` 脚本（当前只有 `dsh-auto-upgrade` / `dsh-external-discuss` 有）
-- [ ] `install-check.sh` 覆盖全部 4 个插件的装配验证并纳入日常
+- [x] 判定契约：`<nonce> VERDICT: <APPROVE|REJECT|ESCALATE> SHA: <40hex>`；0 或 ≥2 个匹配一律 `E_PARSE`
+- [x] 角色化（executor / reviewer）× 接入形态（A 原生 / B product CLI；C 清言网页桥**未做**）
+- [x] 形态 B 的权限映射、可配置二进制、超时 600s、默认审核模型
+- [x] findings 提取（json 块 + `--findings` 兜底）、`publish`（评论 + review 状态映射）
+- [x] 续接：`product_continue` 复用同一 CLI 会话
+- [x] executor 权限 `full`、委派可指定 `cwd`
 
-## 四、变更记录
+### ✅ 阶段 3 · 审核循环（2026-11-01 ~ 11-02）
+
+- [x] `review.sh` 固化 `prepare` / `publish`，产物落项目内 `.tmp/`
+- [x] `gate` 子命令：跨仓共用的审核闸门（`E_POLICY` / 高风险 / 轮次 / 过期）
+- [x] 记录增 `schemaVersion` / `policyVersion` / `round`
+- [x] `REJECT` 后用 `recheck` 在同一会话复审
+- [x] `ESCALATE` 的人为处置留档（`adjudicate`）
+- [x] 绕过闸门的留痕规则（`--no-review` → PR 评论 + 跳过审计 + 不计入已审核）
+
+### ✅ 阶段 4 · 共享包（2026-11-01 ~ 11-02）
+
+- [x] 独立包 `dsh-pipeline`：`gate` / `merge` / `record` / `status`，153 项测试
+- [x] 本仓切到包：`merge-pr.sh` 薄转发（#187）
+- [x] 记录实现统一到包（#221）：插件 `record` 与 `review --form b` 都调包的 `record`，删掉重复实现
+- [x] 锁文件不入库（#231）
+- [x] pre-push 钩子拦住直推 / 删除 `origin/main`（#222）
+
+## 四、未完成（欠账）
+
+| # | 欠账 | 现状 | 影响 |
+|---|------|------|------|
+| 1 | 包缺 `task` / `pr` 子命令 | `dsh-pipeline task` 报「未实现」 | `new-task.sh`、`open-pr.sh` 还没薄壳化，跨仓复用只闭环了一半 |
+| 2 | `dsh-pipeline` 仓没有自己的审核闸门 | 包的 PR 靠人工确认后 `gh pr merge` | 「全局统一」在包自己身上不成立 |
+| 3 | `dsh-pipeline` 仓没有 CI | 靠 `pack.sh` 本地跑 153 项测试 | 换机器 / 他人协作出包无保护 |
+| 4 | 形态 C（清言网页桥） | 未启动 | 依赖 REQ-002 |
+| 5 | 分片审核（超大 PR 拆段送审） | 未做 | 当前靠「diff 过大就人工放行」 |
+| 6 | `#117` 兼容矩阵定期验证 | 一直 open | 自动化项，非阻塞 |
+
+## 五、变更记录
 
 | 日期 | 变更 | 说明 |
 |------|------|------|
-| 2026-10-17 | 建档 + 阶段 0 脚手架落地 | 照抄并适配 agent-mobile pipeline：7 个脚本 + CI + 手册 + 台账；决策 D1–D6；仅脚手架，未改任何插件代码 |
-| 2026-10-18 | 修 `merge-pr.sh` CI 门禁误报（issue #5） | 去掉 `gh pr checks --fail-fast`（本机 gh 2.42.1 不带 `--watch` 时会报参数非法并 exit 1，被误判成"有未通过的 checks"）；改为取原文 + 退出码，**以输出文本判定为主**：`fail`/`pending`/`cancel` 拒绝并打印阻塞原文，`pass`/`skipping` 放行；无法判定时不静默放行。新增 `--check-only`（演练）与 `--checks-file=<文件>`（自测注入 checks 原文）两个开关 |
-| 2026-10-18 | 修 `merge-pr.sh` 收尾快进 main 的 `FETCH_HEAD` 竞态（issue #22） | 收尾不再用 `git pull --ff-only`（它读 `.git/FETCH_HEAD`；本机 git 2.37.1 的 `pull.c` 在 FETCH_HEAD 含 >1 个 for-merge 条目时 `die`「Cannot fast-forward to multiple branches.」，与真分叉无关，却被报成"有分叉"，易诱使误用 `--force`/`reset`）；改为 `git fetch --prune origin main` + `git merge --ff-only origin/main`（显式命名 merge head，仍绝不做非快进合并）。失败时区分「真分叉」（提示不要 force）与「临时状态」（给可操作一步），并对后者做**一次**「先验证无分叉再重试」的自动重试 |
+| 2026-10-17 | 建档 + 阶段 0 脚手架落地 | 照抄并适配 agent-mobile pipeline：7 个脚本 + CI + 手册 + 台账；决策 D1–D6 |
+| 2026-10-18 | 修 `merge-pr.sh` CI 门禁误报（#5） | 去掉 `gh pr checks --fail-fast`（gh 2.42.1 参数不兼容会被误判成「有未通过 checks」）；改为原文 + 退出码判定，新增 `--check-only` / `--checks-file` |
+| 2026-10-18 | 修快进 main 的 `FETCH_HEAD` 竞态（#22） | 弃用 `git pull --ff-only`（多 for-merge 条目时会 die「Cannot fast-forward to multiple branches」），改为 `fetch --prune` + `merge --ff-only origin/main`，绝不做非快进合并 |
+| 2026-11-01 | 阶段 2：reviewer 子代理建成 | 判定契约、角色 × 形态 A/B、权限映射、findings 提取、publish、续接；一批缺陷同日修掉（model 未透传 #159、issue 正文取错 #165、超时 600s #169） |
+| 2026-11-01 | 阶段 3：审核循环 + 闸门 | `review.sh` 固化、`gate` 子命令、记录加三字段、REJECT 同会话复审、ESCALATE 处置留档、绕过闸门留痕 |
+| 2026-11-01 | 阶段 4 起步：ADR-0003 + 独立包 | 定案「闸门与合并抽成独立包、只在本地跑、产物不入库」（D8–D9），本仓 `merge-pr.sh` 改薄转发（#187） |
+| 2026-11-02 | 记录统一到包（#221） | 插件 `record` / `review --form b` 改调包的 `record`；删掉 `findings.js` 与 `contract.js` 里重复的判定实现；顺手补回熔断计数与「畸形响应也落 ESCALATE 记录」 |
+| 2026-11-02 | 锁文件不入库（#231） | `tools/pnpm-lock.yaml` 钉的是内容会变的本地 tarball，必然过期（实测装出旧版包），改为不跟踪 + 文档写明刷新步骤（D11） |
+| 2026-11-02 | pre-push 钩子（#222） | 拦直推与删除 `origin/main`，例外 `ALLOW_DIRECT_MAIN=1`；钩子入库 + 安装脚本 |
+| 2026-11-02 | 重写本台账（#233） | 与现状对齐；D4 标注被 D7 取代；新增「未完成」小节，避免台账再次脱节 |
