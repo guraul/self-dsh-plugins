@@ -21,7 +21,7 @@
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check lib/index.js && node --check lib/cli.js && node --check lib/contract.js && node --check lib/roles.js && node --check lib/record.js && node --check lib/request.js && node --check lib/bridge-cli.js && node --check lib/card.js && node --check lib/findings.js && node --check lib/comment.js && node --check lib/publish.js && node --check lib/provider.js && node --check lib/tools/delegate.js"
+    "check": "node --check lib/index.js && node --check lib/cli.js && node --check lib/contract.js && node --check lib/roles.js && node --check lib/record.js && node --check lib/record-bridge.js && node --check lib/request.js && node --check lib/bridge-cli.js && node --check lib/card.js && node --check lib/comment.js && node --check lib/publish.js && node --check lib/provider.js && node --check lib/tools/delegate.js"
   },
   "keywords": [
     "dsh",

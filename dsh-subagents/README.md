@@ -71,7 +71,7 @@ reviewer 必须输出恰好一行：
 <随机标记> VERDICT: <APPROVE|REJECT|ESCALATE> SHA: <40 位提交>
 ```
 
-解析规则（`lib/contract.js`）：
+解析规则（共享包 `@guraul/dsh-pipeline`；插件只做透传，不再保留第二份实现）：
 
 | 情况 | 结果 |
 |---|---|

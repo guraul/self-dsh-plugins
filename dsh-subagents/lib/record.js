@@ -4,7 +4,7 @@
  * 记录只存 diff 的哈希与长度，不存全文——审核记录用于事后追溯，
  * 不是 diff 的第二份副本。
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
@@ -48,15 +48,6 @@ export function localDate(date = new Date()) {
 
 export function recordFile(dir, pr, headSha) {
   return join(dir, `${pr}-${headSha}.json`)
-}
-
-export function writeRecord(dir, record) {
-  mkdirSync(dir, { recursive: true })
-  const target = recordFile(dir, record.pr, record.head_sha)
-  const tmp = `${target}.tmp`
-  writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, 'utf8')
-  renameSync(tmp, target)
-  return target
 }
 
 export function readRecord(file) {

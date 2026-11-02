@@ -111,7 +111,7 @@ pnpm install
 
 | 项 | 证据 |
 |---|---|
-| 契约（判定行 / schema / 错误码） | `dsh-subagents/lib/contract.js` + `schema/review-result.json`，单测覆盖四种判定行异常与注入 |
+| 契约（判定行 / schema / 错误码） | 共享包 `@guraul/dsh-pipeline` + `schema/review-result.json`，包侧单测覆盖四种判定行异常与注入；插件端只留 nonce 与错误类型 |
 | 审核记录与闸门 | `.dsh-web/reviews/`（主工作区）、`merge-pr.sh --review-record` fail-closed、跳过审计 |
 | 角色层与委派 | `roles/{executor,reviewer}.json`、`product_delegate`（一次性）、权限映射（readonly→plan / full→auto） |
 | 形态 B 闭环 | `prepare → reviewer(B) → record → comment → review → merge` 全自动，PR #161 实测 |

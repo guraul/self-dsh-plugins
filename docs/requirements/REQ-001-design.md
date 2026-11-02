@@ -105,7 +105,7 @@
 
 - `NONCE`：调用方每次生成，12 位 base32（字母表 `A-Z2-7`）；
 - reviewer 必须输出**恰好一行**；
-- 解析规则（`dsh-subagents/lib/contract.js` 已实现）：
+- 解析规则（共享包 `@guraul/dsh-pipeline` 实现）：
 
 | 情况 | 结果 |
 |---|---|
@@ -122,7 +122,7 @@
 {"findings":[{"severity":"blocker","file":"lib/cli.js","line":120,"message":"应报 E_PARSE"}],"evidence":["lib/cli.js:118-124"]}
 ```
 
-优先级：先解析这个块（`lib/findings.js` 的 `extractFindings`），没有或格式不合法时用 `record --findings <文件>` 兜底；两者都没有不算失败——结论仍有效，只是没有明细。这样「格式没跟上」不会让一次审核整体作废。
+优先级：先解析这个块（共享包 `@guraul/dsh-pipeline` 的 `extractFindings`），没有或格式不合法时用 `record --findings <文件>` 兜底；两者都没有不算失败——结论仍有效，只是没有明细。这样「格式没跟上」不会让一次审核整体作废。
 
 ### 5.2 `ReviewResult`
 

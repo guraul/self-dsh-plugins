@@ -15,12 +15,19 @@ import {
   recordFile,
   reviewsDir,
   traceId,
-  writeRecord,
   writeSkipAudit,
 } from '../lib/record.js'
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), 'dsh-subagents-'))
+}
+
+/** 记录由共享包写；测试只造最小可读文件，不依赖插件端写入口。 */
+function putRecord(dir, record) {
+  mkdirSync(dir, { recursive: true })
+  const file = recordFile(dir, record.pr, record.head_sha)
+  writeFileSync(file, JSON.stringify(record))
+  return file
 }
 
 const SHA = 'c'.repeat(40)
@@ -29,10 +36,10 @@ test('traceId 格式符合 schema', () => {
   assert.match(traceId(new Date('2026-10-31T12:15:00Z')), /^20261031T121500Z-[0-9a-f]{8}$/)
 })
 
-test('writeRecord 与 readRecord 往返', () => {
+test('recordFile 命名与 readRecord 往返', () => {
   const dir = reviewsDir(tmp())
   const record = { pr: 7, head_sha: SHA, verdict: 'APPROVE', traceId: 'x', createdAt: new Date().toISOString() }
-  const file = writeRecord(dir, record)
+  const file = putRecord(dir, record)
   assert.equal(file, recordFile(dir, 7, SHA))
   assert.deepEqual(readRecord(file), record)
 })
@@ -83,8 +90,8 @@ test('writeSkipAudit 落一条可读记录', () => {
 
 test('findByTrace 扫目录命中且跳过坏文件', () => {
   const dir = reviewsDir(tmp())
-  writeRecord(dir, { pr: 1, head_sha: SHA, traceId: 'T-1', createdAt: new Date().toISOString() })
-  writeRecord(dir, { pr: 2, head_sha: 'd'.repeat(40), traceId: 'T-2', createdAt: new Date().toISOString() })
+  putRecord(dir, { pr: 1, head_sha: SHA, traceId: 'T-1', createdAt: new Date().toISOString() })
+  putRecord(dir, { pr: 2, head_sha: 'd'.repeat(40), traceId: 'T-2', createdAt: new Date().toISOString() })
   assert.equal(findByTrace(dir, 'T-1').length, 1)
   assert.equal(findByTrace(dir, 'T-1')[0].pr, 1)
   assert.deepEqual(findByTrace(dir, 'missing'), [])
