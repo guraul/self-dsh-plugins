@@ -33,6 +33,7 @@ import type {} from '@deepseek-ai/dsh-session-title'
 import {
   ApprovalQueue,
   buildApprovalCard,
+  makeTaskId,
   formatApprovalText,
   parseApprovalReply,
   parseButtonKey,
@@ -548,6 +549,30 @@ interface WecomClient {
   connect(): void
   close?(): void
   on(event: string, handler: (...args: never[]) => void): void
+}
+
+/**
+ * 把任意异常压成一行可读文本。
+ *
+ * 企微 SDK 拒收卡片时抛出的是普通对象（errcode/errmsg），直接拼接会变成
+ * `[object Object]`，日志里什么都看不到。
+ * @param error - 捕获到的任意值。
+ * @returns 一行描述，最长 300 字。
+ */
+function describeError(error: unknown): string {
+  let text: string
+  if (error instanceof Error) {
+    text = `${error.name}: ${error.message}`
+  } else if (error !== null && typeof error === 'object') {
+    try {
+      text = JSON.stringify(error)
+    } catch {
+      text = Object.prototype.toString.call(error)
+    }
+  } else {
+    text = String(error)
+  }
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text
 }
 
 /** Duck-typed approval request (the host service owns the real type). */
@@ -2117,9 +2142,7 @@ export function apply(ctx: Context, config: Config): void {
       const minutes = approvalTimeoutMinutes()
       const card = buildApprovalCard(entry, minutes)
       const payload = { msgtype: 'template_card', template_card: card }
-      /** 把异常压成一行，避免日志里出现整段堆栈。 */
-      const reason = (error: unknown): string =>
-        error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+      const reason = describeError
       try {
         await ws.sendMessage(entry.chatTarget, payload)
         console.log(`[im-bridge] 审批卡片已发送 id=${entry.id} 目标=${entry.chatTarget}`)
@@ -2192,6 +2215,7 @@ export function apply(ctx: Context, config: Config): void {
       approvalSeq += 1
       return {
         id: String(approvalSeq),
+        taskId: makeTaskId(approvalSeq),
         chatTarget,
         kind: st.kind ?? 'single',
         initiator,
@@ -2341,14 +2365,14 @@ export function apply(ctx: Context, config: Config): void {
     /** 卡片按钮点击。 */
     /** 卡片结果态：点击后 5 秒内换掉，避免停在「待审批」的样子。 */
     function approvalResultCard(
-      id: string,
+      taskId: string,
       title: string,
       desc: string,
       subTitle: string,
     ): Record<string, unknown> {
       return {
         card_type: 'text_notice',
-        task_id: id,
+        task_id: taskId,
         main_title: { title, desc },
         sub_title_text: subTitle,
       }
@@ -2379,7 +2403,7 @@ export function apply(ctx: Context, config: Config): void {
         .updateTemplateCard(
           frame,
           approvalResultCard(
-            entry.id,
+            entry.taskId,
             approved ? '✅ 已同意' : '🚫 已拒绝',
             entry.toolName,
             approved ? '本次操作已放行（只生效这一次）' : '本次操作已拒绝',

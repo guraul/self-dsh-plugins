@@ -24,6 +24,7 @@ function entry(id: string, overrides: Partial<PendingApproval> = {}): {
   const decisions: string[] = []
   const value: PendingApproval = {
     id,
+    taskId: `task-${id}`,
     chatTarget: 'user-1',
     kind: 'single',
     initiator: 'user-1',
@@ -99,7 +100,7 @@ describe('card and text rendering', () => {
     const { value } = entry('5')
     const card = buildApprovalCard(value, 5)
     assert.equal(card.card_type, 'button_interaction')
-    assert.equal(card.task_id, '5')
+    assert.equal(card.task_id, 'task-5')
     assert.deepEqual(card.button_list.map((button) => button.key), ['approve:5', 'reject:5'])
     assert.ok(card.sub_title_text.includes('5 分钟'))
   })
