@@ -15,7 +15,7 @@ importers:
 packages:
 
   '@guraul/dsh-pipeline@file:../../dsh-pipeline/dist/latest.tgz':
-    resolution: {integrity: sha512-eyeI740HtFENqxV+CFrzwpx877Mlo3De/gwQS9qVFQmfLl7KeYTrXJpIf1xh2GPRg9aObMbbUx4ids8P1JQxug==, tarball: file:../../dsh-pipeline/dist/latest.tgz}
+    resolution: {integrity: sha512-xKPotOqtpcxkiIY1RjxnUm4FfAfxTrUjLCRUTcD4EhzBxHuY7YSxv/IU6odftMoMINYiTc6nz7pXGjtHirj01w==, tarball: file:../../dsh-pipeline/dist/latest.tgz}
     version: 0.1.0
     engines: {node: '>=20'}
     hasBin: true
