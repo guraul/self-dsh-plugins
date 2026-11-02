@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { ContractError, makeNonce } from './contract.js'
+import { pickShard, splitDiffByFile } from './shard.js'
 
 export const DEFAULT_MAX_CHARS = 120000
 /** 单个附带文件的字节上限：证据包是补充材料，不能把提示词预算挤爆。 */
@@ -127,7 +128,7 @@ export function changedLines(diff) {
 /**
  * @param {{ pr: number|string, cwd: string, maxChars?: number, timeoutMs?: number,
  *           gitBin?: string, ghBin?: string, nonce?: string, env?: object,
- *           factsFile?: string, include?: string[] }} input
+ *           factsFile?: string, include?: string[], shard?: { index: number, total: number } }} input
  */
 export function prepareRequest({
   pr,
@@ -141,6 +142,7 @@ export function prepareRequest({
   env,
   factsFile,
   include = [],
+  shard,
 }) {
   // 证据包先读：文件缺失属于调用方错误，应该在打网络之前就失败。
   // 它是可选字段，没有就一个键都不加，任务卡才能与旧版逐字节一致。
@@ -175,14 +177,26 @@ export function prepareRequest({
     diff = run(ghBin, ['pr', 'diff', String(pr)], { cwd, env })
   }
 
+  let files = Array.isArray(meta.files) ? meta.files.map((file) => file.path) : []
+  let shardField = null
+
+  // 分片在预算检查之前切：每片各自算预算，切完仍超才失败。
+  // 片内只保留该片的文件与 hunk，`files` 也只列该片——reviewer 不该看到别的片。
+  if (shard) {
+    const picked = pickShard(splitDiffByFile(diff), shard)
+    diff = picked.text
+    files = picked.files
+    shardField = { index: shard.index, total: shard.total, files: picked.files }
+  }
+
   if (diff.length > maxChars) {
     throw new ContractError(
       'E_BUDGET',
-      `变更 ${diff.length} 字符，超过预算 ${maxChars}；一期不分片，直接交回人工`,
+      shard
+        ? `第 ${shard.index}/${shard.total} 片的变更 ${diff.length} 字符，超过预算 ${maxChars}；请把分片调细`
+        : `变更 ${diff.length} 字符，超过预算 ${maxChars}；一期不分片，直接交回人工`,
     )
   }
-
-  const files = Array.isArray(meta.files) ? meta.files.map((file) => file.path) : []
 
   // 验收依据必须来自 issue 本身：PR 正文只有 `Closes #N` 与自动生成说明，
   // 拿它当验收标准等于让 reviewer 对着废话审核。
@@ -215,6 +229,7 @@ export function prepareRequest({
       model: model ?? null,
       issue,
       files,
+      ...(shardField ? { shard: shardField } : {}),
       diff: fenceDiff(diff),
       budget: { maxChars, timeoutMs },
       ...evidence,
@@ -260,6 +275,11 @@ export function buildReviewPrompt({ request, role }) {
     `PR: #${request.pr}`,
     `提交: ${request.head_sha}`,
     `变更文件: ${request.files.join(', ') || '(无)'}`,
+    ...(request.shard
+      ? [
+          `本次只审第 ${request.shard.index}/${request.shard.total} 片：只对本片给出的文件下结论，其它片由别的审核者负责；本片之外的文件缺失不算问题。`,
+        ]
+      : []),
     '',
     '验收依据（issue 正文）:',
     request.issue.body || '(空)',

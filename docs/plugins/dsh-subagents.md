@@ -17,6 +17,7 @@
 | 判定行格式 / 解析规则 / 高风险路径 | 共享包 `tools/node_modules/dsh-pipeline`（`@guraul/dsh-pipeline`） | **插件端没有第二份实现**；改包要同步 `schema/review-result.json` 与 `REQ-001-design.md` §4 |
 | 请求组装、diff 围栏、预算 | `lib/request.js` | diff 走 git，元数据走 gh；`--diff-file` / `--meta-file` 留给测试 |
 | 记录落盘、traceId、熔断 | `lib/record.js` | 记录目录 `.dsh-web/reviews/` 已在 `.gitignore` 里忽略；**落在主工作区**（`mainWorktreeRoot`），不要改回 `cwd` |
+| 分片切分 / 合成规则 | `lib/shard.js` | 按 diff 的 `diff --git` 段落切（段落是文件的真源）；缺片、轮次不一致一律报错，**不许放宽判定** |
 | 角色字段与加载 | `lib/roles.js` + `roles/*.json` | 非法值降级到最保守值，坏文件跳过 |
 | 形态 B 的 CLI 调用 | `lib/bridge-cli.js` | 一期只有 `opencode` / `codebuddy`；ACP 在 PR4 |
 | 子命令 | `lib/cli.js` | 退出码契约：0 通过 / 1 拒绝 / 2 参数或环境错误 |
@@ -57,6 +58,7 @@ reviewer 默认走**形态 B**（`codebuddy/glm-5.3-flash`）：独立模型家�
 10. **形态 B 的沙盒只能读工作目录内的文件。** `codebuddy` 读不到 `/tmp`（实测），所以任务卡必须**内联进 task 文本**，不要让它去读文件路径。
 11. **形态 B 首次调用可能反问确认。** 委派 prompt 已固定带执行前言（`DELEGATION_PREAMBLE`）；自己手写任务书时也要带上，否则一次调用会空转。
 12. **一期没有续接。** `product_submit` / `product_wait` 不存在，委派只能一次性拿结果；控制面写任务卡时要假定「交出去就收不回来追问」。
+13. **分片记录绝不能写规范文件名。** 闸门读的是 `<pr>-<sha>.json`；分片如果落在那里，一片的 `APPROVE` 就能放行整份变更。分片写 `<pr>-<sha>.shard-<i>-of-<n>.json`，落盘后立刻删掉规范文件；`record --aggregate` 才写规范文件。
 
 ## 怎么验证
 

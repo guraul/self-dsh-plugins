@@ -59,6 +59,14 @@ node lib/cli.js card    --input .tmp/review/116/card.json
 node lib/cli.js comment --record .dsh-web/reviews/116-<sha>.json --round 2
 ```
 
+**分片审核**（变更太大、一次审不完时）：`prepare --shard 2/3` 把变更文件按行数均分，
+只产出第 2 片的 request（同一 `head_sha`、独立 `nonce`、`diff` / `files` 只含该片，
+并带 `shard: {index,total,files}`）；每片的 `record` 写成
+`.dsh-web/reviews/<pr>-<sha>.shard-2-of-3.json`，**不占用**闸门读的规范文件名。
+全部片审完后用 `record --aggregate --pr <号> --head-sha <sha> --root <仓库根>` 合成：
+缺片直接退出 `2` 并点名缺第几片；判定按 `REJECT > ESCALATE > APPROVE` 收紧，
+`findings` / `evidence` 拼接并带 `[i/n]` 前缀，合成记录不带 `shard` 字段（闸门只认这条）。
+
 退出码：`0` 通过 / `1` 拒绝（闸门不过或判定不是 `APPROVE`）/ `2` 参数或环境错误。
 
 **证据包**（`prepare --facts` / `--include`）解决 reviewer 读不到外部事实就只能 `ESCALATE` 的问题：

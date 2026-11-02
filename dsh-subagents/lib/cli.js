@@ -17,6 +17,13 @@ import { runProvider } from './bridge-cli.js'
 import { getRole, loadRoles } from './roles.js'
 import { recordViaPackage } from './record-bridge.js'
 import {
+  aggregateShardRecords,
+  collectShardRecords,
+  finalizeShardRecord,
+  parseShardSpec,
+  writeAggregateRecord,
+} from './shard.js'
+import {
   bumpCircuit,
   findByTrace,
   isExpired,
@@ -30,9 +37,10 @@ import {
 } from './record.js'
 
 const USAGE = `用法:
-  dsh-subagents prepare --pr <号> [--out <文件>] [--root <仓库根>]
+  dsh-subagents prepare --pr <号> [--out <文件>] [--root <仓库根>] [--shard <i>/<n>]
                         [--facts <文件>] [--include <路径>[,<路径>...]]
                                                         # 证据包：事实文本 / 附带文件（单文件 8 KB 上限）
+                                                        # --shard：按文件均分后的第 i 片（同一 head_sha，独立 nonce）
   dsh-subagents prompt  --request <文件> [--out <文件>] [--role <角色>]  # 渲染审核提示词
   dsh-subagents recheck --request <新请求> --previous <上一轮记录> [--out <文件>]
                                                         # 渲染「同一会话复审」的任务书
@@ -40,6 +48,8 @@ const USAGE = `用法:
                                                         # 给 ESCALATE 的判定留下人为处置
   dsh-subagents record  --request <文件> --response <文件> [--findings <文件>] [--provider <名>] [--model <名>]
                         [--round <1..3>] [--form <名>] [--duration-ms <毫秒>] [--json] [--root <仓库根>]
+  dsh-subagents record  --aggregate --pr <号> --head-sha <sha> [--root <仓库根>]
+                                                        # 合成该 PR 该 sha 的全部分片记录（缺片 → 退出 2）
   dsh-subagents check   --pr <号> --record <文件> [--head-sha <sha>] [--root <仓库根>]
   dsh-subagents gate    --pr <号> [--record <文件>] [--head-sha <sha>] [--root <仓库根>]
                         [--no-review --reason <说明>]   # 跨仓共用闸门（合并脚本调用）
@@ -109,6 +119,7 @@ function cmdPrepare(flags) {
   if (flags.facts !== undefined && typeof flags.facts !== 'string') {
     throw fail('E_BUDGET', '--facts 需要一个文件路径')
   }
+  const shard = flags.shard === undefined ? undefined : parseShardSpec(flags.shard)
   const { request, stats } = prepareRequest({
     pr: flags.pr,
     cwd: root(flags),
@@ -118,6 +129,7 @@ function cmdPrepare(flags) {
     model: flags.model,
     factsFile: flags.facts,
     include: parseInclude(flags.include),
+    shard,
   })
   const payload = { request, stats }
   if (flags.out) {
@@ -254,11 +266,51 @@ function parseDurationMs(flags) {
   return value
 }
 
+/** 请求里带 shard 时，本次记录是分片；不带就是普通的一整份判定。 */
+function requestShard(file) {
+  let payload
+  try {
+    payload = JSON.parse(readFileSync(file, 'utf8'))
+  } catch (error) {
+    throw fail('E_PARSE', `请求文件不是合法 JSON: ${file}: ${error.message}`)
+  }
+  const shard = payload?.request?.shard
+  if (shard === undefined) return null
+  const { index, total } = shard ?? {}
+  if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || index < 1 || index > total) {
+    throw fail('E_BUDGET', `请求里的 shard 非法: ${JSON.stringify(shard)}`)
+  }
+  return { index, total }
+}
+
+/**
+ * 合成分片记录：缺片直接退出 2（fail-closed），绝不产出「只审了一部分」
+ * 却看起来完整的记录。合成记录写规范文件名，闸门只认它。
+ */
+function cmdAggregate(flags) {
+  if (flags.request !== undefined || flags.response !== undefined) {
+    throw fail('E_BUDGET', '--aggregate 不能与 --request / --response 同时使用')
+  }
+  const pr = Number(flags.pr)
+  if (!Number.isInteger(pr) || pr <= 0) throw fail('E_BUDGET', '--aggregate 需要 --pr')
+  if (typeof flags['head-sha'] !== 'string' || !/^[0-9a-f]{40}$/.test(flags['head-sha'])) {
+    throw fail('E_BUDGET', '--aggregate 需要 --head-sha（40 位小写十六进制）')
+  }
+
+  const dir = reviewsDir(root(flags))
+  const collected = collectShardRecords(dir, pr, flags['head-sha'])
+  const record = aggregateShardRecords(collected)
+  const file = writeAggregateRecord(dir, record)
+  emit(flags.json ? record : `已写入合成审核记录: ${file}（${record.verdict}）`, flags)
+  return record.verdict === 'APPROVE' ? 0 : 1
+}
+
 /**
  * 记录落盘统一交给共享 pipeline 包：判定提取、findings 兜底、高风险策略与
  * policyVersion 都在包内决定，插件端只保留对外参数。
  */
 function cmdRecord(flags) {
+  if (flags.aggregate) return cmdAggregate(flags)
   if (!flags.request || !flags.response) throw fail('E_BUDGET', '缺少 --request 或 --response')
   if (typeof flags.request !== 'string' || typeof flags.response !== 'string') {
     throw fail('E_BUDGET', '--request 与 --response 需要文件路径')
@@ -277,6 +329,7 @@ function cmdRecord(flags) {
     throw fail('E_BUDGET', `--round 必须是 1..3 的整数，收到 ${flags.round}`)
   }
 
+  const shard = requestShard(flags.request)
   const outcome = recordViaPackage({
     requestFile: flags.request,
     responseFile: flags.response,
@@ -285,13 +338,27 @@ function cmdRecord(flags) {
     model: typeof flags.model === 'string' ? flags.model : undefined,
     round,
     root: root(flags),
-    json: Boolean(flags.json),
+    // 分片记录要换名并补 shard 字段：先别打印包算出来的路径，改完自己打印
+    json: shard ? false : Boolean(flags.json),
+    quiet: Boolean(shard),
     form: typeof flags.form === 'string' ? flags.form : undefined,
     durationMs: parseDurationMs(flags),
   })
   // 对外契约：0 通过 / 1 拒绝 / 2 参数或环境错误。包的成功退出码只说明「写完了」，
   // 判定必须由插件读回来翻译，否则 REJECT 会被脚本当成放行。
   if (outcome.status !== 0) return outcome.status
+
+  if (shard) {
+    let written
+    try {
+      written = finalizeShardRecord(reviewsDir(root(flags)), outcome.record, shard)
+    } catch (error) {
+      process.stderr.write(`错误: ${error.message}\n`)
+      return 2
+    }
+    if (flags.json) process.stdout.write(`${JSON.stringify(written.record, null, 2)}\n`)
+    else process.stdout.write(`已写入分片审核记录: ${written.file}\n`)
+  }
   // 与旧实现一致：记录落盘但判定不是 APPROVE 也算一次失败，连续三次即熔断回人工。
   if (outcome.record.verdict !== 'APPROVE') bumpCircuit(reviewsDir(root(flags)))
   return outcome.record.verdict === 'APPROVE' ? 0 : 1

@@ -90,6 +90,7 @@ function optionalArg(args, name, value) {
  * @param {boolean} [options.json] 成功时输出记录 JSON（否则输出中文落盘提示）
  * @param {string} [options.form]
  * @param {number} [options.durationMs]
+ * @param {boolean} [options.quiet] 不打印落盘提示（调用方要改写记录文件时用，避免报出过时路径）
  * @returns {{ status: number, record: object | null }} 包进程退出码（2 表示参数/环境错误，含找不到包）与记录本体
  */
 export function recordViaPackage({
@@ -103,6 +104,7 @@ export function recordViaPackage({
   json,
   form,
   durationMs,
+  quiet = false,
 } = {}) {
   const cwd = root || process.cwd()
   const { cli, tried } = resolvePipelineCli({ root: cwd })
@@ -152,7 +154,7 @@ export function recordViaPackage({
 
   if (json) {
     process.stdout.write(`${JSON.stringify(record, null, 2)}\n`)
-  } else {
+  } else if (!quiet) {
     process.stdout.write(`已写入审核记录: ${recordFile(reviewsDir(cwd), record.pr, record.head_sha)}\n`)
   }
   return { status: 0, record }
