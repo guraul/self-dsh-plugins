@@ -1,352 +1,232 @@
-# Token 用量归集方案（dsh / codebuddy / opencode → homebase）
+# Token 用量归集（dsh / codebuddy / opencode → homebase）
 
-> 状态：设计稿（未实现）｜ 2026-11-01 ｜ 关联：[self-dsh-plugins#197](https://github.com/guraul/self-dsh-plugins/issues/197)
+> **状态：已实现（2026-11-02）** ｜ 关联：[#197](https://github.com/guraul/self-dsh-plugins/issues/197) ｜ 生产侧采集见 [#215](https://github.com/guraul/self-dsh-plugins/issues/215)（未开始）
 
 ## 0. 一句话
 
-三方用量在本机按「日 × 来源 × 执行方 × 模型 × 会话」切分，每天定时 POST 到 homebase，落到生产 SQLite 一张新表；插件改为从 homebase 读，不再直连本地库。
+三方用量在 Mac 上按「日 × 主机 × 来源 × 执行方 × 模型 × 会话」聚合，每天 12:00 写入 homebase 生产 SQLite；插件的**全部**数据（overview + 子代理明细）从 homebase 的 internal API 拉取，不再读本地文件。
 
 ---
 
-## 1. homebase 现状（调查结论）
+## 1. 链路
 
-### 1.1 数据库
+```
+Mac: dsh 投影缓存 / codebuddy traces / opencode.db
+  │  每天 12:00（LaunchAgent），也支持 --date / --from..--to / --all 补采
+  │  归一化 → 按主键聚合 → 按 (source, 日期) 分批
+  ▼
+POST https://106.13.181.13/api/internal/token-usage/ingest
+  │  x-internal-token，UPSERT（覆盖语义，重跑安全）
+  ▼
+homebase 生产 SQLite：token_usage_daily / token_usage_sync
+  ▲
+  │  GET /api/internal/token-usage/query
+  │
+dsh-usage-panel（DSH_USAGE_PANEL_DATA_SOURCE=homebase）
+  → KPI / 热力图 / 模型分布 / 会话排行 / Provider / 子代理明细
+```
 
-| 项 | 值 |
-|---|---|
-| 文件 | `data/finance.db`（BFF 进程内，`packages/web/lib/database.ts`） |
-| 迁移 | `_migrations(name PK, executed_at)` + `initDatabase()` 里 `CREATE TABLE IF NOT EXISTS` + 幂等补列 |
-| 已有表 | `funds` / `trades` / `users` / `scheduler_jobs` / `scheduler_job_runs` / `scheduler_job_retries` / `delivery_jobs` / `ics_sources` / `ics_events` / `agent_reports` … |
-| **token 相关表** | **没有**。现有 `/api/tokens/*` 是**实时读本机 opencode.db**（`lib/tokenService.ts` 打开 `~/.local/share/opencode/opencode.db`，`json_extract(data,'$.tokens.*')`），不落 homebase 库 |
-
-### 1.2 现有 token API
-
-| 端点 | 鉴权 | 返回 |
-|---|---|---|
-| `GET /api/tokens/models?period=today\|week\|month\|all` | JWT cookie（`requireAuth`） | `{models:[{model_id,provider_id,calls,input_tokens,output_tokens,reasoning_tokens,cache_read,cache_write,total_tokens,cache_hit_rate}]}` |
-| `GET /api/tokens/daily` | 同上 | `{daily:[{date,calls,input_tokens,…,total_tokens}]}` |
-| `GET /api/tokens/hourly?date=` | 同上 | 同上，小时粒度 |
-| `GET /api/internal/*` | `x-internal-token` = `INTERNAL_READ_TOKEN`，**未配置即 401（fail-closed）** | 只读 JSON |
-
-> 注：`/api/tokens/*` 原本是给 UI 的 `page tokens` 用的，统计的是**生产 opencode** 的消耗。本方案**复用**它们（改为读新表），不另起一套。
-
-### 1.3 调度
-
-- `registerJob(name, fn)` 代码注册 handler；任务实例（cron/timezone/params/enabled）存 `scheduler_jobs`
-- `engine.ts` 用 `later.setInterval` 在 Next 进程内执行；执行记录写 `scheduler_job_runs`
-- 时区契约：systemd 固定 `TZ=Asia/Shanghai`，cron 求值不依赖系统时区
-
-### 1.4 生产环境
-
-| 项 | 值 |
-|---|---|
-| 主机 | 百度云 `root@106.13.181.13`（GitHub Actions secrets `DEPLOY_SSH_KEY`） |
-| 形态 | `next start -H 0.0.0.0 -p 19234`，systemd `bff-19234.service` |
-| 部署 | push `main` 且命中 `packages/web/**` 等路径 → Actions → SSH/rsync → `systemctl restart bff-19234` |
-| **对外地址** | **`https://106.13.181.13`（TLS 已完成，2026-11-01）** |
-| 反代 | Caddy 2.6.2，`443 → 127.0.0.1:19234`，配置 `/etc/caddy/Caddyfile` |
-| 证书 | 自签（`CN=106.13.181.13`，SAN=IP，有效期至 2036）；CA 副本在本机 `~/.dsh/certs/homebase-selfsigned.crt` |
-| 暴露面 | 安全组只开 443 + SSH；**19234 已关闭公网**（BFF 仍监听 0.0.0.0，但外部不可达，只由本机 Caddy 访问） |
-| 鉴权 | 写：`x-internal-token`（新端点，fail-closed）；读：同上（机读）或 JWT（人看） |
+失败策略：任何一环失败都**回退本地**并打 warn，页面不变空。本地路径保留未删。
 
 ---
 
-## 2. 表结构（新增）
+## 2. 数据模型
 
-### 2.1 `token_usage_daily`（明细，按天 × 会话 × 模型）
+### 2.1 `token_usage_daily`
 
 ```sql
-CREATE TABLE IF NOT EXISTS token_usage_daily (
-  usage_date   TEXT    NOT NULL,   -- YYYY-MM-DD，Asia/Shanghai
-  source       TEXT    NOT NULL,   -- 'dsh' | 'codebuddy' | 'opencode'
-  provider     TEXT    NOT NULL,   -- 执行方/路由：opencode-go / codebuddy / deepseek-official / unknown
-  model        TEXT    NOT NULL,   -- 模型 id（如 deepseek-v4.1-flash）
-  session_id   TEXT    NOT NULL,   -- 来源侧会话 id
-  root_session TEXT,               -- dsh 根会话 id（跨源合并用，可空）
-  calls        INTEGER NOT NULL DEFAULT 0,
-  input_tokens INTEGER NOT NULL DEFAULT 0,   -- 非缓存输入
-  output_tokens INTEGER NOT NULL DEFAULT 0,
-  reasoning_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_read   INTEGER NOT NULL DEFAULT 0,
-  cache_write  INTEGER NOT NULL DEFAULT 0,
-  total_tokens INTEGER NOT NULL DEFAULT 0,   -- 四桶之和
-  credit       REAL,               -- codebuddy credit（其他源为 NULL）
-  first_at     INTEGER NOT NULL,   -- epoch ms
+CREATE TABLE token_usage_daily (
+  usage_date   TEXT NOT NULL,              -- YYYY-MM-DD，Asia/Shanghai
+  origin       TEXT NOT NULL,              -- mac-home | prod-baidu-cloud
+  source       TEXT NOT NULL,              -- dsh | codebuddy | opencode
+  provider     TEXT NOT NULL,              -- 执行方/路由
+  model        TEXT NOT NULL,
+  session_id   TEXT NOT NULL,              -- 来源侧会话 id（见 §3 的身份映射）
+  root_session TEXT,                       -- dsh 根会话
+  title        TEXT,                       -- 会话标题（可空，展示用）
+  calls, input_tokens, output_tokens, reasoning_tokens,
+  cache_read, cache_write, total_tokens, credit,   -- 见 §3.5 口径
+  first_at     INTEGER NOT NULL,
   last_at      INTEGER NOT NULL,
-  batch_id     TEXT    NOT NULL,   -- 采集批次（可回溯到哪次同步写入）
+  batch_id     TEXT NOT NULL,
   ingested_at  INTEGER NOT NULL,
-  PRIMARY KEY (usage_date, source, provider, model, session_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_tud_date  ON token_usage_daily(usage_date);
-CREATE INDEX IF NOT EXISTS idx_tud_root  ON token_usage_daily(root_session);
-CREATE INDEX IF NOT EXISTS idx_tud_model ON token_usage_daily(model);
-```
-
-**粒度理由**：主键到「日 + 会话 + 模型」是能同时满足三个查询的最小粒度——
-
-- 按天/按模型/按执行方聚合 → `GROUP BY`
-- 会话排行合并子代理 → 用 `root_session`
-- 子代理明细 → 用 `session_id`
-
-**为什么不存「每次调用」**：一天几百到几千条调用，按天聚合后量级小（本机约 400 会话/天），且插件只需要聚合视图。
-
-### 2.2 `token_usage_sync`（同步台账，幂等与回溯）
-
-```sql
-CREATE TABLE IF NOT EXISTS token_usage_sync (
-  batch_id    TEXT PRIMARY KEY,   -- uuid
-  usage_date  TEXT NOT NULL,
-  source      TEXT NOT NULL,
-  rows        INTEGER NOT NULL,
-  total_tokens INTEGER NOT NULL,
-  started_at  INTEGER NOT NULL,
-  finished_at INTEGER,
-  status      TEXT NOT NULL,      -- running | ok | error
-  error       TEXT
+  PRIMARY KEY (usage_date, origin, source, provider, model, session_id)
 );
 ```
 
-用途：回答「某天某源采了多少条、有没有漏」。
+**为什么主键要含 `origin`**：同一种 `source=opencode` 会来自多台机器。没有它，两边的量混在一起、session id 可能互相覆盖（[homebase#116](https://github.com/guraul/homebase/issues/116)）。
 
-### 2.3 迁移方式
+### 2.2 `token_usage_sync`
 
-在 `initDatabase()` 的 `CREATE TABLE IF NOT EXISTS` 段追加两张表；不写数据迁移（新表从空开始）。
+批次台账（`batch_id` 主键、`origin`、`rows`、`total_tokens`、`status`、`error`），回答「某天某源采了多少条、有没有漏」。
+
+### 2.3 迁移
+
+- `origin`：SQLite 改不了主键，**必须重建表**；旧数据标 `mac-home`
+- `title`：`ALTER TABLE ADD COLUMN` 即可（幂等）
+- ⚠️ **迁移必须先于建表/建索引**：旧库的表已存在时 `CREATE TABLE IF NOT EXISTS` 会跳过，随后 `CREATE INDEX ... (origin)` 会因缺列抛错，整个初始化中断（生产 500，[homebase#118](https://github.com/guraul/homebase/issues/118)）
 
 ---
 
-## 3. 定时任务（本机采集 → 生产写入）
+## 3. 采集
 
-### 3.1 为什么在本机
+入口 `scripts/token-sync/collect.mjs`。
 
-三方数据都在本机（`~/.dsh`、`~/.codebuddy`、`~/.local/share/opencode`），生产服务器上没有。所以**采集在本机，写入走 API**。
+### 3.1 三个源的取数位置
 
-### 3.2 调度
-
-| 项 | 值 |
-|---|---|
-| 载体 | macOS LaunchAgent `com.deepseek.dsh-token-sync`（与现有 `dsh-web` 同级） |
-| 时间 | 每天 **12:00 Asia/Shanghai**（用户指定；此时前一日数据已完整，且避开 14:50 回执与盘中任务） |
-| 补跑 | `StartCalendarInterval` 只在开机时触发一次；失败由脚本内部重试（3 次指数退避 30s/2m/5m） |
-| 手动 | `launchctl kickstart -k gui/$(id -u)/com.deepseek.dsh-token-sync` |
-| 日志 | `.dsh-web/token-sync.log`（滚动，保留 30 天） |
-
-> 备选：用 homebase 自己的 scheduler 反向「拉」本机——不可行，服务器访问不到本机。
-
-### 3.3 写入流程
-
-```
-12:00 启动
-  ├─ 计算窗口：默认 [T-2, T-1]（今天往前两天，覆盖跨天会话与迟到写入）
-  ├─ 逐源采集（见 §4）
-  ├─ 归一化为 token_usage_daily 行
-  ├─ 分批 POST /api/internal/token-usage/ingest（每批 ≤ 500 行）
-  │     header: x-internal-token: $HOMEBASE_INTERNAL_TOKEN
-  │     body:   { batch_id, usage_date, source, rows: [...] }
-  ├─ 逐批校验响应 {accepted, updated, skipped}
-  ├─ 写本地台账 ~/.dsh/token-sync-state.json（last_ok_date / last_batch_id）
-  └─ 任一批失败 → 退出码 1 + 日志；已成功的批次保留（可安全重跑）
-```
-
-### 3.4 幂等与去重
-
-| 层 | 策略 |
-|---|---|
-| 客户端 | 同一天可重复采集（结果确定）；`batch_id` 每次新生成，只用于审计 |
-| 传输 | 按 `(usage_date, source)` 分片，单片 ≤ 500 行 |
-| 服务端 | `INSERT … ON CONFLICT(usage_date,source,provider,model,session_id) DO UPDATE SET …`，即「重算覆盖」而非累加 |
-| 台账 | `token_usage_sync` 记 `batch_id/rows/status`，重复批次只更新同主键行，不产生重复数据 |
-| 语义 | **按天全量重算该源**，因此重跑安全；不做增量累加（避免漏采时永远补不上） |
-
-### 3.5 新增 API
-
-| 端点 | 方法 | 鉴权 | 说明 |
+| 源 | 位置 | 身份 | 完整度 |
 |---|---|---|---|
-| `/api/internal/token-usage/ingest` | POST | `x-internal-token` | 写入一批；返回 `{accepted, updated, skipped, batch_id}` |
-| `/api/internal/token-usage/query` | GET | `x-internal-token` | 查询聚合：`from/to/source/model/root_session/group_by` |
-| `/api/tokens/models` 等 | GET | JWT | **保留**，改为读新表（不再读 opencode.db） |
+| dsh | `~/.dsh/storages/session_projcache/sessions/*.json` 的 `usagePanel` | 会话 id | 完整 |
+| codebuddy | `~/.codebuddy/traces/*/*.jsonl` | traceId（→ 映射成 remoteId） | 完整（但只留 7 天） |
+| opencode | `~/.local/share/opencode/opencode.db` | `session_id` | 完整（备份库可补更早） |
 
-**鉴权补充**：`INTERNAL_READ_TOKEN` 已存在（fail-closed）。写入端点复用同一 token，**不新增密钥**；轮换按 homebase `OPERATIONS.md §1.2` 同步两处。
+### 3.2 三个必须知道的坑
 
-**传输**：TLS 已完成（2026-11-01）。采集脚本走 `https://106.13.181.13/api/internal/token-usage/ingest`，用 `NODE_EXTRA_CA_CERTS=~/.dsh/certs/homebase-selfsigned.crt`（或 curl `--cacert`）校验自签证书。`x-internal-token` 不再明文过公网。
+**① dsh 必须同时读 `epochs[]` 与 `current`**
 
-**客户端**：浏览器首次访问需接受自签警告（一次性）；`agent-mobile` 需把 baseUrl 从 `http://106.13.181.13:19234` 改为 `https://106.13.181.13`。
+压缩会把已折叠的段推进 `epochs`。只读 `current` 会漏约 35%（本机实测：current 437 条 byDay、epochs 240 条；某天从 43 万漏成 1.6 亿）。
 
----
+两者是**分段互补**而非重复（举例：某会话 10-17，epochs 12.7 万 input + current 0.98 万 input），所以相加是对的。
 
-## 4. 三类数据源的采集口径与字段映射
+**② codebuddy 的身份只能靠 `providerData.messageId`**
 
-### 4.1 统一口径
+| 尝试 | 结果 |
+|---|---|
+| 单条消息时间戳对齐 | 5.5% ❌ |
+| `traceparent` 的 trace_id ↔ traces traceId | 交集 0 ❌ |
+| pid 目录 ↔ registry 会话 | 43% ❌ |
+| **`providerData.messageId` ↔ `toolOutput[].id`** | **99.95%** ✅ |
+
+`messageId` 与 completion id 都是 UUID v7（`01a1` 前缀），同一次调用在两边写同一个值。
+
+**③ codebuddy 的 `projects` 转录不能用来统计用量**
+
+那份文件里 917 条 assistant 只有 347 条带 usage，且带 usage 的也是流式快照。这是 Claude Code 家族的已知缺陷（[#27361](https://github.com/anthropics/claude-code/issues/27361)、[#22686](https://github.com/anthropics/claude-code/issues/22686)）：JSONL 只记 content block，最终的 `message_stop` 从不落盘。
+
+实测同一会话：projects 43,688 token vs traces 123 万，**差 28 倍**。
+
+所以：**身份取自 projects，用量取自 traces**。
+
+### 3.3 会话标题
+
+三级回退：`rows.subagent.val.identity.label` → `rows.subagent.val.label` → `rows.title.val`。
+
+最后一级是给**根会话**用的（根会话没有 subagent 节点，标题只在 `title.val`，如「构建 Reviewer 子代理」）。
+
+### 3.4 日期与窗口
+
+- `usage_date` 按**调用发起时刻**换算 Asia/Shanghai
+- 默认采 `[T-2, T-1]`（覆盖跨天与迟到写入）
+- `--all` 起点取各源最早日的最小值（dsh 2026-10-10、opencode 2026-10-29）
+- codebuddy 只保留 7 天，漏一天就永久缺失
+
+### 3.5 token 口径
 
 | 字段 | 口径 |
 |---|---|
-| `input_tokens` | **非缓存输入**（已扣除缓存命中） |
-| `cache_read` | 缓存读（命中） |
-| `cache_write` | 缓存写 |
+| `input_tokens` | **非缓存**输入 |
+| `cache_read` / `cache_write` | 缓存读 / 写 |
 | `output_tokens` | 输出（不含 reasoning） |
-| `reasoning_tokens` | 推理 token（单列，不并入 output） |
-| `total_tokens` | `input + output + reasoning + cache_read + cache_write` |
-| `calls` | 计费的模型调用次数（一次 LLM 请求 = 1） |
-| `usage_date` | 调用**发起时刻**换算到 Asia/Shanghai 的日期 |
-| `session_id` | 见下表，跨源不通用，用 `source` 区分 |
+| `reasoning_tokens` | 推理（单列） |
+| `total_tokens` | 四者之和 |
 
-### 4.2 dsh
+各源换算：
 
-| 项 | 值 |
+| 源 | 换算 |
 |---|---|
-| 位置 | `~/.dsh/sessions/<workspace>/<session>/session.v4.jsonl.zstd`（多帧 zstd） |
-| 读法 | 复用 `dsh-usage-panel` 已有解析（`src/host/external/*`），或走宿主 `sessionQuery` 导出 |
-| 关键事件 | `assistant/message` 的 `usage`（四桶） |
-| 会话关系 | header 的 `delegationDepth` / `parentSession` → `root_session` |
-| `provider` | `request/header` 的 provider 路由（`opencode-go` / `deepseek-official` …） |
-| 注意 | 子会话的 usage 是**中继调用**，不是外部 CLI 的真实消耗（两者并存，不重复计入同一 `source`） |
-
-### 4.3 codebuddy
-
-| 项 | 值 |
-|---|---|
-| 主源 | `~/.codebuddy/traces/*/*.jsonl`（完整，**仅保留 7 天**，`codebuddy.telemetry.retentionDays` 默认 7，可设 1–90） |
-| 兜底 | `~/.codebuddy/projects/<cwd-slug>/<remoteId>.jsonl`（永久，但仅 282/816 条带 usage，**不完整**） |
-| 映射 | `span.toolOutput` → `chat.completion`：`model`、`usage.prompt_tokens`、`prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、`completion_tokens`、`completion_tokens_details.reasoning_tokens` |
-| 缓存语义 | **OpenAI 语义**：`prompt_tokens` 已含缓存 → `input = miss`、`cache_read = hit`（见 issue #127） |
-| 会话 id | traces 无 sessionId → 用 `traceId`；与 dsh 子会话关联靠 `projects` 的 `remoteId`（registry 映射） |
-| 风险 | 7 天后 traces 消失 → **必须在保留期内每天采**；漏一天就永久缺失 |
-
-### 4.4 opencode
-
-| 项 | 值 |
-|---|---|
-| 位置 | `~/.local/share/opencode/opencode.db` → `message` 表 |
-| 映射 | `json_extract(data,'$.modelID')`、`$.providerID`、`$.tokens.{input,output,reasoning,cache.read,cache.write}` |
-| 会话 id | `message.session_id` |
-| 缓存语义 | `tokens.input` 已是非缓存输入（与 codebuddy 相反），直接映射 |
-| 历史 | 现库仅 2026-10-29 起；更早在 `~/backups/opencode-sessions-*/opencode.db`（需合并） |
-
-### 4.5 字段映射总表
-
-| 统一字段 | dsh | codebuddy | opencode |
-|---|---|---|---|
-| `model` | usage 事件的 model | `chat.completion.model` | `$.modelID` |
-| `provider` | `request/header.provider` | `'codebuddy'` | `$.providerID` |
-| `input_tokens` | `usage.input` | `prompt_cache_miss_tokens` | `$.tokens.input` |
-| `cache_read` | `usage.cacheRead` | `prompt_cache_hit_tokens` | `$.tokens.cache.read` |
-| `cache_write` | `usage.cacheWrite` | `prompt_cache_write_tokens` | `$.tokens.cache.write` |
-| `output_tokens` | `usage.output` | `completion_tokens` | `$.tokens.output` |
-| `reasoning_tokens` | `usage.reasoning` | `completion_tokens_details.reasoning_tokens` | `$.tokens.reasoning` |
-| `session_id` | header.id | traceId / remoteId | `message.session_id` |
-| `root_session` | header.parentSession（根则自身） | 经 registry 映射 | 无（NULL） |
+| dsh | 四桶直接映射 |
+| codebuddy | **OpenAI 语义**：`prompt_tokens` 已含缓存 → `input = prompt − cache_read`；`cache_read` 优先取 `prompt_cache_hit_tokens`，回退 `prompt_tokens_details.cached_tokens`（两者必须用同一个值去减，否则 total 漂移） |
+| opencode | `tokens.input` 已是非缓存，直接映射 |
 
 ---
 
-## 5. 插件侧改造
+## 4. API（homebase）
 
-### 5.1 目标
-
-`dsh-usage-panel`（本仓 fork）的所有数据改为从 homebase 拉取，**移除本地直连读取**（`~/.codebuddy`、`opencode.db`、`registry.json`）。
-
-### 5.2 改动点
-
-| 模块 | 现状 | 改造 |
+| 端点 | 鉴权 | 说明 |
 |---|---|---|
-| `src/host/index.ts` | overview 走 `sessionProjections`；subagents 走本地文件 | 新增 `homebase` 数据源；保留本地作为 **fallback**（可配置开关） |
-| `src/host/external/{registry,opencode,codebuddy,collect}.ts` | 直连本地 | 改为 `src/host/external/homebase.ts`：`GET /api/internal/token-usage/query` |
-| `src/shared/contract.ts` | `SubagentItem` 等 | **不变**（API 返回同一 shape），只在 host 内做映射 |
-| `src/client/**` | — | **不变** |
+| `POST /api/internal/token-usage/ingest` | `x-internal-token` | 单批 ≤500 行；`ON CONFLICT` 覆盖；返回 `{accepted, updated, skipped}` |
+| `GET /api/internal/token-usage/query` | 同上 | `from/to/origin/source/model/root_session`、`group_by=all\|day\|origin\|source\|model\|session`、`limit`、`include=sync` |
 
-### 5.3 配置
+鉴权复用既有 `INTERNAL_READ_TOKEN`（fail-closed：未配置即 401）。
 
-```jsonc
-// profile cordis.patch.yml → dsh-usage-panel config
-{
-  "dataSource": "homebase",          // homebase | local（默认 local，灰度期）
-  "homebaseUrl": "https://106.13.181.13",
-  "internalTokenEnv": "HOMEBASE_INTERNAL_TOKEN"
-}
+**幂等语义**：按天全量重算 + 覆盖，不做累加——漏采时累加永远补不回来。
+
+**批次 origin 优先**：服务端把批次的 `origin` 注入每一行，避免行内字段与批次声明打架（否则同一批会落到两个 origin，互相覆盖）。
+
+---
+
+## 5. 插件侧
+
+`dataSource` 由环境变量控制：
+
+```
+DSH_USAGE_PANEL_DATA_SOURCE=homebase   # local（默认）| homebase
 ```
 
-### 5.4 对现有显示逻辑的影响
+凭据从 `~/.dsh/token-sync.env`（600）读，**不写进 plist**（plist 入库）。
 
-| 显示项 | 影响 |
+| 区块 | homebase 模式下的来源 |
 |---|---|
-| KPI 总量 | 口径变为「homebase 汇总」，包含三方；与本地算可能有几小时延迟（每日同步） |
-| 子代理区块 | 数据来自 `token_usage_daily`，`external` 字段由 `source+session_id` 反查；**失去实时性**（当天数据次日 12:00 才入库） |
-| 会话排行 | `root_session` 合并逻辑不变 |
-| 缓存命中率 | 三方口径已统一（§4.1），比现在混算更准 |
+| KPI / 热力图 / 模型分布 / Provider | `query?group_by=all` 装配（`buildOverviewFromRows`） |
+| 会话排行 | 同上，按会话聚合取前 10，标题来自 `title` |
+| 子代理 external | `query?source=opencode` + `query?source=codebuddy`，按 remoteId 匹配 |
 
-**关键取舍**：改为 homebase 后**当天数据不可见**（T+1）。若需要实时，保留「本地直连」作为 `dataSource=local` 的备用模式。
+**缓存**：overview 60s；子代理扫描 60s。
+
+**回退粒度**：overview 整体回退本地；子代理 external **按会话**回退（某会话在 API 里没有才读本地，避免一个缺失把整表拉回）。
+
+### 5.1 部署
+
+- 生产 TLS：Caddy 自签（`CN=106.13.181.13`，SAN=IP），`443 → 127.0.0.1:19234`，**19234 公网已关闭**
+- CA 副本：`~/.dsh/certs/homebase-selfsigned.crt`
+- ⚠️ **`https.request` 的 `ca` 要的是 PEM 内容，不是文件路径**。传路径等于没配，握手失败后被 catch → 静默回退本地（[#214](https://github.com/guraul/self-dsh-plugins/issues/214)）
+- 调度：LaunchAgent `com.deepseek.dsh-token-sync`，每天 12:00；日志 `.dsh-web/token-sync.log`
+- ⚠️ 改 plist 后 `launchctl kickstart` **不重读配置**，必须 `bootout` + `bootstrap`
 
 ---
 
-## 6. 迁移与验证
+## 6. 实测数据（2026-11-02）
 
-### 6.1 分阶段
-
-| 阶段 | 内容 | 出口条件 |
-|---|---|---|
-| P0 | homebase 加两张表 + 两个 internal 端点（只写不读） | `curl` 写入成功、`sqlite3` 能查到 |
-| P1 | 本机采集脚本 + LaunchAgent（先 `--dry-run` 只打印不写） | 三方行数与本地直算**逐日一致** |
-| P2 | 打开写入，连续跑 3 天 | `token_usage_sync` 无 error；行数稳定 |
-| P3 | 插件加 `dataSource=homebase`，默认仍 local | 两种模式返回**同一 shape**，UI 无差异 |
-| P4 | 切默认为 homebase，保留 local 开关 | 一周无回归后删除本地路径 |
-
-### 6.2 P0 前置条件（已完成 / 待确认）
-
-| 项 | 状态 |
+| 项 | 值 |
 |---|---|
-| 生产 TLS（Caddy + 自签 + 443） | ✅ 2026-11-01 |
-| 19234 公网关闭 | ✅ |
-| CA 分发给本机 | ✅ `~/.dsh/certs/homebase-selfsigned.crt` |
-| `INTERNAL_READ_TOKEN` 投放 | ⬜ 待确认（未配置则 internal 端点全 401） |
+| 总行数 | 1537 |
+| 覆盖天数 | 86（2026-01-17 ~ 2026-11-01） |
+| 总 token | **52.2 亿** |
+| dsh | 569 行 / 33.11 亿 |
+| codebuddy | 359 行 / 6.99 亿 |
+| opencode | 609 行 / 12.10 亿（含备份库历史） |
+| 有标题的行 | 569（dsh 全部） |
 
-### 6.3 一致性验证（P1/P3 的核心）
-
-```bash
-# 1) 本地直算（现有插件逻辑）
-node scripts/verify-token-usage.mjs --date 2026-10-30 --source codebuddy
-#   → {rows: N, total_tokens: X, by_model: {...}}
-
-# 2) homebase 查询
-curl -s --cacert ~/.dsh/certs/homebase-selfsigned.crt \
-  -H "x-internal-token: $TOKEN" \
-  "https://106.13.181.13/api/internal/token-usage/query?from=2026-10-30&to=2026-10-30&source=codebuddy" \
-  | jq '.data.totals'
-
-# 3) 比对：逐 (model, session_id) 比对，不只比总数
-```
-
-**判定标准**：`rows` 与每个 `(model, session)` 的 `total_tokens` 完全相等；差异 > 0 时输出差异明细。
-
-### 6.4 防漏采
-
-| 风险 | 对策 |
-|---|---|
-| codebuddy traces 7 天清理 | 每天采 T-1；若 `last_ok_date` 落后 > 1 天，任务启动时**回溯补采**（最多 6 天） |
-| opencode 旧库未合并 | 首次全量导入备份库；之后只增量 |
-| dsh 会话跨天 | 按调用时间切天，不按会话创建时间 |
-| 任务未跑（机器关机） | LaunchAgent 开机补跑 + `last_ok_date` 检查 |
-| 写入部分失败 | 按 `(date, source)` 分片，失败片单独重试，不影响已成功片 |
-
-### 6.5 回滚
-
-- 插件：`dataSource` 改回 `local`，无需发版（配置热加载）
-- homebase：新表与新端点独立，回滚即不调用；不影响现有 `/api/tokens/*`
+架构有效性验证：插件 `coverage.mode = homebase`，`allTime = 52.15 亿`，会话排行显示真实标题，`homebase overview failed` 日志 0 条。
 
 ---
 
-## 7. 已确认决策
+## 7. 已知边界
 
-| # | 事项 | 结论 |
+| 边界 | 说明 | 影响 |
 |---|---|---|
-| 1 | 生产地址 | `https://106.13.181.13`（TLS 已完成） |
-| 2 | `INTERNAL_READ_TOKEN` | 复用既有内部只读凭据（`x-internal-token`），需确认已投放 |
-| 3 | 保留策略 | `token_usage_daily` 永久；`token_usage_sync` 90 天 |
-| 4 | 小时粒度 | 不需要 |
-| 5 | T+1 延迟 | 可接受 |
-| 6 | 调度时间 | 每天 12:00 Asia/Shanghai |
-| 7 | 与 `/api/tokens/*` 关系 | 复用改造：从「实时读 opencode.db」改为「读新表」 |
-| 8 | 传输安全 | 自签 TLS + 关闭 19234 公网；不装 Tailscale；移动端只考虑 Android，当前只做 web |
+| registry 只保留 162 条 | 每个 DSH 会话一条、会被覆盖；traces 有 355 个会话 | 约 2.57 亿 codebuddy 用量无法归属到子代理（仍在库里，可按天查总量） |
+| codebuddy 未命中身份约 4.5% | `projects` 的 messageId 覆盖 10168 / traces 10640 | 这些行以 traceId 入库，不进子代理明细 |
+| opencode 备份库是一次性并入 | `--include-backups` 只在手动执行时生效 | 日常采集只读现库 |
+| 数据范围受采集起点限制 | dsh 从 2026-10-10 起才有 byDay | 更早的热力图是空的 |
+| opencode 会话无标题 | 未读 `session.title` | 会话排行显示 `ses_xxx` 裸 id |
 
-## 8. 仍待确认
+---
 
-1. `INTERNAL_READ_TOKEN` 在生产 `.env.local` 是否已投放。
-2. `agent-mobile` 的 baseUrl 改动归属（跨仓，需它自己的 pipeline）。
+## 8. 未完成
+
+**生产侧采集**（`origin=prod-baidu-cloud`）：[#215](https://github.com/guraul/self-dsh-plugins/issues/215) 预留。方案倾向「服务器上跑同一份 collect.mjs + systemd timer」（写入不走公网）。前置条件是本机链路稳定运行一周以上。
+
+---
+
+## 9. 被否决的方案（勿重复踩坑）
+
+| 方案 | 否决原因 |
+|---|---|
+| 把 `INTERNAL_READ_TOKEN` 写进 plist | plist 入库，等于把凭据提交进 git |
+| 用 projects 的 usage 做统计 | 只有约 3% 覆盖且是流式快照，低估 28 倍 |
+| 改 codebuddy-shim 注入 session id 到 trace | shim 拿不到 traceId，也改不了 codebuddy 的内部 telemetry |
+| codebuddy 用时间戳/pid/traceparent 对齐 | 实测命中率 5%–43%，不可靠 |
+| 自签证书换成 Tailscale 组网 | 用户明确不考虑（要装客户端） |
+| 服务端改成累加语义 | 重跑会翻倍；覆盖 + 采集端聚合才是安全组合 |
+| 插件只切 opencode | 那是中间态；codebuddy 的身份映射打通后应全切 |
