@@ -11,7 +11,9 @@
 # 约定（由包侧执行）：当前分支必须是 task/<号>-<slug>，PR body 首行 Closes #<号>；
 #   工作区必须干净；PR 已存在则只打印链接，不重推、不新建。
 #
-# 包位置: 优先 $DSH_PIPELINE_HOME，缺省 <repo>/tools/node_modules/dsh-pipeline。
+# 包位置（顺序固定，解析只在 lib.sh 的 resolve_pipeline_cli 里实现一次）:
+#   ① $DSH_PIPELINE_HOME；② 主工作区 tools/node_modules/dsh-pipeline（worktree 场景）；
+#   ③ 当前仓 tools/node_modules/dsh-pipeline（非 worktree）。
 #   注意：装的是 `dist/latest.tgz` 的**打包产物**（见 tools/package.json），不是源码 checkout。
 #
 # 退出码: 原样透传包侧退出码：0 成功 / PR 已存在；2 用法或环境错误（含不在 task 分支、
@@ -23,22 +25,14 @@ set -u   # lib.sh 已设过，这里显式重申：本脚本靠它保护变量�
 die() { echo "✗ $*" >&2; exit 2; }
 
 require_gh
-
-# —— 共享包位置 ——
-PKG_HOME=""
-if [[ -n "${DSH_PIPELINE_HOME+x}" ]]; then PKG_HOME="${DSH_PIPELINE_HOME}"; fi
-if [[ -z "${PKG_HOME}" ]]; then PKG_HOME="${REPO_ROOT}/tools/node_modules/dsh-pipeline"; fi
-CLI="${PKG_HOME}/bin/cli.mjs"
-[[ -f "${CLI}" ]] \
-  || die "找不到共享 pipeline 包: ${CLI} （在 tools/ 里跑 pnpm install，或设置 DSH_PIPELINE_HOME）"
-command -v node >/dev/null 2>&1 || die "需要 node：共享包是 Node CLI"
+require_pipeline_pkg
 
 # —— 参数原样转发（不做任何解析：分支校验 / 脏工作区 / PR body 全在包里做）——
-info "已切换到共享 pipeline 包：${PKG_HOME}"
-info "转发: node ${CLI} pr $*"
+info "已切换到共享 pipeline 包：${PIPELINE_HOME}"
+info "转发: node ${PIPELINE_CLI_PATH} pr $*"
 
 set +e
-node "${CLI}" pr "$@"
+node "${PIPELINE_CLI_PATH}" pr "$@"
 RC=$?
 set -e
 exit "${RC}"

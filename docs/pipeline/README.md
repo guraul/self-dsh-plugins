@@ -66,7 +66,7 @@
 # 不直接执行；被其他脚本 source
 source scripts/pipeline/lib.sh
 ```
-公共常量（`REPO_ROOT` / `GH_REPO` / `FETCH_RETRY` / `PLUGIN_DIRS`）、日志函数（`die` / `info` / `ok` / `mark`）、工具函数（`slugify` / `is_issue_number` / `pkg_script` / `pkg_name` / `worktree_for_branch` / `main_worktree` / `require_gh`）。
+公共常量（`REPO_ROOT` / `GH_REPO` / `FETCH_RETRY` / `PLUGIN_DIRS`）、日志函数（`die` / `info` / `ok` / `mark`）、工具函数（`slugify` / `is_issue_number` / `pkg_script` / `pkg_name` / `worktree_for_branch` / `main_worktree` / `require_gh` / `resolve_pipeline_cli` / `require_pipeline_pkg`）。
 
 `PLUGIN_DIRS` 是**插件目录名白名单**，`status.sh` / `check-all.sh` / `install-check.sh` 全部只从这里取插件。包名不另存副本——需要时用 `pkg_name()` 从各插件 `package.json` 现读。
 
@@ -129,8 +129,16 @@ scripts/pipeline/merge-pr.sh <PR号> --check-only  # 演练：跑到闸门 / CI 
 scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎用）
 ```
 
-**包位置解析**：优先 `$DSH_PIPELINE_HOME`，未设置则用本仓 `tools/node_modules/dsh-pipeline`（由 `tools/package.json` 从 `dist/latest.tgz` 安装的**打包产物**，不是源码 checkout），取
-`<包根>/bin/cli.mjs`；两者都找不到 `cli.mjs` 就报错退出（提示设置 `DSH_PIPELINE_HOME`）。
+**包位置解析**（`lib.sh` 的 `resolve_pipeline_cli`，`new-task.sh` / `open-pr.sh` / `merge-pr.sh` 共用一份）：
+
+1. `$DSH_PIPELINE_HOME`（显式覆盖：**设置了就不再回退**，指错也直接报错，避免静默用到别的包）；
+2. `<主工作区>/tools/node_modules/dsh-pipeline`——主工作区取 `git rev-parse --git-common-dir` 的父目录，
+   因此**在 worktree 里运行也能找到装在主工作区的包**（issue #235）；
+3. `<当前目录所在仓>/tools/node_modules/dsh-pipeline`（非 worktree 的常规场景）。
+
+包是由 `tools/package.json` 从 `dist/latest.tgz` 安装的**打包产物**，不是源码 checkout；取
+`<包根>/bin/cli.mjs`。都落空时报错退出 2，并逐条列出试过的路径（提示在主工作区 `tools/` 里跑
+`pnpm install`，或设置 `DSH_PIPELINE_HOME`）。
 
 **参数转发**（壳只做映射，不做任何判定）：
 
