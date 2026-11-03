@@ -559,3 +559,46 @@ test('分片文件名可解析，且不会与规范记录混淆', () => {
   assert.deepEqual(parseShardRecordName(name), { pr: PR, headSha: SHA, index: 3, total: 4 })
   assert.equal(parseShardRecordName(`${PR}-${SHA}.json`), null)
 })
+
+test('真包集成：record --name 直接写分片名，全程不产生规范名（无真包则跳过）', (t) => {
+  // base32 字母表是 A-Z + 2-7，不含 0/1/8/9 —— 这里单独取一个合法 nonce
+  const REAL_NONCE = 'SHARDTEST234'
+  const probes = [process.env.DSH_PIPELINE_HOME, join(fileURLToPath(new URL('..', import.meta.url)), '..', 'tools', 'node_modules', 'dsh-pipeline')]
+  const real = probes.find((dir) => typeof dir === 'string' && existsSync(join(dir, 'bin', 'cli.mjs')))
+  if (!real) {
+    t.skip('未找到真实 dsh-pipeline 包（tools/ 未安装），跳过')
+    return
+  }
+
+  const root = tmp('shard-real-root-')
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const reviews = join(root, '.dsh-web', 'reviews')
+  const request = {
+    pr: PR,
+    head_sha: SHA,
+    nonce: REAL_NONCE,
+    model: 'stub/model',
+    diff: fileSection('a.js', 3),
+    files: ['a.js'],
+    issue: { number: PR, body: 'b' },
+    budget: { maxChars: 200000 },
+    shard: { index: 1, total: 2, files: ['a.js'], diffSha256: DIFF_HASH },
+  }
+  const requestFile = join(root, 'req.json')
+  const responseFile = join(root, 'res.txt')
+  writeFileSync(requestFile, `${JSON.stringify({ request }, null, 2)}\n`)
+  writeFileSync(responseFile, `${REAL_NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
+
+  const out = spawnSync(
+    process.execPath,
+    [CLI, 'record', '--request', requestFile, '--response', responseFile, '--root', root],
+    { encoding: 'utf8', env: { ...process.env, DSH_PIPELINE_HOME: real } },
+  )
+  assert.equal(out.status, 0, out.stderr)
+  // 关键断言：只留下分片名，规范名从未出现
+  assert.equal(existsSync(join(reviews, `${PR}-${SHA}.json`)), false, '不应产生规范名文件')
+  const shardFile = join(reviews, shardRecordName(PR, SHA, { index: 1, total: 2 }))
+  assert.equal(existsSync(shardFile), true)
+  const saved = JSON.parse(readFileSync(shardFile, 'utf8'))
+  assert.deepEqual(saved.shard, { index: 1, total: 2, diffSha256: DIFF_HASH })
+})

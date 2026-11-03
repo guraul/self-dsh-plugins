@@ -10,7 +10,7 @@
  *     就能骗过闸门。
  */
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { ContractError } from './contract.js'
 import { recordFile } from './record.js'
 
@@ -479,6 +479,15 @@ export function finalizeShardRecord(target, { index, total, diffSha256 }) {
     record = JSON.parse(readFileSync(target, 'utf8'))
   } catch (error) {
     throw new ContractError('E_UNAVAILABLE', `读取分片记录失败: ${error.message}`)
+  }
+  // 纵深防御：文件名由请求里的 pr/head_sha 推导，记录内容由包从同一请求组装；
+  // 两者理论上必然一致，但旧实现的名字取自 record 自身，新实现少了这层隐式保证，显式校验一次。
+  const parsedName = parseShardRecordName(basename(target))
+  if (parsedName === null || parsedName.pr !== record.pr || parsedName.headSha !== record.head_sha) {
+    throw new ContractError(
+      'E_RECORD',
+      `分片记录内容与文件名不符: ${target}（记录 pr=${record.pr} sha=${String(record.head_sha).slice(0, 8)}）`,
+    )
   }
   const sharded = {
     ...record,
