@@ -57,6 +57,30 @@
 - **git tag 依赖**（`git+file://…#v1.2.0`）：依赖 pnpm 对 `git+file` 的支持细节，CI 上还要能 clone；
 - **各仓 `vendor/` 内置产物**：等于把单一实现又复制成五份。
 
+### 4b. 构建标识与漂移检测（2026-11-03 补）
+
+**问题**：稳定文件名 + 版本号常年不变（三个仓装的都是 `0.1.0`）意味着**语义版本在这里完全失效**——
+两个仓的 `package.json` 版本一样，装的内容可能来自不同日期的打包。当天迁移 homebase 时，
+唯一的判断办法是「拿只有新版才有的参数去试」，即没有可核验手段。
+
+**做法**：
+- `scripts/pack.sh` 打包前写入 `build.json`（`gitSha` / `builtAt` / `dirty`），打完在 EXIT trap 里删除；
+  `build.json` 入 `.gitignore`、进 `package.json` 的 `files`，因此**只存在于 tarball 里**，不会污染工作区。
+- `--version` 输出带构建标识：`0.1.0 (8ad432b 2026-11-03T13:32:15Z)`；直接跑源码时显示 `(源码运行)`。
+- 新增 `doctor` 子命令：读各仓 `tools/node_modules/dsh-pipeline/build.json` 比对。
+  不同构建、或某个仓装的是**没有 build.json 的旧包**，都算漂移 → 退出 1 并点名该仓；
+  `--json` 与人类可读模式的退出码一致（CI 常用前者，不能因为换输出就当成功）。
+
+用法：
+
+```bash
+node tools/node_modules/dsh-pipeline/bin/cli.mjs doctor \
+  --repo ~/workspace/self-dsh-plugins,~/workspace/agent-mobile,~/workspace/homebase
+```
+
+**为什么不做成"自动升级"**：那需要每个仓都去改依赖并提交，与「升级零操作」的目标冲突；
+`doctor` 只负责**让漂移可见**，刷新仍是手册里的显式步骤（`rm -rf node_modules pnpm-lock.yaml && pnpm install`）。
+
 ### 5. 闸门只在本地运行
 
 所有仓都在本机，合并动作也由本机的 executor 发起；GitHub Actions 只做构建与部署，**不消费
