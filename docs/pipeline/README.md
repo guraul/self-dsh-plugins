@@ -217,16 +217,25 @@ pnpm install
 ```
 
 **不要用 `pnpm update`**：它可能复用本机的旧 tarball 缓存，命令成功但装出来的还是旧版包。
-装完验证版本（两个报错互斥，按第一句报错判断）：
+
+**装完直接看构建标识**（2026-11-03 起）。下面两条命令都在**仓根**执行（先 `cd ..`）：
 
 ```bash
-node node_modules/dsh-pipeline/bin/cli.mjs record --request /dev/null --response /dev/null --root /tmp
+node tools/node_modules/dsh-pipeline/bin/cli.mjs --version
+# 0.1.0 (8ad432b 2026-11-03T13:32:15Z)
 ```
 
-| 报错 | 含义 |
-|---|---|
-| 「请求文件不是合法 JSON」 | **新版**：已认识 `--root`，只是 `/dev/null` 不是合法 JSON |
-| 「未知选项: --root」 | **旧版**：该版本还没有 `--root`，回到上面的清理重装 |
+版本号常年不变，**看括号里的构建标识才是准的**；直接跑源码时显示 `(源码运行)`。
+想知道多个仓是不是同一次打包：
+
+```bash
+node tools/node_modules/dsh-pipeline/bin/cli.mjs doctor \
+  --repo ~/workspace/self-dsh-plugins,~/workspace/agent-mobile,~/workspace/homebase
+```
+
+某仓装的是**没有构建标识的旧包**也会被判为漂移（它必然不是同一构建）→ 退出 1 并点名。
+
+> 旧办法（拿 `record --root` 试参数、按报错判断新旧）已不需要，仅在包版本早于 2026-11-03 时才用。
 
 重新生成的 `pnpm-lock.yaml` 只留在本机，**不要提交**。
 

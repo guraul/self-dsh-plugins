@@ -89,12 +89,14 @@ GitHub Issue（任务入口）
 - [x] **`PLUGIN_DIRS` 与 CI matrix 对齐**（#246）：补 `dsh-usage-panel`，并修掉 CI 长期缺 `dsh-zhihu-sidebar`（该插件测试此前从未在 CI 跑过）
 - [x] **文档漂移收口**（#250）：脚本清单按实际目录补全、收录 `review-loop-check.sh`、步骤编号去半号
 - [x] **分片审核**（#252）：`prepare --shard i/n` + `record --aggregate`，REJECT > ESCALATE > APPROVE 确定性合成，缺片/哈希不一致 fail-closed；分片记录不占用闸门文件名，单片不可能过闸
+      （⚠️ 2026-11-03 修正：当时是「先写规范名再删除」，中间有一段窗口能让单片冒充整份；#262 起改为直接写分片名，该判断已不成立）
 
 ## 四、未完成（欠账）
 
 | # | 欠账 | 现状 | 影响 |
 |---|------|------|------|
-| 1 | 形态 C（清言网页桥） | 未启动 | 依赖 REQ-002 |
+| 1 | 形态 C（清言网页桥） | 未启动 | 依赖 REQ-002（需求未写） |
+| 2 | memx 迁到共享包 | 未启动；**已定：走与其它仓一模一样的流程**（用户 2026-11-03 决定），暂不做 | 需要包补 `--worktrees-dir`（memx 被 opencode 加载源码，worktree 必须建在仓外）；memx 无 CI，需如实声明 `ci: []` |
 
 > **`#117` 不是欠账**：它是 `compat-matrix.yml` 每周把结果写进去的**滚动 issue**，按设计长期 open（最近一次成功：2026-11-02）。此前台账把它列为「未完成」是误判。
 
@@ -115,3 +117,10 @@ GitHub Issue（任务入口）
 | 2026-11-02 | 阶段 5：六项收口 | agent-mobile 迁包（issue #187 / PR #188）、证据包（#240）、PLUGIN_DIRS/CI matrix（#246）、文档漂移（#250）、分片审核（#252）；另有包仓 dogfooding（#5–#8）。`#117` 澄清为滚动 issue，不是欠账 |
 | 2026-11-02 | 转发壳化（#235） | 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 改薄转发；新脚本真实往返：新 `open-pr.sh` 开出 PR #236 自身，新 `new-task.sh` 建出 #237 的 worktree |
 | 2026-11-02 | 包 dogfooding（#237） | 包仓接入自己的闸门与 CI：PR #6 与 #7 触发 `E_POLICY` 后均走 `--no-review` 并留跳过审计，PR #8 走正常路径（记录 → 闸门 → CI → 合并 → 清理 → 快进）；期间修掉三个包缺陷，均由包仓 PR 修掉：#4（worktree 嵌套）、#7（误删主工作区）、#8（主工作区检出 PR 分支时快进失败） |
+| 2026-11-03 | 证据包进标准入口（#258） | `review.sh prepare` 透传 `--facts` / `--include`；空值按用法错误处理；counts 与手册同步 |
+| 2026-11-03 | 分片 TOCTOU 根除（包 #9 + #262） | 包加 `record --name`，分片记录**直接**写成分片名，不再「先写规范名再删除」——那段窗口里单片 APPROVE 可放行整份变更；新增真包集成断言「全程不产生规范名」 |
+| 2026-11-03 | homebase 迁包（homebase#127） | `merge-pr` / `new-task` / `open-pr` 改薄转发（`status.sh` 保留：带 BFF 探测）；PR 号解析走 REST 守住该仓 #22 的约定；旧自检换成 `test-forwarding.sh`；合并即部署（`scripts/**` 在 deploy 路径里）已确认接受 |
+| 2026-11-03 | agent-mobile 补忽略项（agent-mobile#192） | `.dsh-web/`、`.tmp/` 进 `.gitignore` |
+| 2026-11-03 | 文档漂移小修（#260） | `compat-matrix.yml` 注释不再写死滚动 issue 号 |
+| 2026-11-03 | 包补两个参数（包 #10） | `task --slug`（中文标题自动 slug 退化成哈希时手指定）、`pr --issue`（分支名不含 issue 号时指定）；均为可选参数，不传时行为不变 |
+| 2026-11-03 | 构建标识 + `doctor`（包 #11） | `pack.sh` 写 `build.json`、`--version` 带构建标识、`doctor` 比对多仓装的构建；解决「版本号都一样，内容可能不同」无从判断的问题（ADR-0003 §4b）。三仓刷新后实测同一构建 `8ad432b` |
