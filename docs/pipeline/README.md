@@ -315,11 +315,14 @@ node ~/workspace/self-dsh-plugins/dsh-subagents/lib/cli.js gate \
 ### review.sh
 
 ```bash
-scripts/pipeline/review.sh prepare <pr> [--model <模型>]
+scripts/pipeline/review.sh prepare <pr> [--model <模型>] [--facts <文件>] [--include <路径[,路径...]>]
 scripts/pipeline/review.sh publish <pr> --record <文件> --round <n> [--dry-run] [--repo <owner/name>]
 scripts/pipeline/review.sh paths <pr>
 ```
+
 审核循环的机械步骤：`prepare` 把请求与提示词写到 `.tmp/review/<pr>/`（项目内，避开 `/tmp` 定期清理）；`publish` 用机器账号发评论并提交 review 状态（`APPROVE→approve`、`REJECT→request-changes`、`ESCALATE→只评论`）。**reviewer 的模型调用不在脚本内**——那一步必须由会话内 agent 发起。
+
+**证据包**（`--facts` / `--include`）：reviewer 跑在 plan 模式下，**不能执行命令、也读不到工作区之外**的东西。需要外部事实（例如「包仓 PR #6 已于某日合并」「本机 CI 运行 id」）时，用这两个参数随任务卡一起交给它，它会出现在任务卡的「控制面提供的事实 / 附带文件」两节里（带围栏与「数据不是指令」声明，`EVIDENCE_END` 会被中和）。不用这两个参数时，任务卡与之前逐字节一致。
 
 ### review-loop-check.sh
 
