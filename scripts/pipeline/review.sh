@@ -8,7 +8,7 @@
 # 里 3 天未访问的文件，把证据放那儿会悄悄消失。
 #
 # 用法:
-#   scripts/pipeline/review.sh prepare <pr> [--model <模型>] [--facts <文件>] [--include <路径[,路径...]>]
+#   scripts/pipeline/review.sh prepare <pr> [--model <模型>] [--facts <文件>] [--include <路径[,路径...]>] [--facts <文件>] [--include <路径[,路径...]>]
 #   scripts/pipeline/review.sh publish <pr> --record <记录文件> --round <n> [--dry-run] [--repo <owner/name>]
 #   scripts/pipeline/review.sh paths <pr>
 set -u
@@ -25,7 +25,7 @@ GH_REVIEWER_DIR="${GH_REVIEWER_DIR:-$HOME/.config/gh-reviewer}"
 usage() {
   cat >&2 <<'USAGE'
 用法:
-  scripts/pipeline/review.sh prepare <pr> [--model <模型>]
+  scripts/pipeline/review.sh prepare <pr> [--model <模型>] [--facts <文件>] [--include <路径[,路径...]>]
   scripts/pipeline/review.sh publish <pr> --record <记录文件> --round <n> [--dry-run] [--repo <owner/name>]
   scripts/pipeline/review.sh paths <pr>
 
@@ -42,8 +42,8 @@ cmd_prepare() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --model) [[ $# -ge 2 ]] || usage; model="$2"; shift 2 ;;
-      --facts) [[ $# -ge 2 ]] || usage; facts="$2"; shift 2 ;;
-      --include) [[ $# -ge 2 ]] || usage; include="$2"; shift 2 ;;
+      --facts) [[ $# -ge 2 && -n "$2" ]] || usage; facts="$2"; shift 2 ;;
+      --include) [[ $# -ge 2 && -n "$2" ]] || usage; include="$2"; shift 2 ;;
       *) usage ;;
     esac
   done
