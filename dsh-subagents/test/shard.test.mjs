@@ -564,9 +564,20 @@ test('真包集成：record --name 直接写分片名，全程不产生规范名
   // base32 字母表是 A-Z + 2-7，不含 0/1/8/9 —— 这里单独取一个合法 nonce
   const REAL_NONCE = 'SHARDTEST234'
   const probes = [process.env.DSH_PIPELINE_HOME, join(fileURLToPath(new URL('..', import.meta.url)), '..', 'tools', 'node_modules', 'dsh-pipeline')]
-  const real = probes.find((dir) => typeof dir === 'string' && existsSync(join(dir, 'bin', 'cli.mjs')))
+  // 只有「装了包」还不够：必须是支持 --name 的版本（dsh-pipeline#9），
+  // 否则旧包会以「未知选项 --name」失败，变成环境性误报而不是跳过。
+  const supportsName = (dir) => {
+    try {
+      return readFileSync(join(dir, 'lib', 'record.mjs'), 'utf8').includes('options.name')
+    } catch {
+      return false
+    }
+  }
+  const real = probes.find(
+    (dir) => typeof dir === 'string' && existsSync(join(dir, 'bin', 'cli.mjs')) && supportsName(dir),
+  )
   if (!real) {
-    t.skip('未找到真实 dsh-pipeline 包（tools/ 未安装），跳过')
+    t.skip('未找到支持 --name 的真实 dsh-pipeline 包（tools/ 未安装或版本过旧），跳过')
     return
   }
 

@@ -499,6 +499,9 @@ export function finalizeShardRecord(target, { index, total, diffSha256 }) {
     renameSync(tmp, target)
   } catch (error) {
     rmSync(tmp, { force: true })
+    // 这里**不**删 target：包写出的分片名文件若不慎留下（缺 shard 字段），
+    // collectShardRecords 仍按文件名取片号、合成时也仍要求全片齐备 → fail-closed，
+    // 删它反而会让「删失败」变成第二个故障点。
     throw new ContractError('E_UNAVAILABLE', `分片记录落盘失败: ${error.message}`)
   }
   return { file: target, record: sharded }
