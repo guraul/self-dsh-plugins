@@ -148,11 +148,24 @@ function recordViaStub(t, { index = 2, total = 3, record }) {
   t.after(() => rmSync(home, { recursive: true, force: true }))
   mkdirSync(join(home, 'bin'), { recursive: true })
   const canonical = join(reviews, `${PR}-${SHA}.json`)
+  // 桩包要模拟真实包的 --name：给了 --name 就写到 <reviews>/<name>，否则写规范名。
+  // 分片记录的正确性正取决于「包直接写分片名、全程不产生规范名」。
   writeFileSync(
     join(home, 'bin', 'cli.mjs'),
-    ['#!/bin/sh', 'printf \'%s\' "$DSH_STUB_RECORD" > "$DSH_STUB_TARGET"', 'printf \'%s\' "$DSH_STUB_RECORD"', ''].join(
-      '\n',
-    ),
+    [
+      '#!/bin/sh',
+      'name=""',
+      'while [ $# -gt 0 ]; do',
+      '  case "$1" in',
+      '    --name) name="$2"; shift 2 ;;',
+      '    *) shift ;;',
+      '  esac',
+      'done',
+      'if [ -n "$name" ]; then target="$DSH_STUB_REVIEWS/$name"; else target="$DSH_STUB_TARGET"; fi',
+      'printf \'%s\' "$DSH_STUB_RECORD" > "$target"',
+      'printf \'%s\' "$DSH_STUB_RECORD"',
+      '',
+    ].join('\n'),
     { mode: 0o755 },
   )
 
@@ -166,6 +179,7 @@ function recordViaStub(t, { index = 2, total = 3, record }) {
         DSH_PIPELINE_HOME: home,
         DSH_STUB_RECORD: JSON.stringify(record),
         DSH_STUB_TARGET: canonical,
+        DSH_STUB_REVIEWS: reviews,
       },
     },
   )
@@ -544,4 +558,58 @@ test('分片文件名可解析，且不会与规范记录混淆', () => {
   const name = shardRecordName(PR, SHA, { index: 3, total: 4 })
   assert.deepEqual(parseShardRecordName(name), { pr: PR, headSha: SHA, index: 3, total: 4 })
   assert.equal(parseShardRecordName(`${PR}-${SHA}.json`), null)
+})
+
+test('真包集成：record --name 直接写分片名，全程不产生规范名（无真包则跳过）', (t) => {
+  // base32 字母表是 A-Z + 2-7，不含 0/1/8/9 —— 这里单独取一个合法 nonce
+  const REAL_NONCE = 'SHARDTEST234'
+  const probes = [process.env.DSH_PIPELINE_HOME, join(fileURLToPath(new URL('..', import.meta.url)), '..', 'tools', 'node_modules', 'dsh-pipeline')]
+  // 只有「装了包」还不够：必须是支持 --name 的版本（dsh-pipeline#9），
+  // 否则旧包会以「未知选项 --name」失败，变成环境性误报而不是跳过。
+  const supportsName = (dir) => {
+    try {
+      return readFileSync(join(dir, 'lib', 'record.mjs'), 'utf8').includes('options.name')
+    } catch {
+      return false
+    }
+  }
+  const real = probes.find(
+    (dir) => typeof dir === 'string' && existsSync(join(dir, 'bin', 'cli.mjs')) && supportsName(dir),
+  )
+  if (!real) {
+    t.skip('未找到支持 --name 的真实 dsh-pipeline 包（tools/ 未安装或版本过旧），跳过')
+    return
+  }
+
+  const root = tmp('shard-real-root-')
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const reviews = join(root, '.dsh-web', 'reviews')
+  const request = {
+    pr: PR,
+    head_sha: SHA,
+    nonce: REAL_NONCE,
+    model: 'stub/model',
+    diff: fileSection('a.js', 3),
+    files: ['a.js'],
+    issue: { number: PR, body: 'b' },
+    budget: { maxChars: 200000 },
+    shard: { index: 1, total: 2, files: ['a.js'], diffSha256: DIFF_HASH },
+  }
+  const requestFile = join(root, 'req.json')
+  const responseFile = join(root, 'res.txt')
+  writeFileSync(requestFile, `${JSON.stringify({ request }, null, 2)}\n`)
+  writeFileSync(responseFile, `${REAL_NONCE} VERDICT: APPROVE SHA: ${SHA}\n`)
+
+  const out = spawnSync(
+    process.execPath,
+    [CLI, 'record', '--request', requestFile, '--response', responseFile, '--root', root],
+    { encoding: 'utf8', env: { ...process.env, DSH_PIPELINE_HOME: real } },
+  )
+  assert.equal(out.status, 0, out.stderr)
+  // 关键断言：只留下分片名，规范名从未出现
+  assert.equal(existsSync(join(reviews, `${PR}-${SHA}.json`)), false, '不应产生规范名文件')
+  const shardFile = join(reviews, shardRecordName(PR, SHA, { index: 1, total: 2 }))
+  assert.equal(existsSync(shardFile), true)
+  const saved = JSON.parse(readFileSync(shardFile, 'utf8'))
+  assert.deepEqual(saved.shard, { index: 1, total: 2, diffSha256: DIFF_HASH })
 })

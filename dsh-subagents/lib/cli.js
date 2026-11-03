@@ -21,6 +21,7 @@ import {
   collectShardRecords,
   finalizeShardRecord,
   parseShardSpec,
+  shardRecordName,
   writeAggregateRecord,
 } from './shard.js'
 import {
@@ -284,7 +285,13 @@ function requestShard(file) {
   if (typeof diffSha256 !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(diffSha256)) {
     throw fail('E_BUDGET', `请求里的 shard 缺少合法的 diffSha256: ${file}`)
   }
-  return { index, total, diffSha256 }
+  const pr = payload?.request?.pr
+  const headSha = payload?.request?.head_sha
+  if (!Number.isInteger(pr) || pr <= 0) throw fail('E_BUDGET', `请求里的 pr 非法: ${String(pr)}`)
+  if (typeof headSha !== 'string' || !/^[0-9a-f]{40}$/.test(headSha)) {
+    throw fail('E_BUDGET', `请求里的 head_sha 非法: ${String(headSha)}`)
+  }
+  return { index, total, diffSha256, pr, headSha }
 }
 
 /**
@@ -347,6 +354,10 @@ function cmdRecord(flags) {
   }
 
   const shard = requestShard(flags.request)
+  // 分片记录的文件名由这里算好交给包，包**直接**写到分片名（不再先写规范名再删除）
+  const shardName = shard
+    ? shardRecordName(shard.pr, shard.headSha, { index: shard.index, total: shard.total })
+    : undefined
   const outcome = recordViaPackage({
     requestFile: flags.request,
     responseFile: flags.response,
@@ -358,6 +369,7 @@ function cmdRecord(flags) {
     // 分片记录要换名并补 shard 字段：先别打印包算出来的路径，改完自己打印
     json: shard ? false : Boolean(flags.json),
     quiet: Boolean(shard),
+    name: shardName,
     form: typeof flags.form === 'string' ? flags.form : undefined,
     durationMs: parseDurationMs(flags),
   })
@@ -368,7 +380,7 @@ function cmdRecord(flags) {
   if (shard) {
     let written
     try {
-      written = finalizeShardRecord(reviewsDir(root(flags)), outcome.record, shard)
+      written = finalizeShardRecord(join(reviewsDir(root(flags)), shardName), shard)
     } catch (error) {
       process.stderr.write(`错误: ${error.message}\n`)
       return 2
