@@ -8,7 +8,7 @@
 # 里 3 天未访问的文件，把证据放那儿会悄悄消失。
 #
 # 用法:
-#   scripts/pipeline/review.sh prepare <pr> [--model <模型>] [--facts <文件>] [--include <路径[,路径...]>] [--facts <文件>] [--include <路径[,路径...]>]
+#   scripts/pipeline/review.sh prepare <pr> [--model <模型>] [--facts <文件>] [--include <路径[,路径...]>]
 #   scripts/pipeline/review.sh publish <pr> --record <记录文件> --round <n> [--dry-run] [--repo <owner/name>]
 #   scripts/pipeline/review.sh paths <pr>
 set -u
