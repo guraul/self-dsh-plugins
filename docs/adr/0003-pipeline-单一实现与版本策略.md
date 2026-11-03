@@ -17,6 +17,9 @@
 
 ### 1. 一个独立仓，一个包
 
+包名 `@guraul/dsh-pipeline`；消费仓在 `tools/package.json` 里用**别名** `dsh-pipeline` 依赖本地 tarball，
+所以安装目录是 `tools/node_modules/dsh-pipeline`、命令里也写 `dsh-pipeline`。两个名字是同一个包。
+
 新建 `~/workspace/dsh-pipeline`，包名 `@guraul/dsh-pipeline`，**不发布到任何 registry**。
 它是所有仓的交付流程与审核流程的单一实现。
 
@@ -56,6 +59,8 @@
 否决：
 - **git tag 依赖**（`git+file://…#v1.2.0`）：依赖 pnpm 对 `git+file` 的支持细节，CI 上还要能 clone；
 - **各仓 `vendor/` 内置产物**：等于把单一实现又复制成五份。
+
+代价：版本号在这里失去区分力（各仓都写 `0.1.0`，内容却可能不同）。**怎么判断各仓装的是哪次打包，见 §4b。**
 
 ### 4b. 构建标识与漂移检测（2026-11-03 补）
 

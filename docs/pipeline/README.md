@@ -218,10 +218,10 @@ pnpm install
 
 **不要用 `pnpm update`**：它可能复用本机的旧 tarball 缓存，命令成功但装出来的还是旧版包。
 
-**装完直接看构建标识**（2026-11-03 起）：
+**装完直接看构建标识**（2026-11-03 起）。下面两条命令都在**仓根**执行（先 `cd ..`）：
 
 ```bash
-node node_modules/dsh-pipeline/bin/cli.mjs --version
+node tools/node_modules/dsh-pipeline/bin/cli.mjs --version
 # 0.1.0 (8ad432b 2026-11-03T13:32:15Z)
 ```
 
