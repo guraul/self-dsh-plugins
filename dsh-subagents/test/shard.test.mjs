@@ -148,11 +148,24 @@ function recordViaStub(t, { index = 2, total = 3, record }) {
   t.after(() => rmSync(home, { recursive: true, force: true }))
   mkdirSync(join(home, 'bin'), { recursive: true })
   const canonical = join(reviews, `${PR}-${SHA}.json`)
+  // 桩包要模拟真实包的 --name：给了 --name 就写到 <reviews>/<name>，否则写规范名。
+  // 分片记录的正确性正取决于「包直接写分片名、全程不产生规范名」。
   writeFileSync(
     join(home, 'bin', 'cli.mjs'),
-    ['#!/bin/sh', 'printf \'%s\' "$DSH_STUB_RECORD" > "$DSH_STUB_TARGET"', 'printf \'%s\' "$DSH_STUB_RECORD"', ''].join(
-      '\n',
-    ),
+    [
+      '#!/bin/sh',
+      'name=""',
+      'while [ $# -gt 0 ]; do',
+      '  case "$1" in',
+      '    --name) name="$2"; shift 2 ;;',
+      '    *) shift ;;',
+      '  esac',
+      'done',
+      'if [ -n "$name" ]; then target="$DSH_STUB_REVIEWS/$name"; else target="$DSH_STUB_TARGET"; fi',
+      'printf \'%s\' "$DSH_STUB_RECORD" > "$target"',
+      'printf \'%s\' "$DSH_STUB_RECORD"',
+      '',
+    ].join('\n'),
     { mode: 0o755 },
   )
 
@@ -166,6 +179,7 @@ function recordViaStub(t, { index = 2, total = 3, record }) {
         DSH_PIPELINE_HOME: home,
         DSH_STUB_RECORD: JSON.stringify(record),
         DSH_STUB_TARGET: canonical,
+        DSH_STUB_REVIEWS: reviews,
       },
     },
   )

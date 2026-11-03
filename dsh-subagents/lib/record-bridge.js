@@ -104,6 +104,7 @@ export function recordViaPackage({
   json,
   form,
   durationMs,
+  name,
   quiet = false,
 } = {}) {
   const cwd = root || process.cwd()
@@ -124,6 +125,8 @@ export function recordViaPackage({
   if (round !== undefined) args.push('--round', String(round))
   if (typeof root === 'string' && root.length > 0) args.push('--root', root)
   if (durationMs !== undefined) args.push('--duration-ms', String(durationMs))
+  // 分片记录直接写成分片名：包自己写，不再「先写规范名再删除」
+  if (name !== undefined) args.push('--name', name)
   optionalArg(args, 'form', form)
   args.push('--json')
 

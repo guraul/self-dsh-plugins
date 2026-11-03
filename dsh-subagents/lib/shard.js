@@ -466,21 +466,30 @@ export function writeAggregateRecord(dir, record) {
  *
  * 任何一步失败都要保证规范文件名不残留——没有记录，闸门就拒绝。
  */
-export function finalizeShardRecord(dir, record, { index, total, diffSha256 }) {
-  const canonical = recordFile(dir, record.pr, record.head_sha)
-  const target = join(dir, shardRecordName(record.pr, record.head_sha, { index, total }))
-  const tmp = `${target}.${process.pid}.tmp`
+/**
+ * 给分片记录补上 `shard` 字段。
+ *
+ * 记录**已经由共享包直接写到分片文件名**（`record --name`），所以这里只做「就地补字段」，
+ * 不再有「先写规范名、再删掉」那段窗口——那段窗口里规范名指向的是单片判定，
+ * 闸门若恰好在窗口内运行，单片 APPROVE 就能放行整份变更。
+ */
+export function finalizeShardRecord(target, { index, total, diffSha256 }) {
+  let record
+  try {
+    record = JSON.parse(readFileSync(target, 'utf8'))
+  } catch (error) {
+    throw new ContractError('E_UNAVAILABLE', `读取分片记录失败: ${error.message}`)
+  }
   const sharded = {
     ...record,
     shard: { index, total, ...(diffSha256 ? { diffSha256 } : {}) },
   }
+  const tmp = `${target}.${process.pid}.tmp`
   try {
     writeFileSync(tmp, `${JSON.stringify(sharded, null, 2)}\n`, 'utf8')
     renameSync(tmp, target)
-    rmSync(canonical, { force: true })
   } catch (error) {
     rmSync(tmp, { force: true })
-    rmSync(canonical, { force: true })
     throw new ContractError('E_UNAVAILABLE', `分片记录落盘失败: ${error.message}`)
   }
   return { file: target, record: sharded }
