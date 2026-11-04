@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # review.sh — 审核循环里的机械步骤：prepare / publish / paths
 #
+# 分工（2026-11-04 起）：
+#   prepare / prompt  —— 转发共享包 `dsh-pipeline review prepare|prompt`（请求构建、nonce、提示词模板归包）
+#   publish           —— 仍留本仓：它把判定**发到 GitHub 当作 review**（走 reviewer 专属 gh 身份），
+#                        包侧 `review publish` 只负责落盘记录，没有这个能力；这条差异是已知边界。
+#
 # 不包含的一步：reviewer 的模型调用。那必须由会话内的 agent 发起（形态 A 或 B），
 # 脚本只负责准备材料与发布结果。
 #
@@ -52,13 +57,16 @@ cmd_prepare() {
   local dir; dir=$(pr_dir "${pr}")
   mkdir -p "${dir}"
 
-  local args=(prepare --pr "${pr}" --out "${dir}/request.json")
+  resolve_pipeline_cli || die "未找到共享 pipeline 包（试过: ${PIPELINE_TRIED}）"
+
+  # 请求构建与提示词模板都归共享包：本仓不再各存一份（同一能力两份实现必然漂移）
+  local args=(review prepare --pr "${pr}" --root "${MAIN_WT}" --out "${dir}/request.json")
   if [[ -n "${model}" ]]; then args+=(--model "${model}"); fi
   # 证据包：reviewer 读不到工作区之外、也不能跑命令，控制面用这两个参数把事实喂给它
   if [[ -n "${facts}" ]]; then args+=(--facts "${facts}"); fi
   if [[ -n "${include}" ]]; then args+=(--include "${include}"); fi
-  node "${CLI}" "${args[@]}" >/dev/null || die "prepare 失败"
-  node "${CLI}" prompt --request "${dir}/request.json" --out "${dir}/prompt.md" >/dev/null \
+  node "${PIPELINE_CLI_PATH}" "${args[@]}" >/dev/null || die "prepare 失败"
+  node "${PIPELINE_CLI_PATH}" review prompt --request "${dir}/request.json" --out "${dir}/prompt.md" >/dev/null \
     || die "生成 prompt 失败"
 
   node -e '
@@ -66,8 +74,10 @@ const fs = require("node:fs")
 const path = require("node:path")
 const dir = process.argv[1]
 const payload = JSON.parse(fs.readFileSync(path.join(dir, "request.json"), "utf8"))
-const { request, stats } = payload
-console.log(`PR #${request.pr}  nonce=${request.nonce}  head=${String(request.head_sha).slice(0, 8)}  diff=${stats.diffChars}  model=${request.model ?? "-"}`)
+// 兼容两种形态：包的扁平请求，或插件信封 {request, stats}
+const request = payload.request ?? payload
+const diffChars = typeof request.diff === "string" ? request.diff.length : (payload.stats?.diffChars ?? 0)
+console.log(`PR #${request.pr}  nonce=${request.nonce}  head=${String(request.head_sha).slice(0, 8)}  diff=${diffChars}  model=${request.model ?? "-"}`)
 console.log(`产物: ${dir}/request.json`)
 console.log(`      ${dir}/prompt.md`)
 ' "${dir}"
