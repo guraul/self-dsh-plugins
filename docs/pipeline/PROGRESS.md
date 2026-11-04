@@ -81,7 +81,7 @@ GitHub Issue（任务入口）
 
 - [x] 台账重写，与现状对齐（#234）
 - [x] 包补齐 `task` / `pr`，本仓 `new-task.sh` / `open-pr.sh` 薄壳化，并用新脚本真实往返（#236）
-      ——新 `open-pr.sh` 开出 PR #236 自身，新 `new-task.sh` 建出 #253 的 worktree
+      ——新 `open-pr.sh` 开出 PR #236 自身，新 `new-task.sh` 建出 #237 的 worktree
 - [x] 包仓接入自己的闸门 + CI：PR #6 与 #7 各触发一次 `E_POLICY`（#6 改 `.dsh/**`、#7 改 `.gitignore`；#7 同一个 PR 还修了「误删主工作区」），
       均按文档走 `--no-review` 并落跳过审计；PR #8 按正常路径通过闸门合并；CI 只跑测试（#5）
 - [x] **agent-mobile 迁到共享包**（issue agent-mobile#187 / PR #188）：`merge-pr.sh` 从 118 行自带实现改薄转发，去掉硬编码的别仓闸门路径；合并即部署的行为不变
