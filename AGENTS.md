@@ -16,7 +16,7 @@
 
 | 项 | 值 |
 |---|---|
-| DSH | `0.2.1-rc.2`（本机全局安装，走 `next` 渠道；npm `latest` 仍是 `0.2.0-rc.2`），装在 nvm node `v24.21.0` 下 |
+| DSH | `0.2.2-alpha.2`（本机全局安装，**2026-11-04 实测** `dsh --version`；同日 npm `@deepseek-ai/dsh` 的 `latest` 是 `0.2.1-rc.5`），装在 nvm node `v24.21.0` 下 |
 | Node / pnpm | `v24.21.0` / `12.6.0`（`dsh`、`pnpm` 都在 `~/.nvm/versions/node/v24.21.0/bin`） |
 | `DSH_HOME` | `/Users/gubin/.dsh` |
 | profile | `web` = `~/.dsh/profiles/web`，`patchReload: live` |
@@ -54,9 +54,11 @@
 | [`dsh-external-discuss/`](./dsh-external-discuss) | `dsh-plugin-external-discuss` | 把 DSH 会话一键送到外部模型（清言网页版）继续讨论 | **原创** |
 | [`dsh-im-bridge-workspaces/`](./dsh-im-bridge-workspaces) | `@mhfire/dsh-im-bridge` | 企业微信 ⇄ DSH Agent 桥接，本地 fork 加多工作区 `/ws` 切换 | **fork**（npm `@mhfire/dsh-im-bridge@0.4.4`） |
 | [`dsh-plugin-product-subagents/`](./dsh-plugin-product-subagents) | `dsh-plugin-product-subagents` | 把 Claude Code / Codex / 任意 ACP CLI 变成基于角色的可续接 subagent | **fork**（`shaokeyibb/dsh-plugin-product-subagents` v0.4.0） |
+| [`dsh-plugin-memx/`](./dsh-plugin-memx) | `dsh-plugin-memx` | memx 记忆能力的 DSH 薄壳：`link:` 进 web profile、提供设置页「记忆」（提炼 provider / model、轮末自动提炼、提炼间隔），用 Node `load` 钩子直接加载 memx 仓的 TS 源码，零逻辑复制 | **原创**（记忆逻辑单源在 memx 仓 `src/hosts/dsh/`） |
 | [`dsh-subagent-policy-fallback/`](./dsh-subagent-policy-fallback) | `dsh-subagent-policy-fallback` | host-only：为种子 / 恢复会话补齐 `subagent/model-selection-policy`，补上 DSH 只采样 `firstLiveSeq === 0` 的缺口 | **原创** |
 | [`dsh-subagents/`](./dsh-subagents) | `dsh-plugin-subagents` | 角色化子代理层：角色（executor / reviewer）× 接入形态（A/B/C），共享判定契约 | **原创**（替代 fork `dsh-plugin-product-subagents`） |
 | [`dsh-prompt-optimizer/`](./dsh-prompt-optimizer) | `@y1x1n/dsh-prompt-optimizer` | 发送栏纯图标按钮，一键优化提示词并直接写回输入框（线性图标 + 内联 loading，无弹出面板） | **fork**（npm `@y1x1n/dsh-prompt-optimizer@0.6.1`，`0.6.1-fork.1`） |
+| [`dsh-usage-panel/`](./dsh-usage-panel) | `dsh-usage-panel` | 用量面板：设置页「消耗统计」展示 Token 用量 KPI、活跃热力图、按模型堆叠柱状图与模型环形图，只读聚合会话日志、不回写 | **fork**（`AlfredChaos/dsh-usage-panel` v0.2.3，本地 `0.2.3-fork.1`） |
 | [`dsh-zhihu-sidebar/`](./dsh-zhihu-sidebar) | `dsh-plugin-zhihu-sidebar` | 知乎热榜 / 搜索 / 我的创作挂进右侧栏；数据走官方 Zhihu CLI，密钥存系统凭证库、插件不接触明文 | **原创** |
 
 顶层其它文件：[`README.md`](./README.md)（对外说明）、[`upgrade-dsh.sh`](./upgrade-dsh.sh)（全局 dsh 升级/回滚/恢复）、
