@@ -97,12 +97,21 @@ GitHub Issue（任务入口）
 - [x] 新插件 `dsh-subagent-policy-fallback`：DSH 只在 `firstLiveSeq === 0` 的顶层会话采样 `subagent-model-selection-settings`，种子 / 恢复会话永远拿不到 `subagent/model-selection-policy`（上游 discussion #8444）；本插件按设置补写该事件，换 subagent 模型不必重开会话
 - [x] 模型路由切换：executor 走形态 A（原生子代理）+ `opencode-go/mimo-v2.6-flash`，reviewer 走形态 B（`product_delegate`）+ `codebuddy/glm-5.3-flash`
 
+### ✅ 阶段 7 · 审核准备/落盘收口（2026-11-04 下午）
+
+- [x] **`dsh-pipeline` PR #15**：CLI 新增 `review` 子命令——`prepare` 生成 `.tmp/review/<pr>/request.json` + 12 位 nonce，`publish` 复用包的 `record` 落盘；测试 201→219。两轮审核：第 1 轮以「`files` 为空时高风险判定静默放行」判 minor，已修
+- [x] **`homebase` PR #131**：新增 `scripts/pipeline/review.sh`（`prepare` / `publish` 转发壳），`test-forwarding.sh` 断言 10→13 组
+- [x] **`agent-mobile` PR #195**：新增 `scripts/pipeline/review.sh` 与 `test-review.sh`（8 组断言）；第 1 轮审核 **REJECT**——`--root` 取成 worktree，会让 `.tmp/review/` 与 `.dsh-web/reviews/` 随 worktree 清理消失，且测试测不出该偏差；修后第 2 轮 **APPROVE**，并用「旧脚本喂新测试 → exit 1、21 处 ✗」反向验证测试有效
+
+同日三仓共享包刷新到构建 `0a7ea83 2026-11-04T08:10:47Z`，`doctor` 三行一致。
+
 ## 四、未完成（欠账）
 
 | # | 欠账 | 现状 | 影响 |
 |---|------|------|------|
 | 1 | 形态 C（清言网页桥） | 未启动 | 依赖 REQ-002（需求未写） |
-| 2 | memx 迁到共享包 | 未启动；**已定：走与其它仓一模一样的流程**（用户 2026-11-03 决定），暂不做 | 需要包补 `--worktrees-dir`（memx 被 opencode 加载源码，worktree 必须建在仓外）；memx 无 CI，需如实声明 `ci: []` |
+| 2 | memx 迁到共享包 | 未启动（**完全未接入 pipeline**）；**已定：走与其它仓一模一样的流程**（用户 2026-11-03 决定），暂不做 | 需要包补 `--worktrees-dir`（memx 被 opencode 加载源码，worktree 必须建在仓外）；memx 无 CI，需如实声明 `ci: []` |
+| 3 | 本仓 `review.sh` 未统一到共享包 | 仍为自有实现（多 `--facts` / `--include` / 提示词生成）；`agent-mobile` / `homebase` 已转发到包的 `review` 子命令 | 审核准备 / 落盘两套实现并存，行为面可能漂移；统一时要保住本仓多出的三个能力 |
 
 > **`#117` 不是欠账**：它是 `compat-matrix.yml` 每周把结果写进去的**滚动 issue**，按设计长期 open（最近一次成功：2026-11-02）。此前台账把它列为「未完成」是误判。
 
@@ -133,3 +142,6 @@ GitHub Issue（任务入口）
 | 2026-11-04 | dsh-pipeline `deleteBranch` 修复（包提交 74c4ccf / PR #13） | `bin/cli.mjs` 适配层丢掉调用方 options，`{force:true}` 失效、squash 合并后删分支必走 `-d` 而失败。**教训：注入式包装层必须透传 options，单测只注入假 git 时抓不到这类丢失** |
 | 2026-11-04 | 新插件 `dsh-subagent-policy-fallback` 上线 | DSH 只在 `firstLiveSeq === 0` 的顶层会话采样 `subagent-model-selection-settings`，种子 / 恢复会话永远拿不到 `subagent/model-selection-policy`（上游 discussion #8444）；本插件按设置补写该事件，因此不必为「换个 subagent 模型」重开会话 |
 | 2026-11-04 | 模型路由切换 | executor 走形态 A（原生 subagent）+ `opencode-go/mimo-v2.6-flash`，reviewer 走形态 B（`product_delegate`）+ `codebuddy/glm-5.3-flash`；形态 A 路由依赖 `subagent/model-selection-policy` 会话策略事件，缺口由上述插件补写 |
+| 2026-11-04 | 审核准备/落盘收口：包补 `review` 子命令（包 PR #15） | `prepare` 生成 `.tmp/review/<pr>/request.json` + 12 位 nonce，`publish` 复用包的 `record` 落盘；测试 201→219。两轮审核：第 1 轮以「`files` 为空时高风险判定静默放行」判 minor，已修 |
+| 2026-11-04 | 两仓 `review.sh` 转发壳（homebase PR #131 / agent-mobile PR #195） | homebase 新增 `scripts/pipeline/review.sh`（`prepare` / `publish` 转发壳），`test-forwarding.sh` 10→13 组断言；agent-mobile 新增 `review.sh` 与 `test-review.sh`（8 组），第 1 轮 **REJECT**、修后第 2 轮 **APPROVE**。**教训：`--root` 必须取主工作区**——取成 worktree 时，`.tmp/review/` 与 `.dsh-web/reviews/` 都落在 worktree 里，随 `git worktree remove` 一起消失（请求产物与审核记录全丢），且旧测试测不出该偏差；修完用「旧脚本喂新测试 → exit 1、21 处 ✗」反向验证测试有效 |
+| 2026-11-04 | 三仓共享包刷新 + 欠账登记（§四 #2–#3） | 三仓共享包刷新到构建 `0a7ea83 2026-11-04T08:10:47Z`，`doctor` 三行一致；欠账：本仓 `review.sh` 仍是自有实现（多 `--facts` / `--include` / 提示词生成）未统一到包，`memx` 完全未接入 pipeline |
