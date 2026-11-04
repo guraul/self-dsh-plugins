@@ -68,7 +68,8 @@
 |---|---|---|
 | `audit-subagents.mjs` | product 子代理会话审计：只读、确定性、不调模型 | 本节 §audit-subagents.mjs |
 | `audit-subagents.test.mjs` | 上者的单测 + fixture 集成（`node --test`） | 本节 §audit-subagents.mjs |
-| `check-all.sh` | 逐插件跑 `test` / `check` / `typecheck` | 本节 §check-all.sh |
+| `check-all.sh` | 逐插件跑 `test` / `check` / `typecheck`，末尾再跑一次构建一致性检查 | 本节 §check-all.sh |
+| `build-check.sh` | 比对各消费仓装的共享包是不是同一个构建（读 `.dsh/pipeline.json` 的 `doctorRepos`） | 本节 §build-check.sh |
 | `compat-matrix.sh` | 对任意 dsh 版本跑全插件装配验收（兼容矩阵） | 本节 §compat-matrix.sh |
 | `install-check.sh` | 一次性 `DSH_HOME` 里验证插件装配 | 本节 §install-check.sh |
 | `install-hooks.sh` | 安装 `pre-push` 钩子（拦直推 / 删 `origin/main`） | 本节 §pre-push-main-guard.sh / install-hooks.sh |
@@ -246,6 +247,20 @@ node tools/node_modules/dsh-pipeline/bin/cli.mjs doctor \
 scripts/pipeline/status.sh
 ```
 **纯只读**，无参数。四段输出：(a) 本仓库分支/HEAD/工作区/全部 worktree；(b) 各插件（以 `lib.sh` 的 `PLUGIN_DIRS` 为准）的 `test`/`check`/`typecheck` 脚本是否存在 + `node_modules` 是否已安装；(c) `dsh plugin --profile web version-exemptions`；(d) profile `link:` 依赖悬空检测 + `gh pr list` / `gh issue list`。任何一段失败都不中断整体输出。
+
+### build-check.sh
+
+`doctor` 只能手动跑，构建漂移不会自己叫（2026-11-04 实测：`tools/` 装着旧包，`review prompt` 直接报「未知动作」）。`build-check.sh` 把「各仓同一个构建」变成一条可自动执行的检查：
+
+```bash
+scripts/pipeline/build-check.sh           # 打印 doctor 表 + 结论
+scripts/pipeline/build-check.sh --quiet   # 只打一行，适合钩子 / CI
+```
+
+- 比对的仓来自 `.dsh/pipeline.json` 的 `doctorRepos`（相对**主工作区**；worktree 里跑也按主工作区算）；
+- 只纳入「目录在、且装了包」的兄弟仓；缺失的会跳过并说明——**CI 里没有兄弟仓，跳过不判失败**；
+- 不一致退出 1 并给出修法（`cd <仓>/tools && rm -rf node_modules pnpm-lock.yaml && pnpm install`）；未知参数退出 2。
+- `check-all.sh` 末尾会调用它，结果进汇总表；不想跑就单独调用 `check-all.sh` 前设 `SKIP_BUILD_CHECK=1`。
 
 ### check-all.sh
 
