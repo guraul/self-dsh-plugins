@@ -10,6 +10,7 @@
 #   * 有 scripts.check → 跑 pnpm run check
 #   * 有 scripts.typecheck → 跑 pnpm run typecheck（dsh-im-bridge-workspaces）
 #   * 缺 node_modules 的插件 → 明确报告"未安装依赖，已跳过"，**不算失败**
+#   * 末尾跑一次 build-check.sh：各仓装的共享包构建不一致 → 算失败（兄弟仓缺失时跳过）
 # 退出码: 任一检查失败 → 1；其余情况 0（跳过不导致失败）
 # 注意: 各插件的完整输出会直接打到 stdout（适合人看）；机器消费只看末尾汇总表。
 set -euo pipefail
@@ -105,6 +106,22 @@ for DIR in ${TARGETS}; do
     FAILED=$((FAILED + 1))
   fi
 done
+
+# —— 构建一致性：各仓装的共享包是不是同一个构建（兄弟仓缺失时自动跳过） ——
+# 放在插件循环之后、汇总之前：它比的是「包」，不是某个插件。
+if [[ "${SKIP_BUILD_CHECK:-0}" -eq 1 ]]; then
+  info "构建检查: 跳过（SKIP_BUILD_CHECK=1）"
+  add_row "-" "构建一致" "跳过（SKIP_BUILD_CHECK=1）"
+else
+  BUILD_RC=0
+  bash "$(dirname "$0")/build-check.sh" || BUILD_RC=$?
+  if [[ "${BUILD_RC}" -ne 0 ]]; then
+    add_row "-" "构建一致" "失败（见上）"
+    FAILED=$((FAILED + 1))
+  else
+    add_row "-" "构建一致" "通过"
+  fi
+fi
 
 echo ""
 echo "══════════ 汇总 ══════════"
