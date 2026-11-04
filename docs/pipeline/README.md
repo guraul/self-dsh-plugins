@@ -257,7 +257,7 @@ scripts/pipeline/build-check.sh           # 打印 doctor 表 + 结论
 scripts/pipeline/build-check.sh --quiet   # 只打一行，适合钩子 / CI
 ```
 
-- 比对的仓来自 **`.dsh/build-check.json`** 的 `repos`（相对**主工作区**；worktree 里跑也按主工作区算）。
+- 比对的仓来自 **`.dsh/build-check.json`**（**不入库**，兄弟仓路径是本机的）；仓库里只有示例 `.dsh/build-check.example.json`，首次使用 `cp .dsh/build-check.example.json .dsh/build-check.json` 再改路径。缺这个文件时脚本**跳过**并提示，不判失败。
   刻意不放进 `.dsh/pipeline.json`：那是共享包的 schema（`CONFIG_FIELDS` 只认 `repo/ci/highRisk/roles`），多一个字段会让 `task`/`pr`/`merge` 直接 `E_CONFIG`（2026-11-04 踩过，PR #284 → 修复 #288）；
 - 只纳入「目录在、且装了包」的兄弟仓；缺失的会跳过并说明——**CI 里没有兄弟仓，跳过不判失败**；
 - 不一致退出 1 并给出修法（`cd <仓>/tools && rm -rf node_modules pnpm-lock.yaml && pnpm install`）；未知参数退出 2。

@@ -33,7 +33,12 @@ MAIN_WT=$(main_worktree)
 resolve_pipeline_cli || die "未找到共享 pipeline 包（试过: ${PIPELINE_TRIED}）"
 
 CONFIG="${MAIN_WT}/.dsh/build-check.json"
-[[ -r "${CONFIG}" ]] || die "读不到 ${CONFIG}（应含 {\"repos\": [\"../<兄弟仓>\", …]}）"
+if [[ ! -r "${CONFIG}" ]]; then
+  # 兄弟仓路径是本机的，不入库；缺了就跳过，别把没有兄弟仓的环境判成失败
+  INFO="构建检查: 跳过（没有 ${CONFIG}；需要时 cp .dsh/build-check.example.json .dsh/build-check.json 并改路径）"
+  [[ "${QUIET}" -eq 1 ]] && echo "${INFO}" || info "${INFO}"
+  exit 0
+fi
 
 # 兄弟仓清单：一行一个（没有就输出空）
 SIBLINGS=$(node -e '

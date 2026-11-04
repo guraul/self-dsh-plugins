@@ -1,0 +1,7 @@
+{
+  "repos": [
+    "../agent-mobile",
+    "../homebase",
+    "../memx"
+  ]
+}

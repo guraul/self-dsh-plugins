@@ -7,7 +7,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,7 +25,7 @@ function layout({ siblingTools = true, siblings = ['sib-a', 'sib-b'] } = {}) {
   // main_worktree() 认的是 git worktree 首条，这里直接给个假 git
   writeFileSync(join(main, '.dsh', 'pipeline.json'), JSON.stringify({ repo: 'o/r' }))
   // build-check 自己的配置在**独立文件**里（`.dsh/pipeline.json` 是包的 schema，不能加字段）
-  writeFileSync(join(main, '.dsh', 'build-check.json'), JSON.stringify({ repos: siblings.map((s) => `../${s}`) }))
+  writeFileSync(join(main, '.dsh', 'build-check.json'), JSON.stringify({ repos: siblings.map((s) => `../${s}`) }), { mode: 0o600 })
   for (const s of siblings) {
     const dir = join(root, s)
     mkdirSync(dir, { recursive: true })
@@ -104,4 +104,13 @@ test('doctor 自身退出 2（环境错误）→ 透传 2，不误报成「构�
   const r = run(l, [], { FAKE_BROKEN: '1' })
   assert.equal(r.code, 2)
   assert.match(r.out, /无法完成比对/)
+})
+
+test('没有 .dsh/build-check.json → 跳过（不算失败）并提示复制示例', () => {
+  const l = layout()
+  rmSync(join(l.main, '.dsh', 'build-check.json'))
+  const r = run(l, ['--quiet'])
+  assert.equal(r.code, 0)
+  assert.match(r.out, /跳过/)
+  assert.match(r.out, /build-check\.example\.json/)
 })
