@@ -202,3 +202,21 @@ test('apply 回填后同一会话再触发 agent/created 不会重复追加', ()
 
   assert.equal(session.appended.length, 1)
 })
+
+test('回填时 sessions.list() 抛错 → 插件仍正常挂载、后续 agent/created 照常工作', () => {
+  const session = createSession({ id: 'later' })
+  const ctx = createCtx({ service: createService() })
+  ctx.sessions.list = () => {
+    throw new Error('store offline')
+  }
+
+  apply(ctx)
+
+  assert.equal(ctx.warns.length, 1)
+  assert.match(ctx.warns[0], /回填存活会话失败/)
+  assert.match(ctx.warns[0], /store offline/)
+
+  // 挂载没被拖垮：之后新会话照旧能拿到策略
+  ctx.emitCreated(session)
+  assert.equal(session.appended.length, 1)
+})

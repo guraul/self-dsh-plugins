@@ -15,7 +15,13 @@ import { backfillLiveSessions, backfillSession } from './policy.js'
 /** 插件 id（cordis 里就是组合行的 id）。 */
 export const name = 'dsh-subagent-policy-fallback'
 
-/** 需要的宿主服务：会话存储；设置服务用 `ctx.get()` 软探测，不强制注入。 */
+/**
+ * 需要的宿主服务：会话存储。
+ *
+ * `sessions` 会挂到 `ctx.sessions` 上供 `backfillLiveSessions()` 使用；设置服务
+ * `subagentModelSelection` 故意不写进 `inject`，用 `ctx.get()` 软探测——它没挂载时
+ * 本插件应当安静地什么都不做，而不是把挂载顶掉。
+ */
 export const inject = ['sessions']
 
 /**
@@ -40,5 +46,13 @@ export function apply(ctx, config = {}) {
   })
 
   // 插件加载 / 重启时，已经存活的会话不会再触发 agent/created，这里补一次。
-  backfillLiveSessions(ctx)
+  // 回填失败只影响「当下这批会话」，不能让插件挂载跟着失败。
+  try {
+    backfillLiveSessions(ctx)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    if (ctx.logger !== undefined && ctx.logger !== null && typeof ctx.logger.warn === 'function') {
+      ctx.logger.warn(`subagent-policy-fallback: 回填存活会话失败：${reason}`)
+    }
+  }
 }
