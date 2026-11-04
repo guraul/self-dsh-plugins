@@ -3,7 +3,8 @@
 #
 # 为什么只有几十行: 自 issue #187 起，「闸门 → CI → squash 合并 → 清理现场」的**唯一实现**
 #   是共享包 @guraul/dsh-pipeline；本仓只保留一个「文件名与参数都不变」的转发壳，
-#   免得两份实现各自漂移。原实现留在 scripts/pipeline/merge-pr.legacy.sh（已弃用，仅回滚用）。
+#   免得两份实现各自漂移。原实现 scripts/pipeline/merge-pr.legacy.sh 已于 2026-11-04 退役，
+#   需要时从 git 历史取：git show <该文件被删除前的提交>:scripts/pipeline/merge-pr.legacy.sh
 #
 # 用法（与旧脚本一致）:
 #   cd <worktree> && scripts/pipeline/merge-pr.sh          # 用当前分支对应的 PR

@@ -63,7 +63,7 @@ scripts/pipeline/merge-pr.sh 173 --review-record=.dsh-web/reviews/173-<sha>.json
 | 跳过审核 | `--no-review` **必须**配 `--reason=<文本>`，裸 `--no-review` 被拒绝；`DSH_REVIEWER=off` **已不再生效** |
 | `--checks-file` | 读的是 JSON `{"state":"success"｜"failure"}`，不再是 `gh pr checks` 原文；非 JSON / 不可读按 CI 未过拒绝 |
 
-`scripts/pipeline/merge-pr.legacy.sh` 仅作**回滚**用，不要在日常流程里调用。
+`scripts/pipeline/merge-pr.legacy.sh` 转发前是端口内的本地实现，已于 2026-11-04 退役；需要回滚请从 git 历史取 `git show <该文件被删除前的提交>:scripts/pipeline/merge-pr.legacy.sh`。
 
 **为什么产物不放 `/tmp`**：macOS 的 `/etc/periodic/daily/110.clean-tmps` 每天清理 `/tmp` 里超过 3 天未访问的文件，重启也可能清掉；证据要留在项目内。
 

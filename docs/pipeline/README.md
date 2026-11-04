@@ -74,7 +74,6 @@
 | `install-check.sh` | 一次性 `DSH_HOME` 里验证插件装配 | 本节 §install-check.sh |
 | `install-hooks.sh` | 安装 `pre-push` 钩子（拦直推 / 删 `origin/main`） | 本节 §pre-push-main-guard.sh / install-hooks.sh |
 | `lib.sh` | 公共常量、日志函数、工具函数；被其他脚本 source | 本节 §lib.sh |
-| `merge-pr.legacy.sh` | 转发前的旧 `merge-pr.sh`，**仅作回滚用** | 本节 §merge-pr.sh 末尾引用块 |
 | `merge-pr.sh` | 审核闸门 → CI → squash 合并 → 清理 → 快进 main（转发壳） | 本节 §merge-pr.sh |
 | `new-task.sh` | 建 `task/<号>-<slug>` 分支 + worktree（转发壳） | 本节 §new-task.sh |
 | `open-pr.sh` | 推送分支 + 开 PR（转发壳） | 本节 §open-pr.sh |
@@ -199,9 +198,9 @@ scripts/pipeline/merge-pr.sh <PR号> --force       # CI 未过时仍合并（慎
 `node dsh-subagents/lib/cli.js check`，判定、SHA 绑定、时效、高风险路径都由它负责，包只负责
 「拿不到记录就拒绝」与「显式跳过要留痕」。
 
-> **`scripts/pipeline/merge-pr.legacy.sh` 仅作回滚用。** 它是转发前的旧实现，语义与共享包**不一致**
-> （允许裸 `--no-review`、`--checks-file` 读 `gh pr checks` 原文、`DSH_REVIEWER=off` 仍生效），
-> 平时不要用它；只有共享包出问题时才临时回滚到它。
+> **历史说明**：`scripts/pipeline/merge-pr.legacy.sh` 转发前是端口内的本地实现，已于 2026-11-04 退役。
+> 当时它与共享包语义**不一致**（允许裸 `--no-review`、`--checks-file` 读 `gh pr checks` 原文、`DSH_REVIEWER=off` 仍生效）。
+> 需要回滚请从 git 历史取：`git show <该文件被删除前的提交>:scripts/pipeline/merge-pr.legacy.sh`。
 
 ### 刷新共享包（`tools/`）
 
