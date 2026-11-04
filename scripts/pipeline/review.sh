@@ -46,7 +46,7 @@ cmd_prepare() {
   local model="" facts="" include=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --model) [[ $# -ge 2 ]] || usage; model="$2"; shift 2 ;;
+      --model) [[ $# -ge 2 && -n "$2" ]] || usage; model="$2"; shift 2 ;;
       --facts) [[ $# -ge 2 && -n "$2" ]] || usage; facts="$2"; shift 2 ;;
       --include) [[ $# -ge 2 && -n "$2" ]] || usage; include="$2"; shift 2 ;;
       *) usage ;;
@@ -55,9 +55,10 @@ cmd_prepare() {
   [[ "${pr}" =~ ^[0-9]+$ ]] || usage
 
   local dir; dir=$(pr_dir "${pr}")
-  mkdir -p "${dir}"
 
+  # 先解析包再建目录：包缺失时不在主工作区留下空 .tmp/review/<pr>/
   resolve_pipeline_cli || die "未找到共享 pipeline 包（试过: ${PIPELINE_TRIED}）"
+  mkdir -p "${dir}"
 
   # 请求构建与提示词模板都归共享包：本仓不再各存一份（同一能力两份实现必然漂移）
   local args=(review prepare --pr "${pr}" --root "${MAIN_WT}" --out "${dir}/request.json")
