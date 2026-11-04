@@ -33,6 +33,36 @@ DSH 的 subagent 模型选择有一处覆盖缺口：
 插件刻意**不复制**上游的 `firstLiveSeq === 0` 判据——本插件存在的意义正是覆盖它漏掉的会话。
 重复追加由「日志里已有事件就跳过」兜住。
 
+## 挂载日志：挂了要能被看见
+
+插件没加载（profile 漏了行、宿主 API 变了）时，会话会一直报
+`not allowed for this Session` 而日志毫无动静。所以 `apply` 一定打一行
+`ctx.logger.info`，只在挂载时打一次，不逐会话刷屏：
+
+| 场景 | 日志行 |
+|---|---|
+| 服务可用 | `dsh-subagent-policy-fallback: 已挂载，设置里允许 N 条 subagent 模型路由` |
+| 服务缺失（含未启用、列表为空） | `dsh-subagent-policy-fallback: 已挂载，设置服务缺失，不会补策略` |
+| 配置 `enabled: false` | `dsh-subagent-policy-fallback: 未挂载（enabled=false），不会补策略` |
+
+N 是**挂载那一刻**的快照；设置之后改了，以 `describeStatus` 的实时读数为准。
+
+## 自检入口（只读）
+
+`lib/status.js` 导出 `describeStatus(ctx)`，返回结构化状态，供人排查（不做 CLI）：
+
+```js
+import { describeStatus } from 'dsh-subagent-policy-fallback/lib/status.js'
+
+describeStatus(ctx)
+// → { mounted: true, serviceAvailable: true, allowedRoutes: 2, backfilledSessions: 3 }
+```
+
+- `mounted`：本进程 `apply()` 是否真注册了监听；
+- `serviceAvailable`：设置服务 `subagentModelSelection` 在不在（只看在不在，开没开看 `allowedRoutes`）；
+- `allowedRoutes`：设置里当前可用的路由条数（缺失 / 未启用 / 空列表时为 0）；
+- `backfilledSessions`：**本进程内**补写过策略的会话数，宿主重启归零。
+
 ## 配置
 
 ```yaml
@@ -65,7 +95,7 @@ pnpm install
 
 ```sh
 cd dsh-subagent-policy-fallback
-pnpm test        # 10 条：注入、幂等、子会话、服务缺失、enabled=false、apply 回填
+pnpm test        # 16 条：注入、幂等、子会话、服务缺失、enabled=false、apply 回填、三种挂载日志、describeStatus
 pnpm run lint    # lib/ + test/ 全量 node --check
 ```
 
@@ -73,8 +103,9 @@ pnpm run lint    # lib/ + test/ 全量 node --check
 
 1. 打开 subagent 模型选择，配置至少两条路线；
 2. 恢复一个旧会话（或从历史会话 fork），让其中的 subagent 显式选模型；
-3. 宿主日志里应出现
-   `subagent-policy-fallback: 为会话 <id> 补齐 N 条 subagent 模型路由`；
+3. 宿主日志里应先出现挂载行
+   `dsh-subagent-policy-fallback: 已挂载，设置里允许 N 条 subagent 模型路由`，
+   再出现 `subagent-policy-fallback: 为会话 <id> 补齐 N 条 subagent 模型路由`；
 4. 同一个会话再次恢复 / 插件重载，不应出现第二条策略事件。
 
 ## 已知限制
