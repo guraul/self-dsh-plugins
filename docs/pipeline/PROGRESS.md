@@ -91,6 +91,12 @@ GitHub Issue（任务入口）
 - [x] **分片审核**（#252）：`prepare --shard i/n` + `record --aggregate`，REJECT > ESCALATE > APPROVE 确定性合成，缺片/哈希不一致 fail-closed；分片记录不占用闸门文件名，单片不可能过闸
       （⚠️ 2026-11-03 修正：当时是「先写规范名再删除」，中间有一段窗口能让单片冒充整份；#262 起改为直接写分片名，该判断已不成立）
 
+### ✅ 阶段 6 · 运行态回写（2026-11-04）
+
+- [x] dsh-pipeline `deleteBranch` 修复（包提交 74c4ccf / PR #13）：`bin/cli.mjs` 适配层丢掉调用方 options，`{force:true}` 失效、squash 合并后删分支必走 `-d` 而失败
+- [x] 新插件 `dsh-subagent-policy-fallback`：DSH 只在 `firstLiveSeq === 0` 的顶层会话采样 `subagent-model-selection-settings`，种子 / 恢复会话永远拿不到 `subagent/model-selection-policy`（上游 discussion #8444）；本插件按设置补写该事件，换 subagent 模型不必重开会话
+- [x] 模型路由切换：executor 走形态 A（原生子代理）+ `opencode-go/mimo-v2.6-flash`，reviewer 走形态 B（`product_delegate`）+ `codebuddy/glm-5.3-flash`
+
 ## 四、未完成（欠账）
 
 | # | 欠账 | 现状 | 影响 |
@@ -124,3 +130,6 @@ GitHub Issue（任务入口）
 | 2026-11-03 | 文档漂移小修（#260） | `compat-matrix.yml` 注释不再写死滚动 issue 号 |
 | 2026-11-03 | 包补两个参数（包 #10） | `task --slug`（中文标题自动 slug 退化成哈希时手指定）、`pr --issue`（分支名不含 issue 号时指定）；均为可选参数，不传时行为不变 |
 | 2026-11-03 | 构建标识 + `doctor`（包 #11） | `pack.sh` 写 `build.json`、`--version` 带构建标识、`doctor` 比对多仓装的构建；解决「版本号都一样，内容可能不同」无从判断的问题（ADR-0003 §4b）。三仓刷新后实测同一构建 `8ad432b` |
+| 2026-11-04 | dsh-pipeline `deleteBranch` 修复（包提交 74c4ccf / PR #13） | `bin/cli.mjs` 适配层丢掉调用方 options，`{force:true}` 失效、squash 合并后删分支必走 `-d` 而失败。**教训：注入式包装层必须透传 options，单测只注入假 git 时抓不到这类丢失** |
+| 2026-11-04 | 新插件 `dsh-subagent-policy-fallback` 上线 | DSH 只在 `firstLiveSeq === 0` 的顶层会话采样 `subagent-model-selection-settings`，种子 / 恢复会话永远拿不到 `subagent/model-selection-policy`（上游 discussion #8444）；本插件按设置补写该事件，因此不必为「换个 subagent 模型」重开会话 |
+| 2026-11-04 | 模型路由切换 | executor 走形态 A（原生 subagent）+ `opencode-go/mimo-v2.6-flash`，reviewer 走形态 B（`product_delegate`）+ `codebuddy/glm-5.3-flash`；形态 A 路由依赖 `subagent/model-selection-policy` 会话策略事件，缺口由上述插件补写 |

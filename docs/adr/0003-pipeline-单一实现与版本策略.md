@@ -41,6 +41,10 @@
 
 否决：**只靠白名单**——那是运行期检查参数，总能被 `spawn('gh', ...)` 绕过；API 层没有那个入口。
 
+教训（2026-11-04，包 PR #13 / 提交 74c4ccf）：**注入式包装层必须透传调用方 options**——
+`bin/cli.mjs` 的适配层丢掉 options 后 `{force:true}` 失效，squash 合并后删分支必走 `-d` 而失败；
+单测只注入假 git 时抓不到这类丢失（详见 `docs/pipeline/PROGRESS.md` 2026-11-04 行）。
+
 ### 4. 版本：稳定文件名 + 编号 tarball
 
 各仓依赖的是**固定文件名** `dsh-pipeline-latest.tgz`，内容可以前进；同时每次发布保留

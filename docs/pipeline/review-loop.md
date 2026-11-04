@@ -147,4 +147,5 @@ pnpm install
 | 没有权限天花板 | 角色声明的 `permissionMode` 目前只透传给产品 CLI，未做「子代理不能派生更高权限」的校验 | 同上 |
 | provider 名带 `product-` 前缀 | 名不副实，但改名会让 `audit-subagents.mjs` 静默失效 | 单独一次改名 + 同步审计脚本 |
 
-这些缺口不阻塞 reviewer 循环：reviewer 走形态 A（宿主内置子代理），executor 走一次性委派。
+这些缺口不阻塞 reviewer 循环：executor 走形态 A（宿主原生子代理，模型 `opencode-go/mimo-v2.6-flash`），
+reviewer 走形态 B（`product_delegate` 一次性委派，`codebuddy/glm-5.3-flash`）。
