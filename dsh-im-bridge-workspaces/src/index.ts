@@ -2119,8 +2119,7 @@ export function apply(ctx: Context, config: Config): void {
       try {
         await ws.sendMessage(chatTarget, { msgtype: 'text', text: { content: text } })
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        console.warn(`[im-bridge] 审批提示发送失败: ${message}`)
+        console.warn(`[im-bridge] 审批提示发送失败: ${describeError(error)}`)
       }
     }
 
@@ -2362,8 +2361,26 @@ export function apply(ctx: Context, config: Config): void {
       console.log('[im-bridge] 审批应答方已注册(agent)')
     }
 
-    /** 卡片按钮点击。 */
-    /** 卡片结果态：点击后 5 秒内换掉，避免停在「待审批」的样子。 */
+    /** 已处理态按钮 key 前缀：点它只表示看过，不构成审批决定。 */
+    const DONE_PREFIX = 'done:'
+
+    /** 第一优先：保持 button_interaction，只留一个「已处理」按钮（同类型才允许更新）。 */
+    function approvalDoneCard(
+      taskId: string,
+      title: string,
+      desc: string,
+      subTitle: string,
+    ): Record<string, unknown> {
+      return {
+        card_type: 'button_interaction',
+        task_id: taskId,
+        main_title: { title, desc },
+        sub_title_text: subTitle,
+        button_list: [{ text: '已处理', key: `${DONE_PREFIX}${taskId}`, style: 1 }],
+      }
+    }
+
+    /** 第二优先：text_notice 卡片。 */
     function approvalResultCard(
       taskId: string,
       title: string,
@@ -2378,12 +2395,43 @@ export function apply(ctx: Context, config: Config): void {
       }
     }
 
+    /**
+     * 点击后按「同类型按钮卡 → text_notice → 文本回执」逐层降级，
+     * 每层失败都 console.warn 并用 describeError 打出原因。
+     */
+    async function applyApprovalResult(
+      frame: WecomFrame,
+      entry: PendingApproval,
+      title: string,
+      desc: string,
+      subTitle: string,
+      fallbackText: string,
+    ): Promise<void> {
+      try {
+        await ws.updateTemplateCard(frame, approvalDoneCard(entry.taskId, title, desc, subTitle))
+        console.log(`[im-bridge] 审批结果卡片已更新(button_interaction) id=${entry.id}`)
+        return
+      } catch (first) {
+        console.warn(`[im-bridge] 同类型结果卡更新失败(降级 text_notice): ${describeError(first)}`)
+      }
+      try {
+        await ws.updateTemplateCard(frame, approvalResultCard(entry.taskId, title, desc, subTitle))
+        console.log(`[im-bridge] 审批结果卡片已更新(text_notice) id=${entry.id}`)
+        return
+      } catch (second) {
+        console.warn(`[im-bridge] text_notice 结果卡更新失败(降级文本): ${describeError(second)}`)
+      }
+      await notifyChat(entry.chatTarget, fallbackText)
+    }
+
     ws.on('event.template_card_event', ((frame: WecomFrame) => {
       // 企微实际结构是 `body.event.template_card_event.event_key`；旧结构直接挂在 event 上。
       const payload = frame.body?.event
       const key = payload?.template_card_event?.event_key ?? payload?.event_key
       const userId = frame.body?.from?.userid ?? ''
       if (typeof key !== 'string' || key === '') return
+      // 「已处理」是结果态按钮：直接忽略，既不当审批决定，也不触发「已失效」提示。
+      if (key.startsWith(DONE_PREFIX)) return
       const parsed = parseButtonKey(key)
       if (parsed === undefined) return
       const entry = approvals.get(parsed.id)
@@ -2398,23 +2446,15 @@ export function apply(ctx: Context, config: Config): void {
       if (!approvals.settle(parsed.id, parsed.decision)) return
 
       const approved = parsed.decision === 'allowed-once'
-      // 先换卡片（5 秒窗口），失败再发文本回执。
-      void ws
-        .updateTemplateCard(
-          frame,
-          approvalResultCard(
-            entry.taskId,
-            approved ? '✅ 已同意' : '🚫 已拒绝',
-            entry.toolName,
-            approved ? '本次操作已放行（只生效这一次）' : '本次操作已拒绝',
-          ),
-        )
-        .catch(() => {
-          void notifyChat(
-            entry.chatTarget,
-            approved ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`,
-          )
-        })
+      // 5 秒窗口内换卡片：同类型按钮卡优先，逐层降级，失败都有日志。
+      void applyApprovalResult(
+        frame,
+        entry,
+        approved ? '✅ 已同意' : '🚫 已拒绝',
+        entry.toolName,
+        approved ? '本次操作已放行（只生效这一次）' : '本次操作已拒绝',
+        approved ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`,
+      )
     }) as (...args: never[]) => void)
 
     // 启动即注册：不再依赖「收到第一条企微消息」。此前实现在纯网页会话或重启后
