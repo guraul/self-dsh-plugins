@@ -20,9 +20,10 @@
 
 | 路径 | 作用 |
 |---|---|
-| `lib/index.js` | 宿主入口：`name` / `inject = ['sessions']` / `apply` 注册 `agent/created` + 回填存活会话 + `enabled` 开关 |
+| `lib/index.js` | 宿主入口：`name` / `inject = ['sessions']` / `apply` 注册 `agent/created` + 回填存活会话 + `enabled` 开关 + 挂载日志 + 进程内计数（`readStats`） |
 | `lib/policy.js` | 纯逻辑：幂等检查、读设置、追加事件、审计日志、批量回填 |
-| `test/policy.test.mjs` | 假 ctx / 假 session 的单测（10 条） |
+| `lib/status.js` | 只读自检：`describeStatus(ctx)` 返回 `{ mounted, serviceAvailable, allowedRoutes, backfilledSessions }`，不做 CLI |
+| `test/policy.test.mjs` | 假 ctx / 假 session 的单测（16 条） |
 | `scripts/lint.js` | 对 `lib/**`、`test/**` 逐个 `node --check` |
 | `cordis.patch.yml` | 把本插件插进宿主组合 |
 
@@ -30,16 +31,14 @@
 
 ```
 apply(ctx, config)
-  ├─ config.enabled === false ──► 直接返回（不注册、不回填）
-  ├─ ctx.on('agent/created')  ──► backfillSession(agent.session)   （同步）
-  └─ ctx.sessions.list()      ──► backfillSessions([...])          （apply 时已存活的）
+  ├─ config.enabled === false ──► 打一行「未挂载（enabled=false）」info 后直接返回
+  ├─ ctx.on('agent/created')  ──► backfillSession(agent.session)   （同步，成功则计数 +1）
+  ├─ 挂载 info（只打一次）     ──► 「已挂载，设置里允许 N 条 …」
+  │                                或「已挂载，设置服务缺失，不会补策略」
+  └─ ctx.sessions.list()      ──► backfillSessions([...])          （apply 时已存活的，成功计入数）
 
-backfillSession
-  ├─ header.origin === 'subagent' ──► 跳过
-  ├─ 日志已有策略事件 ──────────────► 跳过（幂等）
-  ├─ 服务缺失 / current() 抛错 / enabled false / 列表空 ──► 跳过
-  └─ session.append('subagent/model-selection-policy', { allowedModels })
-       + ctx.logger.info('… 补齐 N 条 …')
+describeStatus(ctx)            ──► { mounted, serviceAvailable, allowedRoutes, backfilledSessions }
+                                  （只读 index.js 的进程内 WeakMap + 实时读设置）
 ```
 
 ## 改之前必须知道的五件事
@@ -56,23 +55,29 @@ backfillSession
    缺失时静默跳过。上游 `current()` 在「enabled 但列表空」时会抛错，`readAllowedModels` 必须捕获并按空处理。
 5. **子会话跳过是语义，不是 bug。** 子会话继承父会话；父会话若被补上，子会话自然拿到。
    不要给 `origin === 'subagent'` 的会话单独追加，否则会破坏继承关系。
+6. **挂载行只打一次，别挪进 `backfillSession`。** 服务缺失的提示放挂载行里说清就够了；
+   挪到逐会话路径会每个会话刷一行，反而把真正的补齐审计淹掉。
+   `describeStatus` 的计数由 `index.js` 累计（`state.backfilledSessions`），`status.js` 只读。
 
 ## 验证
 
 ```sh
 cd dsh-subagent-policy-fallback
-pnpm test        # 10 条：注入 / 已有事件 / 子会话 / 服务缺失 / enabled=false / apply 回填 / 幂等
+pnpm test        # 16 条：注入 / 已有事件 / 子会话 / 服务缺失 / enabled=false / apply 回填 / 幂等 / 三种挂载日志 / describeStatus
 pnpm run lint    # lib/ + test/ 全量 node --check
 ```
 
 单测不引入 cordis、不启动宿主：`createCtx` 只实现 `on` / `sessions.list` / `get` / `logger`，
 `createSession` 把 `append` 写回 `snapshotEvents()`，所以「回填后再触发一次」能直接验证幂等。
+挂载行与补齐行都进 `ctx.infos`，断言时用 `backfillInfos()` 只数「补齐」行，别混着数。
 
 真机验收（**重启 dsh web 会终止当前会话**，注意时机）：
 
 1. 在设置里打开 subagent 模型选择并配置 ≥2 条路线；
-2. 恢复一个旧会话，确认宿主日志出现
-   `subagent-policy-fallback: 为会话 <id> 补齐 N 条 subagent 模型路由`；
+2. 恢复一个旧会话，确认宿主日志先出现挂载行
+   `dsh-subagent-policy-fallback: 已挂载，设置里允许 N 条 subagent 模型路由`，
+   再出现 `subagent-policy-fallback: 为会话 <id> 补齐 N 条 subagent 模型路由`；
+   **没有挂载行 = 插件没加载**（查 profile 的 `bundles` 与 peer 范围），别先去怀疑会话本身；
 3. 再恢复 / 重载一次，确认没有第二条策略事件；
 4. 在子会话里确认 subagent 仍按父会话策略工作（本插件不会给它单独写事件）。
 

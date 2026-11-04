@@ -9,11 +9,21 @@ import assert from 'node:assert/strict'
 
 import { apply, inject, name } from '../lib/index.js'
 import { POLICY_EVENT, SERVICE_NAME } from '../lib/policy.js'
+import { describeStatus } from '../lib/status.js'
 
 const ROUTES = [
   { provider: 'deepseek', model: 'deepseek-chat' },
   { provider: 'openai', model: 'gpt-5' },
 ]
+
+/**
+ * 只挑「补齐」审计行：挂载行也会进 infos，别混在一起数。
+ * @param {any} ctx 假 ctx。
+ * @returns {Array<string>} 补齐审计日志。
+ */
+function backfillInfos(ctx) {
+  return ctx.infos.filter((message) => message.includes('补齐'))
+}
 
 /**
  * 假会话：记录 append，并把事件写回 `events`，让幂等检查能看到刚追加的内容。
@@ -96,9 +106,11 @@ test('注入生效：顶层会话拿到策略事件与审计日志', () => {
   assert.equal(session.appended.length, 1)
   assert.equal(session.appended[0].type, POLICY_EVENT)
   assert.deepEqual(session.appended[0].data.allowedModels, ROUTES)
-  assert.equal(ctx.infos.length, 1)
-  assert.match(ctx.infos[0], /补齐 2 条 subagent 模型路由/)
-  assert.match(ctx.infos[0], /session-1/)
+  assert.equal(ctx.infos.length, 2)
+  assert.match(ctx.infos[0], /^dsh-subagent-policy-fallback: 已挂载，设置里允许 2 条 subagent 模型路由$/)
+  assert.equal(backfillInfos(ctx).length, 1)
+  assert.match(ctx.infos[1], /补齐 2 条 subagent 模型路由/)
+  assert.match(ctx.infos[1], /session-1/)
 })
 
 test('会话日志已有策略事件 → 跳过', () => {
@@ -109,7 +121,7 @@ test('会话日志已有策略事件 → 跳过', () => {
   ctx.emitCreated(session)
 
   assert.equal(session.appended.length, 0)
-  assert.equal(ctx.infos.length, 0)
+  assert.equal(backfillInfos(ctx).length, 0)
 })
 
 test('子会话（origin=subagent）→ 跳过', () => {
@@ -120,7 +132,7 @@ test('子会话（origin=subagent）→ 跳过', () => {
   ctx.emitCreated(session)
 
   assert.equal(session.appended.length, 0)
-  assert.equal(ctx.infos.length, 0)
+  assert.equal(backfillInfos(ctx).length, 0)
 })
 
 test('设置服务不存在 → 跳过', () => {
@@ -131,7 +143,7 @@ test('设置服务不存在 → 跳过', () => {
   ctx.emitCreated(session)
 
   assert.equal(session.appended.length, 0)
-  assert.equal(ctx.infos.length, 0)
+  assert.equal(backfillInfos(ctx).length, 0)
 })
 
 test('服务 enabled=false → 跳过', () => {
@@ -142,7 +154,7 @@ test('服务 enabled=false → 跳过', () => {
   ctx.emitCreated(session)
 
   assert.equal(session.appended.length, 0)
-  assert.equal(ctx.infos.length, 0)
+  assert.equal(backfillInfos(ctx).length, 0)
 })
 
 test('允许列表为空（含上游 current 抛错）→ 跳过', () => {
@@ -177,8 +189,9 @@ test('apply 回填已存活会话，且只补符合条件的那个', () => {
   assert.equal(restored.appended.length, 1)
   assert.equal(subagent.appended.length, 0)
   assert.equal(already.appended.length, 0)
-  assert.equal(ctx.infos.length, 1)
-  assert.match(ctx.infos[0], /restored/)
+  assert.equal(ctx.infos.length, 2)
+  assert.match(ctx.infos[0], /已挂载/)
+  assert.match(ctx.infos[1], /restored/)
 })
 
 test('插件配置 enabled=false → 不注册监听、不回填', () => {
@@ -191,6 +204,7 @@ test('插件配置 enabled=false → 不注册监听、不回填', () => {
 
   assert.equal(live.appended.length, 0)
   assert.equal(created.appended.length, 0)
+  assert.equal(backfillInfos(ctx).length, 0)
 })
 
 test('apply 回填后同一会话再触发 agent/created 不会重复追加', () => {
@@ -219,4 +233,77 @@ test('回填时 sessions.list() 抛错 → 插件仍正常挂载、后续 agent/
   // 挂载没被拖垮：之后新会话照旧能拿到策略
   ctx.emitCreated(session)
   assert.equal(session.appended.length, 1)
+})
+
+test('挂载日志：服务存在 → 报已挂载与允许路由数', () => {
+  const three = [
+    { provider: 'deepseek', model: 'deepseek-chat' },
+    { provider: 'openai', model: 'gpt-5' },
+    { provider: 'anthropic', model: 'claude-sonnet-4' },
+  ]
+  const ctx = createCtx({ service: createService({ enabled: true, allowedModels: three }) })
+
+  apply(ctx)
+
+  assert.equal(ctx.infos.length, 1)
+  assert.equal(ctx.infos[0], 'dsh-subagent-policy-fallback: 已挂载，设置里允许 3 条 subagent 模型路由')
+})
+
+test('挂载日志：服务缺失 → 报已挂载与不会补策略', () => {
+  const ctx = createCtx({ service: undefined })
+
+  apply(ctx)
+
+  assert.equal(ctx.infos.length, 1)
+  assert.equal(ctx.infos[0], 'dsh-subagent-policy-fallback: 已挂载，设置服务缺失，不会补策略')
+})
+
+test('挂载日志：enabled=false → 报未挂载', () => {
+  const ctx = createCtx({ service: createService() })
+
+  apply(ctx, { enabled: false })
+
+  assert.equal(ctx.infos.length, 1)
+  assert.equal(ctx.infos[0], 'dsh-subagent-policy-fallback: 未挂载（enabled=false），不会补策略')
+})
+
+test('describeStatus：补过 2 个会话后计数正确', () => {
+  const first = createSession({ id: 'first' })
+  const second = createSession({ id: 'second' })
+  const ctx = createCtx({ sessions: [first, second], service: createService() })
+
+  apply(ctx)
+
+  assert.equal(first.appended.length, 1)
+  assert.equal(second.appended.length, 1)
+  assert.deepEqual(describeStatus(ctx), {
+    mounted: true,
+    serviceAvailable: true,
+    allowedRoutes: 2,
+    backfilledSessions: 2,
+  })
+
+  // 再经 agent/created 补一个，计数跟着走
+  ctx.emitCreated(createSession({ id: 'third' }))
+  assert.equal(describeStatus(ctx).backfilledSessions, 3)
+})
+
+test('describeStatus：未挂载 / 服务缺失时结构化可读', () => {
+  const off = createCtx({ service: createService() })
+  apply(off, { enabled: false })
+  assert.deepEqual(describeStatus(off), {
+    mounted: false,
+    serviceAvailable: true,
+    allowedRoutes: 2,
+    backfilledSessions: 0,
+  })
+
+  const missing = createCtx({ service: undefined })
+  apply(missing)
+  assert.deepEqual(describeStatus(missing), {
+    mounted: true,
+    serviceAvailable: false,
+    allowedRoutes: 0,
+    backfilledSessions: 0,
+  })
 })
