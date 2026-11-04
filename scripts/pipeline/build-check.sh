@@ -4,8 +4,10 @@
 # 为什么需要它：`doctor` 是手动命令，构建漂移不会自己叫。2026-11-04 实测过一次——
 # `tools/` 装的还是旧构建，`review prompt` 直接报「未知动作」，全靠人回忆才定位。
 #
-# 比对的仓来自 `.dsh/pipeline.json` 的 `doctorRepos`（相对本仓根的路径）：
-#   {"repo":"guraul/self-dsh-plugins", "doctorRepos":["../agent-mobile","../homebase","../memx"]}
+# 比对的仓来自**本脚本自己的**配置文件 `.dsh/build-check.json`（相对主工作区的路径）：
+#   {"repos":["../agent-mobile","../homebase","../memx"]}
+# 刻意不放进 `.dsh/pipeline.json`：那是共享包的 schema（CONFIG_FIELDS 只认
+# repo/ci/highRisk/roles），多一个字段会让 task/pr/merge 直接 E_CONFIG（2026-11-04 踩过）。
 # 本仓自己总是参与比对；不存在 / 没装包的兄弟仓会被跳过并说明（CI 里没有兄弟仓，
 # 跳过不判失败——否则 CI 必红）。
 #
@@ -30,14 +32,19 @@ MAIN_WT=$(main_worktree)
 [[ -n "${MAIN_WT}" ]] || die "找不到主工作区"
 resolve_pipeline_cli || die "未找到共享 pipeline 包（试过: ${PIPELINE_TRIED}）"
 
-CONFIG="${MAIN_WT}/.dsh/pipeline.json"
-[[ -r "${CONFIG}" ]] || die "读不到 ${CONFIG}"
+CONFIG="${MAIN_WT}/.dsh/build-check.json"
+if [[ ! -r "${CONFIG}" ]]; then
+  # 兄弟仓路径是本机的，不入库；缺了就跳过，别把没有兄弟仓的环境判成失败
+  INFO="构建检查: 跳过（没有 ${CONFIG}；需要时 cp .dsh/build-check.example.json .dsh/build-check.json 并改路径）"
+  [[ "${QUIET}" -eq 1 ]] && echo "${INFO}" || info "${INFO}"
+  exit 0
+fi
 
 # 兄弟仓清单：一行一个（没有就输出空）
 SIBLINGS=$(node -e '
 const fs = require("node:fs")
 const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
-const list = Array.isArray(cfg.doctorRepos) ? cfg.doctorRepos : []
+const list = Array.isArray(cfg.repos) ? cfg.repos : []
 process.stdout.write(list.filter((p) => typeof p === "string" && p.trim().length > 0).join("\n"))
 ' "${CONFIG}") || die "解析 ${CONFIG} 失败"
 
@@ -80,7 +87,7 @@ fi
 if [[ "${RC}" -eq 2 ]]; then
   # doctor 自己 exit 2 = 参数/环境错误（找不到仓、包坏了），不是「构建不一致」
   echo "" >&2
-  echo "✗ doctor 无法完成比对（退出码 2）：检查 doctorRepos 里的路径、以及本仓 tools/ 装的包。" >&2
+  echo "✗ doctor 无法完成比对（退出码 2）：检查 .dsh/build-check.json 的 repos 路径、以及本仓 tools/ 装的包。" >&2
   exit 2
 fi
 if [[ "${RC}" -ne 0 ]]; then
