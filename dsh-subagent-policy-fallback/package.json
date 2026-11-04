@@ -1,0 +1,43 @@
+{
+  "name": "dsh-subagent-policy-fallback",
+  "version": "0.1.0",
+  "description": "Backfill subagent/model-selection-policy for seeded and resumed DSH sessions: the host only samples subagent model selection for firstLiveSeq === 0 sessions, so restored sessions never receive the policy event.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "lint": "node scripts/lint.js",
+    "check": "node --check lib/index.js && node --check lib/policy.js"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guraul/self-dsh-plugins.git",
+    "directory": "dsh-subagent-policy-fallback"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "subagent",
+    "model-selection"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

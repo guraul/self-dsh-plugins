@@ -21,7 +21,7 @@ FETCH_RETRY=2
 # 两边一一对应；只改一处不会报错，只会让该插件的测试在 CI 里静默地从未跑过（issue #243）。
 # 包名不在这里维护——用 pkg_name() 从各插件 package.json 读，避免注定漂移的副本。
 # 新增插件时第一个动作就是往这里加目录名，见 docs/pipeline/README.md「新增插件检查清单」。
-PLUGIN_DIRS="dsh-auto-upgrade dsh-external-discuss dsh-im-bridge-workspaces dsh-plugin-product-subagents dsh-prompt-optimizer dsh-subagents dsh-zhihu-sidebar dsh-plugin-memx dsh-awake dsh-usage-panel"
+PLUGIN_DIRS="dsh-auto-upgrade dsh-external-discuss dsh-im-bridge-workspaces dsh-plugin-product-subagents dsh-prompt-optimizer dsh-subagents dsh-subagent-policy-fallback dsh-zhihu-sidebar dsh-plugin-memx dsh-awake dsh-usage-panel"
 
 die()  { echo "✗ $*" >&2; exit 1; }
 info() { echo "→ $*"; }
