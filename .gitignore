@@ -44,6 +44,7 @@
 !/dsh-plugin-product-subagents/
 !/dsh-plugin-restart/
 !/dsh-prompt-optimizer/
+!/dsh-subagent-policy-fallback/
 !/dsh-subagents/
 !/dsh-usage-panel/
 !/dsh-zhihu-sidebar/

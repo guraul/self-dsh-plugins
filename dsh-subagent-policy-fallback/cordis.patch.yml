@@ -1,0 +1,4 @@
+
+- insert:
+    - id: dsh-subagent-policy-fallback
+      name: 'dsh-subagent-policy-fallback'
