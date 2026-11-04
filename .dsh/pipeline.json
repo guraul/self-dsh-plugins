@@ -10,10 +10,5 @@
     "docs/pipeline/**",
     "docs/adr/**",
     ".gitignore"
-  ],
-  "doctorRepos": [
-    "../agent-mobile",
-    "../homebase",
-    "../memx"
   ]
 }

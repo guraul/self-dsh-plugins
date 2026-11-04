@@ -23,7 +23,9 @@ function layout({ siblingTools = true, siblings = ['sib-a', 'sib-b'] } = {}) {
   mkdirSync(join(main, 'tools', 'node_modules', 'dsh-pipeline', 'bin'), { recursive: true })
   writeFileSync(join(main, 'tools', 'node_modules', 'dsh-pipeline', 'bin', 'cli.mjs'), '')
   // main_worktree() 认的是 git worktree 首条，这里直接给个假 git
-  writeFileSync(join(main, '.dsh', 'pipeline.json'), JSON.stringify({ repo: 'o/r', doctorRepos: siblings.map((s) => `../${s}`) }))
+  writeFileSync(join(main, '.dsh', 'pipeline.json'), JSON.stringify({ repo: 'o/r' }))
+  // build-check 自己的配置在**独立文件**里（`.dsh/pipeline.json` 是包的 schema，不能加字段）
+  writeFileSync(join(main, '.dsh', 'build-check.json'), JSON.stringify({ repos: siblings.map((s) => `../${s}`) }))
   for (const s of siblings) {
     const dir = join(root, s)
     mkdirSync(dir, { recursive: true })

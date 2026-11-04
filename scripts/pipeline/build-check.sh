@@ -4,8 +4,10 @@
 # 为什么需要它：`doctor` 是手动命令，构建漂移不会自己叫。2026-11-04 实测过一次——
 # `tools/` 装的还是旧构建，`review prompt` 直接报「未知动作」，全靠人回忆才定位。
 #
-# 比对的仓来自 `.dsh/pipeline.json` 的 `doctorRepos`（相对本仓根的路径）：
-#   {"repo":"guraul/self-dsh-plugins", "doctorRepos":["../agent-mobile","../homebase","../memx"]}
+# 比对的仓来自**本脚本自己的**配置文件 `.dsh/build-check.json`（相对主工作区的路径）：
+#   {"repos":["../agent-mobile","../homebase","../memx"]}
+# 刻意不放进 `.dsh/pipeline.json`：那是共享包的 schema（CONFIG_FIELDS 只认
+# repo/ci/highRisk/roles），多一个字段会让 task/pr/merge 直接 E_CONFIG（2026-11-04 踩过）。
 # 本仓自己总是参与比对；不存在 / 没装包的兄弟仓会被跳过并说明（CI 里没有兄弟仓，
 # 跳过不判失败——否则 CI 必红）。
 #
@@ -30,14 +32,14 @@ MAIN_WT=$(main_worktree)
 [[ -n "${MAIN_WT}" ]] || die "找不到主工作区"
 resolve_pipeline_cli || die "未找到共享 pipeline 包（试过: ${PIPELINE_TRIED}）"
 
-CONFIG="${MAIN_WT}/.dsh/pipeline.json"
-[[ -r "${CONFIG}" ]] || die "读不到 ${CONFIG}"
+CONFIG="${MAIN_WT}/.dsh/build-check.json"
+[[ -r "${CONFIG}" ]] || die "读不到 ${CONFIG}（应含 {\"repos\": [\"../<兄弟仓>\", …]}）"
 
 # 兄弟仓清单：一行一个（没有就输出空）
 SIBLINGS=$(node -e '
 const fs = require("node:fs")
 const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
-const list = Array.isArray(cfg.doctorRepos) ? cfg.doctorRepos : []
+const list = Array.isArray(cfg.repos) ? cfg.repos : []
 process.stdout.write(list.filter((p) => typeof p === "string" && p.trim().length > 0).join("\n"))
 ' "${CONFIG}") || die "解析 ${CONFIG} 失败"
 
