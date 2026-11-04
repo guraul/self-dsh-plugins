@@ -10266,8 +10266,7 @@ function apply(ctx, config) {
 					text: { content: text }
 				});
 			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				console.warn(`[im-bridge] 审批提示发送失败: ${message}`);
+				console.warn(`[im-bridge] 审批提示发送失败: ${describeError(error)}`);
 			}
 		}
 		/** 超时分钟数，用于文案。 */
@@ -10451,8 +10450,26 @@ function apply(ctx, config) {
 			}, "im-bridge: approval relay");
 			console.log("[im-bridge] 审批应答方已注册(agent)");
 		}
-		/** 卡片按钮点击。 */
-		/** 卡片结果态：点击后 5 秒内换掉，避免停在「待审批」的样子。 */
+		/** 已处理态按钮 key 前缀：点它只表示看过，不构成审批决定。 */
+		const DONE_PREFIX = "done:";
+		/** 第一优先：保持 button_interaction，只留一个「已处理」按钮（同类型才允许更新）。 */
+		function approvalDoneCard(taskId, title, desc, subTitle) {
+			return {
+				card_type: "button_interaction",
+				task_id: taskId,
+				main_title: {
+					title,
+					desc
+				},
+				sub_title_text: subTitle,
+				button_list: [{
+					text: "已处理",
+					key: `${DONE_PREFIX}${taskId}`,
+					style: 1
+				}]
+			};
+		}
+		/** 第二优先：text_notice 卡片。 */
 		function approvalResultCard(taskId, title, desc, subTitle) {
 			return {
 				card_type: "text_notice",
@@ -10464,11 +10481,33 @@ function apply(ctx, config) {
 				sub_title_text: subTitle
 			};
 		}
+		/**
+		* 点击后按「同类型按钮卡 → text_notice → 文本回执」逐层降级，
+		* 每层失败都 console.warn 并用 describeError 打出原因。
+		*/
+		async function applyApprovalResult(frame, entry, title, desc, subTitle, fallbackText) {
+			try {
+				await ws.updateTemplateCard(frame, approvalDoneCard(entry.taskId, title, desc, subTitle));
+				console.log(`[im-bridge] 审批结果卡片已更新(button_interaction) id=${entry.id}`);
+				return;
+			} catch (first) {
+				console.warn(`[im-bridge] 同类型结果卡更新失败(降级 text_notice): ${describeError(first)}`);
+			}
+			try {
+				await ws.updateTemplateCard(frame, approvalResultCard(entry.taskId, title, desc, subTitle));
+				console.log(`[im-bridge] 审批结果卡片已更新(text_notice) id=${entry.id}`);
+				return;
+			} catch (second) {
+				console.warn(`[im-bridge] text_notice 结果卡更新失败(降级文本): ${describeError(second)}`);
+			}
+			await notifyChat(entry.chatTarget, fallbackText);
+		}
 		ws.on("event.template_card_event", ((frame) => {
 			const payload = frame.body?.event;
 			const key = payload?.template_card_event?.event_key ?? payload?.event_key;
 			const userId = frame.body?.from?.userid ?? "";
 			if (typeof key !== "string" || key === "") return;
+			if (key.startsWith(DONE_PREFIX)) return;
 			const parsed = parseButtonKey(key);
 			if (parsed === void 0) return;
 			const entry = approvals.get(parsed.id);
@@ -10482,9 +10521,7 @@ function apply(ctx, config) {
 			}
 			if (!approvals.settle(parsed.id, parsed.decision)) return;
 			const approved = parsed.decision === "allowed-once";
-			ws.updateTemplateCard(frame, approvalResultCard(entry.taskId, approved ? "✅ 已同意" : "🚫 已拒绝", entry.toolName, approved ? "本次操作已放行（只生效这一次）" : "本次操作已拒绝")).catch(() => {
-				notifyChat(entry.chatTarget, approved ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`);
-			});
+			applyApprovalResult(frame, entry, approved ? "✅ 已同意" : "🚫 已拒绝", entry.toolName, approved ? "本次操作已放行（只生效这一次）" : "本次操作已拒绝", approved ? `✅ 已放行这一次操作：${entry.toolName}` : `🚫 已拒绝：${entry.toolName}`);
 		}));
 		installRootApprovalRelay();
 		ws.connect();
