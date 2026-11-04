@@ -94,6 +94,10 @@ _Avoid_: 预设、persona、agent 类型
 子代理**怎么连**：A 原生（宿主内注册的 provider）、B 委派（外部 CLI 经 ACP 桥）、C 伪模型（网页端点）。三种形态共享同一份契约。
 _Avoid_: provider、通道、backend
 
+**形态 × 角色对应**：
+当前 executor 走形态 A（宿主原生子代理，模型 `opencode-go/mimo-v2.6-flash`），reviewer 走形态 B（`product_delegate` 委派，`codebuddy/glm-5.3-flash`）。形态 A 的模型路由来自会话策略事件 `subagent/model-selection-policy`：会话里没有这个事件时，显式选模型会被拒（`child LLM route … is not allowed for this Session`）。DSH 只在 `firstLiveSeq === 0` 的顶层会话采样该设置，种子 / 恢复会话永远拿不到它（上游 discussion #8444），由插件 `dsh-subagent-policy-fallback` 按设置补写，因此换 subagent 模型不必重开会话。
+_Avoid_: 角色通道、模型绑定
+
 **provider**：
 仅指接入形态 B 内部的具体 CLI（`opencode` / `codebuddy` / `acp`）。形态 A 与 C 没有这一层。
 _Avoid_: 模型、厂商、服务商
