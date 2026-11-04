@@ -87,7 +87,7 @@ fi
 if [[ "${RC}" -eq 2 ]]; then
   # doctor 自己 exit 2 = 参数/环境错误（找不到仓、包坏了），不是「构建不一致」
   echo "" >&2
-  echo "✗ doctor 无法完成比对（退出码 2）：检查 doctorRepos 里的路径、以及本仓 tools/ 装的包。" >&2
+  echo "✗ doctor 无法完成比对（退出码 2）：检查 .dsh/build-check.json 的 repos 路径、以及本仓 tools/ 装的包。" >&2
   exit 2
 fi
 if [[ "${RC}" -ne 0 ]]; then
