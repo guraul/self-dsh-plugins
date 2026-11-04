@@ -255,6 +255,11 @@ jobs:
       - name: audit-subagents 单测（含内置 --self-test）
         run: node --test scripts/pipeline/audit-subagents.test.mjs
 
+      - name: build-check 语法检查 + 单测（构建一致性检查的契约）
+        run: |
+          bash -n scripts/pipeline/build-check.sh
+          node --test scripts/pipeline/build-check.test.mjs
+
       # token 用量采集脚本（scripts/token-sync）：语法 + 单测。
       # 只跑纯函数与 fixture，不读真实用户数据、不发网络请求。
       - name: token-sync 语法检查

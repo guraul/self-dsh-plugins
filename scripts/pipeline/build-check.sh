@@ -77,6 +77,12 @@ else
   printf '%s\n' "${OUT}"
 fi
 
+if [[ "${RC}" -eq 2 ]]; then
+  # doctor 自己 exit 2 = 参数/环境错误（找不到仓、包坏了），不是「构建不一致」
+  echo "" >&2
+  echo "✗ doctor 无法完成比对（退出码 2）：检查 doctorRepos 里的路径、以及本仓 tools/ 装的包。" >&2
+  exit 2
+fi
 if [[ "${RC}" -ne 0 ]]; then
   echo "" >&2
   echo "✗ 共享包构建不一致：上面几行里出现不同的 sha/时间，说明有仓装的是旧包。" >&2
@@ -85,5 +91,5 @@ if [[ "${RC}" -ne 0 ]]; then
   exit 1
 fi
 
-[[ "${QUIET}" -eq 1 ]] || ok "构建一致：${#REPOS[@]} 个仓同一个共享包构建${SKIPPED:+（跳过:${SKIPPED}}"
+[[ "${QUIET}" -eq 1 ]] || ok "构建一致：${#REPOS[@]} 个仓同一个共享包构建${SKIPPED:+（跳过:${SKIPPED}）}"
 exit 0

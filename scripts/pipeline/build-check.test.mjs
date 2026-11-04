@@ -41,6 +41,7 @@ function layout({ siblingTools = true, siblings = ['sib-a', 'sib-b'] } = {}) {
   mkdirSync(join(pkg, 'bin'), { recursive: true })
   writeFileSync(join(pkg, 'bin', 'cli.mjs'), `
 if (process.env.FAKE_DRIFT) { console.log('/a\\tdeadbee 2026-11-04T00:00:00Z'); console.log('/b\\tcafebabe 2026-11-04T00:00:00Z'); process.exit(1) }
+if (process.env.FAKE_BROKEN) { console.error('doctor: cannot read config'); process.exit(2) }
 console.log('/a\\tcc13260 2026-11-04T12:18:01Z'); console.log('/b\\tcc13260 2026-11-04T12:18:01Z')
 `, { mode: 0o755 })
   return { root, main, pkg, bin }
@@ -94,4 +95,11 @@ test('未知参数 → 退出 2', () => {
   const l = layout()
   const r = run(l, ['--bogus'])
   assert.equal(r.code, 2)
+})
+
+test('doctor 自身退出 2（环境错误）→ 透传 2，不误报成「构建不一致」', () => {
+  const l = layout()
+  const r = run(l, [], { FAKE_BROKEN: '1' })
+  assert.equal(r.code, 2)
+  assert.match(r.out, /无法完成比对/)
 })
