@@ -102,16 +102,21 @@ GitHub Issue（任务入口）
 - [x] **`dsh-pipeline` PR #15**：CLI 新增 `review` 子命令——`prepare` 生成 `.tmp/review/<pr>/request.json` + 12 位 nonce，`publish` 复用包的 `record` 落盘；测试 201→219。两轮审核：第 1 轮以「`files` 为空时高风险判定静默放行」判 minor，已修
 - [x] **`homebase` PR #131**：新增 `scripts/pipeline/review.sh`（`prepare` / `publish` 转发壳），`test-forwarding.sh` 断言 10→13 组
 - [x] **`agent-mobile` PR #195**：新增 `scripts/pipeline/review.sh` 与 `test-review.sh`（8 组断言）；第 1 轮审核 **REJECT**——`--root` 取成 worktree，会让 `.tmp/review/` 与 `.dsh-web/reviews/` 随 worktree 清理消失，且测试测不出该偏差；修后第 2 轮 **APPROVE**，并用「旧脚本喂新测试 → exit 1、21 处 ✗」反向验证测试有效
+- [x] **`dsh-pipeline` PR #19 / #21**：`review prepare` 补 `--facts` / `--include`（证据包进标准入口），`review prompt` 独立成子命令（提示词模板归包）
+- [x] **`dsh-pipeline` PR #23 / #25**：`task --worktrees-dir`（worktree 容器可指定，给「容器必须在仓外」的仓用）、`review prepare` 取 issue 正文；包测试 219→246
+- [x] **本仓 `review.sh` 转发（PR #278，`70eaa3d`）**：`prepare` / `prompt` 改为转发共享包的 `review` 子命令；`publish`（把判定发到 GitHub 当 review，走 reviewer 专属 gh 身份）仍留本仓，属已知边界
+- [x] **`memx` 接入共享包（memx PR #56）**：`tools/` + `.dsh/pipeline.json` + 五个转发壳 + `test-forwarding.sh`（13 组）；`new-task.sh` 固定 `--worktrees-dir /Users/gubin/workspace/memx-worktrees`（memx 被宿主加载源码，worktree 必须建在仓外）
+- [x] 四仓 `doctor` 一致：构建 `cc13260 2026-11-04T12:18:01Z`（self-dsh-plugins / agent-mobile / homebase / memx）
 
-同日三仓共享包刷新到构建 `0a7ea83 2026-11-04T08:10:47Z`，`doctor` 三行一致。
+同日上午三仓共享包刷新到构建 `0a7ea83 2026-11-04T08:10:47Z`，`doctor` 三行一致（同日晚些时候四仓统一到 `cc13260`，见上）。
 
 ## 四、未完成（欠账）
 
 | # | 欠账 | 现状 | 影响 |
 |---|------|------|------|
 | 1 | 形态 C（清言网页桥） | 未启动 | 依赖 REQ-002（需求未写） |
-| 2 | memx 迁到共享包 | 未启动（**完全未接入 pipeline**）；**已定：走与其它仓一模一样的流程**（用户 2026-11-03 决定），暂不做 | 需要包补 `--worktrees-dir`（memx 被 opencode 加载源码，worktree 必须建在仓外）；memx 无 CI，需如实声明 `ci: []` |
-| 3 | 本仓 `review.sh` 未统一到共享包 | 仍为自有实现（多 `--facts` / `--include` / 提示词生成）；`agent-mobile` / `homebase` 已转发到包的 `review` 子命令 | 审核准备 / 落盘两套实现并存，行为面可能漂移；统一时要保住本仓多出的三个能力 |
+| 2 | memx 迁到共享包 | **已完成**（memx PR #56）：`tools/` + `.dsh/pipeline.json` + 五个转发壳 + `test-forwarding.sh`（13 组）；`new-task.sh` 固定 `--worktrees-dir /Users/gubin/workspace/memx-worktrees`（包 PR #23 补的参数；memx 被 opencode 加载源码，worktree 必须建在仓外） | 无。memx 无 CI，按 `ci: []` 如实声明 |
+| 3 | 本仓 `review.sh` 未统一到共享包 | **已完成**（本仓 PR #278，`70eaa3d`）：`prepare` / `prompt` 已转发到包的 `review` 子命令（`--facts` / `--include` / 提示词生成都由包提供）；四仓（agent-mobile / homebase / memx / 本仓）一致 | 剩余已知边界：`publish`（把判定发到 GitHub 当 review）仍留本仓自己实现，包侧 `review publish` 只落盘记录 |
 
 > **`#117` 不是欠账**：它是 `compat-matrix.yml` 每周把结果写进去的**滚动 issue**，按设计长期 open（最近一次成功：2026-11-02）。此前台账把它列为「未完成」是误判。
 
@@ -145,3 +150,8 @@ GitHub Issue（任务入口）
 | 2026-11-04 | 审核准备/落盘收口：包补 `review` 子命令（包 PR #15） | `prepare` 生成 `.tmp/review/<pr>/request.json` + 12 位 nonce，`publish` 复用包的 `record` 落盘；测试 201→219。两轮审核：第 1 轮以「`files` 为空时高风险判定静默放行」判 minor，已修 |
 | 2026-11-04 | 两仓 `review.sh` 转发壳（homebase PR #131 / agent-mobile PR #195） | homebase 新增 `scripts/pipeline/review.sh`（`prepare` / `publish` 转发壳），`test-forwarding.sh` 10→13 组断言；agent-mobile 新增 `review.sh` 与 `test-review.sh`（8 组），第 1 轮 **REJECT**、修后第 2 轮 **APPROVE**。**教训：`--root` 必须取主工作区**——取成 worktree 时，`.tmp/review/` 与 `.dsh-web/reviews/` 都落在 worktree 里，随 `git worktree remove` 一起消失（请求产物与审核记录全丢），且旧测试测不出该偏差；修完用「旧脚本喂新测试 → exit 1、21 处 ✗」反向验证测试有效 |
 | 2026-11-04 | 三仓共享包刷新 + 欠账登记（§四 #2–#3） | 三仓共享包刷新到构建 `0a7ea83 2026-11-04T08:10:47Z`，`doctor` 三行一致；欠账：本仓 `review.sh` 仍是自有实现（多 `--facts` / `--include` / 提示词生成）未统一到包，`memx` 完全未接入 pipeline |
+| 2026-11-04 | 包补四个入口（包 PR #19 / #21 / #23 / #25） | `review prepare` 补 `--facts` / `--include`、`review prompt` 独立成子命令、`task --worktrees-dir`（worktree 容器可指定）、`review prepare` 取 issue 正文；包测试 219→246 |
+| 2026-11-04 | 本仓 `review.sh` 转发到包（#278，`70eaa3d`） | `prepare` / `prompt` 改为转发共享包的 `review` 子命令；`publish`（发 GitHub review）仍留本仓，属已知边界；欠账 #3 清零 |
+| 2026-11-04 | memx 接入共享包（memx PR #56） | `tools/` + `.dsh/pipeline.json` + 五个转发壳 + `test-forwarding.sh`（13 组）；`new-task.sh` 固定 `--worktrees-dir /Users/gubin/workspace/memx-worktrees`（仓外 worktree 容器）；欠账 #2 清零 |
+| 2026-11-04 | 四仓 `doctor` 一致 | 四仓（self-dsh-plugins / agent-mobile / homebase / memx）同一构建 `cc13260 2026-11-04T12:18:01Z` |
+| 2026-11-04 | 台账收口（#279） | §三 阶段 7 补五行（包四个入口 / 本仓 #278 / memx #56 / 四仓 `doctor`），§四 欠账 #2 / #3 改「已完成」；`README.md` 脚本清单与 §review.sh 的跨仓状态、刷新共享包的构建标识、memx 仓外 worktree 容器说明同步更新 |

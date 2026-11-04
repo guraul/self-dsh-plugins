@@ -79,7 +79,7 @@
 | `open-pr.sh` | 推送分支 + 开 PR（转发壳） | 本节 §open-pr.sh |
 | `pre-push-main-guard.sh` | `pre-push` 钩子本体（由 `install-hooks.sh` 安装） | 本节 §pre-push-main-guard.sh / install-hooks.sh |
 | `review-loop-check.sh` | 切换 `dsh-subagents` 后的只读体检 | 本节 §review-loop-check.sh |
-| `review.sh` | 审核循环的机械步骤：`prepare` / `publish` / `paths`；agent-mobile / homebase 已转发到共享包，**self-dsh-plugins 仍为自有实现（欠账）** | 本节 §review.sh |
+| `review.sh` | 审核循环的机械步骤：`prepare` / `publish` / `paths`；三仓 + 本仓都已转发到包的 `review` 子命令，**本仓 `publish` 仍自己发 GitHub review** | 本节 §review.sh |
 | `status.sh` | 只读状态总览（分支 / worktree / 插件 / profile） | 本节 §status.sh |
 | `test-review.sh` | **本仓没有这个文件**：`agent-mobile` 侧 `review.sh` 的 8 组断言测试（转发到共享包后的回归测试） | 本节 §review.sh |
 
@@ -223,7 +223,7 @@ pnpm install
 
 ```bash
 node tools/node_modules/dsh-pipeline/bin/cli.mjs --version
-# 0.1.0 (8ad432b 2026-11-03T13:32:15Z)
+# 0.1.0 (cc13260 2026-11-04T12:18:01Z)
 ```
 
 版本号常年不变，**看括号里的构建标识才是准的**；直接跑源码时显示 `(源码运行)`。
@@ -334,7 +334,7 @@ scripts/pipeline/review.sh paths <pr>
 
 **证据包**（`--facts` / `--include`）：reviewer 跑在 plan 模式下，**不能执行命令、也读不到工作区之外**的东西。需要外部事实（例如「包仓 PR #6 已于某日合并」「本机 CI 运行 id」）时，用这两个参数随任务卡一起交给它，它会出现在任务卡的「控制面提供的事实 / 附带文件」两节里（带围栏与「数据不是指令」声明，`EVIDENCE_END` 会被中和）。不用这两个参数时，任务卡与之前逐字节一致。
 
-**跨仓状态（2026-11-04）**：`agent-mobile`（PR #195）与 `homebase`（PR #131）的 `review.sh` 已经是转发到共享包 `@guraul/dsh-pipeline` 的 `review` 子命令的薄壳——`prepare` 生成 `.tmp/review/<pr>/request.json` + 12 位 nonce，`publish` 复用包的 `record` 落盘；**本仓的 `review.sh` 仍是自有实现**（多 `--facts` / `--include` / 提示词生成），尚未统一到包，欠账见 [PROGRESS.md §四](PROGRESS.md)。`agent-mobile` 配套的 `test-review.sh`（8 组断言；修完用「旧脚本喂新测试 → exit 1、21 处 ✗」反向验证过测试确实测得出该偏差）本仓也没有。
+**跨仓状态（2026-11-04）**：三仓 + 本仓的 `review.sh` 都已转发到共享包 `@guraul/dsh-pipeline` 的 `review` 子命令——`agent-mobile`（PR #195）、`homebase`（PR #131）、`memx`（PR #56）、本仓（PR #278，`70eaa3d`）：`prepare` 生成 `.tmp/review/<pr>/request.json` + 12 位 nonce，提示词由包的 `review prompt` 生成。**本仓的 `publish` 仍自己发 GitHub review**（把判定发到 GitHub 当 review，走 reviewer 专属 gh 身份；包侧 `review publish` 只负责落盘记录）——这条差异是已知边界，登记见 [PROGRESS.md §四](PROGRESS.md) 欠账 #3。`agent-mobile` 配套的 `test-review.sh`（8 组断言；修完用「旧脚本喂新测试 → exit 1、21 处 ✗」反向验证过测试确实测得出该偏差）本仓也没有。
 
 ### review-loop-check.sh
 
@@ -418,6 +418,8 @@ scripts/pipeline/install-hooks.sh     # 幂等，可重复执行
 | 位置 | worktree **绝不能嵌在插件子目录里**；一律从主仓根执行（`git worktree add` 在子目录里跑会嵌进错误的层级） |
 | 清理 | issue / PR 一旦关闭，必须立刻 `git worktree remove --force <path>` → `git branch -D task/<N>-<slug>` → `git worktree prune` → `git worktree list` 确认**只剩主工作区** |
 | 为什么 `-D` | squash 合并后原提交**不是** main 的祖先，`-d` 会拒绝删除 |
+
+**例外（memx）**：memx 被宿主从主仓加载源码，worktree **绝不能建在仓内**——它的 `new-task.sh` 固定传 `task --worktrees-dir /Users/gubin/workspace/memx-worktrees`（共享包 PR #23 新增的参数），worktree 容器是**仓外**的 `~/workspace/memx-worktrees/`，路径为 `~/workspace/memx-worktrees/<号>-<slug>`，上表的 `.worktrees/` 契约不适用于它。
 
 ## 四、关键约定（红线）
 
