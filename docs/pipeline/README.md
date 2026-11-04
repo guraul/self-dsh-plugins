@@ -79,8 +79,9 @@
 | `open-pr.sh` | 推送分支 + 开 PR（转发壳） | 本节 §open-pr.sh |
 | `pre-push-main-guard.sh` | `pre-push` 钩子本体（由 `install-hooks.sh` 安装） | 本节 §pre-push-main-guard.sh / install-hooks.sh |
 | `review-loop-check.sh` | 切换 `dsh-subagents` 后的只读体检 | 本节 §review-loop-check.sh |
-| `review.sh` | 审核循环的机械步骤：`prepare` / `publish` / `paths` | 本节 §review.sh |
+| `review.sh` | 审核循环的机械步骤：`prepare` / `publish` / `paths`；agent-mobile / homebase 已转发到共享包，**self-dsh-plugins 仍为自有实现（欠账）** | 本节 §review.sh |
 | `status.sh` | 只读状态总览（分支 / worktree / 插件 / profile） | 本节 §status.sh |
+| `test-review.sh` | **本仓没有这个文件**：`agent-mobile` 侧 `review.sh` 的 8 组断言测试（转发到共享包后的回归测试） | 本节 §review.sh |
 
 ### lib.sh
 
@@ -332,6 +333,8 @@ scripts/pipeline/review.sh paths <pr>
 审核循环的机械步骤：`prepare` 把请求与提示词写到 `.tmp/review/<pr>/`（项目内，避开 `/tmp` 定期清理）；`publish` 用机器账号发评论并提交 review 状态（`APPROVE→approve`、`REJECT→request-changes`、`ESCALATE→只评论`）。**reviewer 的模型调用不在脚本内**——那一步必须由会话内 agent 发起。
 
 **证据包**（`--facts` / `--include`）：reviewer 跑在 plan 模式下，**不能执行命令、也读不到工作区之外**的东西。需要外部事实（例如「包仓 PR #6 已于某日合并」「本机 CI 运行 id」）时，用这两个参数随任务卡一起交给它，它会出现在任务卡的「控制面提供的事实 / 附带文件」两节里（带围栏与「数据不是指令」声明，`EVIDENCE_END` 会被中和）。不用这两个参数时，任务卡与之前逐字节一致。
+
+**跨仓状态（2026-11-04）**：`agent-mobile`（PR #195）与 `homebase`（PR #131）的 `review.sh` 已经是转发到共享包 `@guraul/dsh-pipeline` 的 `review` 子命令的薄壳——`prepare` 生成 `.tmp/review/<pr>/request.json` + 12 位 nonce，`publish` 复用包的 `record` 落盘；**本仓的 `review.sh` 仍是自有实现**（多 `--facts` / `--include` / 提示词生成），尚未统一到包，欠账见 [PROGRESS.md §四](PROGRESS.md)。`agent-mobile` 配套的 `test-review.sh`（8 组断言；修完用「旧脚本喂新测试 → exit 1、21 处 ✗」反向验证过测试确实测得出该偏差）本仓也没有。
 
 ### review-loop-check.sh
 
