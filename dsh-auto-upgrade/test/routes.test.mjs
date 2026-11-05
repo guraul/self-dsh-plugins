@@ -872,3 +872,16 @@ test('POST /smoke：没有可冒烟插件时早退，且不泄漏占位', async 
     await env.close()
   }
 })
+
+test('GET /refill：没有冒烟结果时明确说「先跑一次 /smoke」，不假装有结论', async (t) => {
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const body = await (await fetch(`${env.host.base}${API.refillPlan}`)).json()
+    assert.equal(body.ok, true)
+    assert.equal(body.skipped, true)
+    assert.match(body.detail, /先跑一次/)
+  } finally {
+    await env.close()
+  }
+})
