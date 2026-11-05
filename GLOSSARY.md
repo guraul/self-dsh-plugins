@@ -77,7 +77,7 @@ _Avoid_: nonce、token、盐
 _Avoid_: 审计日志、review log
 
 **审计记录**：
-`scripts/pipeline/audit-subagents.mjs` 产出的子代理执行合规日报，与「审核记录」是两回事。
+`scripts/pipeline/audit-subagents.mjs`（已于 2026-11-05 删除）产出的子代理执行合规日报，与「审核记录」是两回事。
 _Avoid_: 审核日志
 
 **熔断**：

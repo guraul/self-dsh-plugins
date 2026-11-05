@@ -38,7 +38,7 @@
 
 | 深度 | 验的是什么 | 怎么验 | 能得出什么结论 |
 |---|---|---|---|
-| **L1 装配** | profile 能否把这个插件装进去 | `scripts/pipeline/install-check.sh` / `compat-matrix.sh`（一次性 `DSH_HOME` + `plugin add` + `--dump-config` grep 包名） | 插件不会因为装配失败而「莫名其妙没加载」 |
+| **L1 装配** | profile 能否把这个插件装进去 | 一次性 `DSH_HOME` + `plugin add` + `--dump-config` grep 包名（原 `install-check.sh` / `compat-matrix.sh`，已于 2026-11-05 删除，能力移交 `dsh-auto-upgrade` #300） | 插件不会因为装配失败而「莫名其妙没加载」 |
 | **L2 启动** | 加载后会不会当场报错 | headless 起一次，看插件自身日志有没有异常栈 | 初始化路径没炸 |
 | **L3 编译期** | 依赖的官方 API 有没有变 | 该版本依赖下 `tsc` / `pnpm run build`（只对有构建步骤的插件有意义） | 类型契约没漂移（im-bridge 的 `TS2554` 就是这层抓到的） |
 | **L4 业务链路** | 功能是否真的可用 | 真机实测：发消息 / 点按钮 / `/ws` 切换 | 端到端可用 |
@@ -48,7 +48,7 @@
 - **verdict 在「该深度及更深」成立**：记 `L2` + ✅ 表示「装配与启动都过」，不表示 L3/L4 过。
 - **`dshDepth` 与 `dshReleases` 必须成对**：有 verdict 就该有深度；缺深度 = **深度未记录**
   （按最浅的 L1 理解，表里显式写「未记录」，不许默认当成验深了）。
-- 只想快速铺一遍「能不能装配」时，用 `scripts/pipeline/compat-matrix.sh <版本>`，它的结论是 **L1**。
+- 只想快速铺一遍「能不能装配」时，结论是 **L1**（原 `scripts/pipeline/compat-matrix.sh <版本>` 已于 2026-11-05 删除：周报与升级事件脱钩、只测 L1 装得上，能力移交 `dsh-auto-upgrade` #300）。
 
 ## 矩阵
 

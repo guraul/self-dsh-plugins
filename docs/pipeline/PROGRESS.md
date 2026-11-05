@@ -155,3 +155,4 @@ GitHub Issue（任务入口）
 | 2026-11-04 | memx 接入共享包（memx PR #56） | `tools/` + `.dsh/pipeline.json` + 五个转发壳 + `test-forwarding.sh`（13 组）；`new-task.sh` 固定 `--worktrees-dir /Users/gubin/workspace/memx-worktrees`（仓外 worktree 容器）；欠账 #2 清零 |
 | 2026-11-04 | 四仓 `doctor` 一致 | 四仓（self-dsh-plugins / agent-mobile / homebase / memx）同一构建 `cc13260 2026-11-04T12:18:01Z` |
 | 2026-11-04 | 台账收口（#279） | §三 阶段 7 补五行（包四个入口 / 本仓 #278 / memx #56 / 四仓 `doctor`），§四 欠账 #2 / #3 改「已完成」；`README.md` 脚本清单与 §review.sh 的跨仓状态、刷新共享包的构建标识、memx 仓外 worktree 容器说明同步更新 |
+| 2026-11-05 | 删除 `install-check` / `compat-matrix` / `audit-subagents`（#301 / PR #302） | 能力移交 `dsh-auto-upgrade` #300（升级前试装 + 升级后逐插件冒烟）；文档同步清引用，脚本与 CI 文件删除由另一单负责 |

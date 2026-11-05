@@ -145,7 +145,7 @@ pnpm install
 | 没有异步的 `product_submit` / `product_wait` | 委派是同步的，提交与取结果在同一个调用里完成 | 需要后台等待时再做 |
 | 没有 ACP 会话 | `acp` 产品未注册；`opencode` / `codebuddy` 走各自的 CLI | 同上 |
 | 没有权限天花板 | 角色声明的 `permissionMode` 目前只透传给产品 CLI，未做「子代理不能派生更高权限」的校验 | 同上 |
-| provider 名带 `product-` 前缀 | 名不副实，但改名会让 `audit-subagents.mjs` 静默失效 | 单独一次改名 + 同步审计脚本 |
+| provider 名带 `product-` 前缀 | 名不副实，但改名会让 `audit-subagents.mjs` 静默失效（该脚本已于 2026-11-05 删除） | 单独一次改名 + 同步审计脚本 |
 
 这些缺口不阻塞 reviewer 循环：executor 走形态 A（宿主原生子代理，模型 `opencode-go/mimo-v2.6-flash`），
 reviewer 走形态 B（`product_delegate` 一次性委派，`codebuddy/glm-5.3-flash`）。

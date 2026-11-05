@@ -187,19 +187,18 @@ scripts/pipeline/check-all.sh
 scripts/pipeline/check-all.sh dsh-auto-upgrade dsh-plugin-product-subagents   # 只跑指定插件
 
 # 在一次性 $DSH_HOME 里验证插件能被 profile 正确安装 + 组合（绝不触碰真实 ~/.dsh）
-scripts/pipeline/install-check.sh
-scripts/pipeline/install-check.sh dsh-plugin-product-subagents
+# scripts/pipeline/install-check.sh [插件目录]   # 已于 2026-11-05 删除，能力移交 dsh-auto-upgrade 的升级前试装（issue #300）
 ```
 
-- **本仓库的「交付物」不是线上服务，而是「插件被本机 DSH profile 正确装配」**——对应 `install-check.sh`，
-  它每个插件新建一个 `mktemp -d` 的 `DSH_HOME`，`pnpm dlx @deepseek-ai/dsh@<当前版本> plugin --profile headless add <插件>`
-  后用 `--dump-config` 校验，装完即删。
+- **本仓库的「交付物」不是线上服务，而是「插件被本机 DSH profile 正确装配」**——对应一次性 `DSH_HOME` 装配验证
+  （原 `install-check.sh`，已于 2026-11-05 删除：每个插件新建 `mktemp -d` 的 `DSH_HOME`，`pnpm dlx @deepseek-ai/dsh@<当前版本> plugin --profile headless add <插件>`
+  后用 `--dump-config` 校验，装完即删；能力移交 `dsh-auto-upgrade` issue #300：升级前试装 + 升级后冒烟）。
 - `dsh-im-bridge-workspaces` 的 peer 声明已按实测收窄为 `^0.2.1-rc.2 || ^0.2.1-rc.4`（rc.2 / rc.4 均验过，
   [issue #3](https://github.com/guraul/self-dsh-plugins/issues/3) 已修），干净 checkout 可直接 `pnpm install`；
   `0.2.2-alpha.2` **未放宽**（`dsh-agent` 的 `installModelSelection` 签名变更，见
   [docs/COMPATIBILITY.md](./docs/COMPATIBILITY.md)）。
   它的构建产物**不可复现**（tsdown 把绝对路径与 CSS module 哈希写进产物），所以 CI 只跳过这一项的新鲜度检查，
-  安装 / 测试 / typecheck / 语法门禁照跑；完整装配校验仍走 `scripts/pipeline/install-check.sh dsh-im-bridge-workspaces`。
+  安装 / 测试 / typecheck / 语法门禁照跑；完整装配校验原走 `scripts/pipeline/install-check.sh dsh-im-bridge-workspaces`（该脚本已于 2026-11-05 删除，能力移交 `dsh-auto-upgrade` 的升级前试装）。
 - 只读状态一览：`scripts/pipeline/status.sh`。
 - CI（`.github/workflows/ci.yml`）只跑测试 + `node --check`，**零部署步骤**。
 

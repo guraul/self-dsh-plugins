@@ -422,7 +422,7 @@ node --check lib/index.js && node --check lib/client.js
 ```
 
 - **验收 UI 改动必须看真浏览器**：`lib/client.js` 只有语法门禁，旋转动画 / 写回草稿 / 会话隔离
-  要装进一次性 profile 手点一遍（见 [`../pipeline/README.md`](../pipeline/README.md) 的 install-check）。
+  要装进一次性 profile 手点一遍（原 `install-check` 已于 2026-11-05 删除，能力移交 `dsh-auto-upgrade` 的升级前试装）。
 - `test/slot-guard.test.mjs` 会 import **真实构建产物** `lib/client.js` 并对 `apply()` 断言：
   改槽位注册（例如又把 dock 加回来）必须先 `pnpm run build`，否则测的还是旧产物。
 - `test/controller.test.mjs` 依赖 `settle` 之外的四个导出（`markApplied` / `clearApplied` / `retry` /

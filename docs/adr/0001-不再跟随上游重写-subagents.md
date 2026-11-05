@@ -13,6 +13,6 @@
 ## 后果
 
 - ACP 桥要自己维护。范围收窄到本机真实在用的 `opencode` / `codebuddy` / 通用 `acp` 三套，`claude-code` / `codex` 桥不迁（本机无此命令）。
-- provider 前缀与工具名**沿用** `product-subagents:*` / `product_*`，因为 `scripts/pipeline/audit-subagents.mjs` 硬编码了旧前缀，改名会让审计静默失效。正名留到 `executor` 迁完之后单独做一次。
+- provider 前缀与工具名**沿用** `product-subagents:*` / `product_*`，因为 `scripts/pipeline/audit-subagents.mjs` 硬编码了旧前缀，改名会让审计静默失效（该脚本已于 2026-11-05 删除，此顾虑已不存在）。正名留到 `executor` 迁完之后单独做一次。
 - 旧插件在 PR4 挂载新插件前必须先卸载：一次性替换，不做长期并存。
-- 一期不挂真实 profile，只过 `install-check.sh`；挂载需要重启宿主，单独一个 PR 窗口。
+- 一期不挂真实 profile，只过 `install-check.sh`（该脚本已于 2026-11-05 删除，能力移交 `dsh-auto-upgrade` 的升级前试装）；挂载需要重启宿主，单独一个 PR 窗口。
