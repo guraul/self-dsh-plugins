@@ -687,13 +687,48 @@ type AgentOptionsForCreate = Parameters<AgentRegistry['create']>[0]['agentOption
  * @param install 官方 `installModelSelection`（两种签名都接受）。
  * @param selection 当前选择（仅在两参数线上使用）。
  */
+export function needsSelectionArg(install: { length: number }): boolean {
+  return install.length >= 2
+}
+
+/**
+ * 同上，但返回走的是哪条线——调用方不必再判一次 arity（单一真源，issue #299 review）。
+ * @param ctx agent 上下文。
+ * @param install 官方 `installModelSelection`。
+ * @param selection 当前选择。
+ * @returns `'legacy'`（两参数线）或 `'modern'`（一参数线）。
+ */
 export function installSelectionCompat(
   ctx: Context,
   install: (ctx: Context, selection?: { current: ModelSelection; assembled?: ModelSelection }) => void,
   selection: ModelSelection,
-): void {
-  if (install.length >= 2) install(ctx, { current: selection, assembled: undefined })
-  else install(ctx)
+): 'legacy' | 'modern' {
+  if (needsSelectionArg(install)) {
+    install(ctx, { current: selection, assembled: undefined })
+    return 'legacy'
+  }
+  install(ctx)
+  return 'modern'
+}
+
+/**
+ * 组装 `agents.create/resume` 的 agentOptions。
+ *
+ * `reasoningEffort` 只在「一参数线」展开：老版本（≤0.2.1-rc.x）的 `AgentOptions` 没有这个字段，
+ * 而那条线的路由本来就走 `installModelSelection` 的第二个参数（issue #299）。
+ * @param selection 当前选择。
+ * @param withEffort 是否下发 `reasoningEffort`（即一参数线）。
+ * @returns 可直接交给 `agents.create/resume` 的 agentOptions。
+ */
+export function buildAgentOptions(
+  selection: ModelSelection,
+  withEffort: boolean,
+): AgentOptionsForCreate {
+  return {
+    provider: selection.provider,
+    model: selection.model,
+    ...(withEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+  } as AgentOptionsForCreate
 }
 
 function resolveSelection(
@@ -1492,7 +1527,7 @@ export function apply(ctx: Context, config: Config): void {
       // 两个 dsh 版本线的签名不同（0.2.1-rc.x 两参数、0.2.2-rc.1+ 一参数），
       // 且语义也变了：前者负责路由，后者只发「模型切换提示」。用 arity 分流，
       // 一次源码同时支持两条线（#299）。
-      const selectionArgRequired = installModelSelection.length >= 2
+      const selectionArgRequired = needsSelectionArg(installModelSelection)
       const installLegacy = installModelSelection as unknown as (
         ctx: Context,
         selection?: { current: ModelSelection; assembled?: ModelSelection },
@@ -1509,12 +1544,7 @@ export function apply(ctx: Context, config: Config): void {
         installWecomChannel(agentCtx, st, () => binding.path)
       }
       // rc 线把 selection 从 installModelSelection 移到了 AgentOptions（#299）。
-      // 只在新签名上下发 reasoningEffort：老版本 AgentOptions 没有这个字段。
-      const agentOptions = {
-        provider: selection.provider,
-        model: selection.model,
-        ...(selectionArgRequired ? {} : { reasoningEffort: selection.reasoningEffort }),
-      } as AgentOptionsForCreate
+      const agentOptions = buildAgentOptions(selection, !selectionArgRequired)
 
       try {
         if (plan.bind === 'resume') {

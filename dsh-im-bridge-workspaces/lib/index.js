@@ -9061,12 +9061,42 @@ function resolvePersona(config, settings) {
 * @param install 官方 `installModelSelection`（两种签名都接受）。
 * @param selection 当前选择（仅在两参数线上使用）。
 */
+function needsSelectionArg(install) {
+	return install.length >= 2;
+}
+/**
+* 同上，但返回走的是哪条线——调用方不必再判一次 arity（单一真源，issue #299 review）。
+* @param ctx agent 上下文。
+* @param install 官方 `installModelSelection`。
+* @param selection 当前选择。
+* @returns `'legacy'`（两参数线）或 `'modern'`（一参数线）。
+*/
 function installSelectionCompat(ctx, install, selection) {
-	if (install.length >= 2) install(ctx, {
-		current: selection,
-		assembled: void 0
-	});
-	else install(ctx);
+	if (needsSelectionArg(install)) {
+		install(ctx, {
+			current: selection,
+			assembled: void 0
+		});
+		return "legacy";
+	}
+	install(ctx);
+	return "modern";
+}
+/**
+* 组装 `agents.create/resume` 的 agentOptions。
+*
+* `reasoningEffort` 只在「一参数线」展开：老版本（≤0.2.1-rc.x）的 `AgentOptions` 没有这个字段，
+* 而那条线的路由本来就走 `installModelSelection` 的第二个参数（issue #299）。
+* @param selection 当前选择。
+* @param withEffort 是否下发 `reasoningEffort`（即一参数线）。
+* @returns 可直接交给 `agents.create/resume` 的 agentOptions。
+*/
+function buildAgentOptions(selection, withEffort) {
+	return {
+		provider: selection.provider,
+		model: selection.model,
+		...withEffort ? { reasoningEffort: selection.reasoningEffort } : {}
+	};
 }
 function resolveSelection(config, defaultModel) {
 	const provider = config.provider.trim();
@@ -9746,7 +9776,7 @@ function apply(ctx, config) {
 				return st;
 			}
 			const selection = resolveSelection(cfg(), defaultModel);
-			const selectionArgRequired = installModelSelection.length >= 2;
+			const selectionArgRequired = needsSelectionArg(installModelSelection);
 			const installLegacy = installModelSelection;
 			const presets = ctx.get("agentPresets");
 			const presetId = plan.bind === "resume" && stored?.agentPreset ? stored.agentPreset : cfg().agentPreset;
@@ -9757,11 +9787,7 @@ function apply(ctx, config) {
 				if (presets !== void 0) await presets.mount(agentCtx, resolvedId);
 				installWecomChannel(agentCtx, st, () => binding.path);
 			};
-			const agentOptions = {
-				provider: selection.provider,
-				model: selection.model,
-				...selectionArgRequired ? {} : { reasoningEffort: selection.reasoningEffort }
-			};
+			const agentOptions = buildAgentOptions(selection, !selectionArgRequired);
 			try {
 				if (plan.bind === "resume") {
 					const { agent } = await agents.resume({
@@ -10609,4 +10635,4 @@ function apply(ctx, config) {
 		}, "im-bridge: wecom websocket"));
 	})();
 }
-export { Config, IM_BRIDGE_NS, apply, guardInactiveEffect, inject, installSelectionCompat, isFiberInactive, name };
+export { Config, IM_BRIDGE_NS, apply, buildAgentOptions, guardInactiveEffect, inject, installSelectionCompat, isFiberInactive, name, needsSelectionArg };

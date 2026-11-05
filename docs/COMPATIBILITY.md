@@ -139,5 +139,11 @@ DSH_HOME="$H" pnpm dlx @deepseek-ai/dsh@<V> --profile headless 2>&1 | head -20
 `pnpm test` 54/54（新增 3 条：两参数线交接 selection、一参数线只传 1 个实参、`reasoningEffort` 随
 `agentOptions` 下发）；`build:host` 产物 `node --check` 通过。因此两个版本都改为 `compatible` / **L3**。
 
+**反证（非空转）**：把 `installSelectionCompat` 的 arity 分支去掉、永远传两参数 →
+用例「一参数线：只传 ctx」立刻红（`AssertionError: 一参数线上不许再塞第二个实参`）；恢复后 54/54 绿。
+而「无条件两参数调用」正是 #299 的原始症状：在 0.2.2 线类型下必报
+`TS2554: Expected 1 arguments, but got 2`——本轮改法在 rc.1 / alpha.2 两种类型下 `tsc` 均通过，
+说明该错误已消除而不是被绕过。
+
 **仍未验证**：GUI 端的端到端（模型切换提示是否按预期出现、`reasoningEffort` 在真实请求头里是否生效）——
 这需要重启宿主并观察实际请求，属合并后补验项。
