@@ -99,5 +99,5 @@ fi
 
 echo "════ 提示 ════"
 echo "  本仓库的\"交付物\"是插件被本机 DSH profile 正确装配（没有服务器、没有部署）。"
-echo "  一次性 DSH_HOME 里验证装配: scripts/pipeline/install-check.sh <插件目录名>"
+echo "  装配验证已随脚本移除；接续方案见 issue #300（dsh-auto-upgrade 升级前试装，尚未实现）"
 echo "  跑全部插件的测试与检查:     scripts/pipeline/check-all.sh"

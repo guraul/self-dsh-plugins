@@ -4,7 +4,7 @@
 #
 # 与 agent-mobile 版本的区别：本仓库没有服务器、没有部署，故不含
 # SERVER_HOST / SERVER_USER / remote() / BFF_REPO 等部署侧常量。
-# 本仓库的"交付物"是插件被本机 DSH profile 正确装配，见 install-check.sh。
+# 本仓库的"交付物"是插件被本机 DSH profile 正确装配（原装配验证脚本已删除；接续方案见 issue #300，尚未实现）。
 
 set -euo pipefail
 
@@ -16,7 +16,7 @@ GH_REPO="guraul/self-dsh-plugins"
 # 第一层 git fetch 失败后的重试次数（macOS 自带没有 timeout，用重试代替）
 FETCH_RETRY=2
 
-# 插件目录白名单（SUMMARY 与 install-check 用）。**故意不写数量**——写死的数字必然漂。
+# 插件目录白名单（summary 与 check-all 用）。**故意不写数量**——写死的数字必然漂。
 # 改这里的唯一纪律：新增/删除目录时同步 .github/workflows/ci.yml 的 matrix，
 # 两边一一对应；只改一处不会报错，只会让该插件的测试在 CI 里静默地从未跑过（issue #243）。
 # 包名不在这里维护——用 pkg_name() 从各插件 package.json 读，避免注定漂移的副本。
