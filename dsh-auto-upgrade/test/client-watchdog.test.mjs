@@ -117,3 +117,29 @@ test('「令牌已更换」文案给可执行指引且不再承诺自动重连�
   assert.match(source, /const WATCHDOG_INTERVAL_MS = 2000/)
   assert.match(source, /const WATCHDOG_TOKEN_TICKS = 15/)
 })
+
+test('#300 深度口径：自述兼容但深度只到 L1（或没记）→ 显示「可装配，未验证行为」', async () => {
+  const exported = await loadClient()
+  const cases = [
+    [{ declared: { verdict: 'compatible' }, depth: 'L1' }, true, '只到装配'],
+    [{ declared: { verdict: 'compatible' } }, true, '没记深度（老记录）'],
+    [{ declared: { verdict: 'compatible' }, depth: 'L2' }, false, '启动+冒烟通过才叫兼容'],
+    [{ declared: { verdict: 'compatible' }, depth: 'L3' }, false],
+    [{ declared: { verdict: 'compatible' }, depth: 'L4' }, false],
+    [{ declared: { verdict: 'incompatible' }, depth: 'L1' }, false, '不兼容本来就不显示兼容'],
+    [{ declared: { verdict: 'unverified' } }, false],
+    [undefined, false, '没有判定项不炸'],
+  ]
+  for (const [plugin, expected] of cases) {
+    assert.equal(exported.behaviourUnverified(plugin), expected, JSON.stringify(plugin))
+  }
+})
+
+test('#300 深度口径：门禁放行的插件按「未验证 / 可装配 / 兼容」三态显示，不许把没验过的叫兼容', async () => {
+  const exported = await loadClient()
+  assert.equal(exported.passState({ declared: { verdict: 'compatible' }, depth: 'L2' }), 'ok')
+  assert.equal(exported.passState({ declared: { verdict: 'compatible' }, depth: 'L1' }), 'assembled')
+  assert.equal(exported.passState({ declared: { verdict: 'compatible' } }), 'assembled', '没记深度同样只能算可装配')
+  assert.equal(exported.passState({ declared: { verdict: 'unverified' } }), 'unverified', '从没验过就该显示未验证')
+  assert.equal(exported.passState({}), 'unverified')
+})

@@ -97,3 +97,15 @@ test('evaluatePlugins：declared 逐条挂上，incompatible 与 unverified 都�
     await rm(profileDir, { recursive: true, force: true })
   }
 })
+
+test('#300 深度：declaredDepth 只认 L1–L4，缺失或非法一律 undefined', async () => {
+  const { declaredDepth } = await import('../lib/host/compat.js')
+  const manifest = (depths) => ({ dsh: { compatibility: { dshDepth: depths } } })
+  assert.equal(declaredDepth(manifest({ '1.0.0': 'L1' }), '1.0.0'), 'L1')
+  assert.equal(declaredDepth(manifest({ '1.0.0': 'L2' }), '1.0.0'), 'L2')
+  assert.equal(declaredDepth(manifest({ '1.0.0': 'L4' }), '1.0.0'), 'L4')
+  assert.equal(declaredDepth(manifest({ '1.0.0': 'L9' }), '1.0.0'), undefined, '非法深度当没记')
+  assert.equal(declaredDepth(manifest({ '1.0.0': 1 }), '1.0.0'), undefined, '非字符串当没记')
+  assert.equal(declaredDepth(manifest({}), '1.0.0'), undefined, '没这个版本')
+  assert.equal(declaredDepth(undefined, '1.0.0'), undefined, '没有 manifest')
+})

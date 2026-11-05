@@ -49,6 +49,27 @@ export function declaredVerdict(manifest, targetVersion) {
   return { verdict, source: SELF_DECLARED }
 }
 
+/** 合法的验证深度，由浅到深。 */
+export const DEPTHS = ['L1', 'L2', 'L3', 'L4']
+
+/**
+ * 读插件的自述**验证深度**：`dsh.compatibility.dshDepth[<目标版本>]`。
+ *
+ * 深度说的是「这个 compatible 是怎么得来的」：#300 之后 **L1 = 装配通过（试装）**、
+ * **L2 = 启动 + 冒烟通过**。只有 L2 及以上才有资格显示「兼容」；只到 L1 只能叫
+ * 「可装配，未验证行为」——声明覆盖 ≠ 行为验证过。
+ * @param {object|undefined} manifest 插件 package.json。
+ * @param {string} targetVersion 目标版本。
+ * @returns {'L1'|'L2'|'L3'|'L4'|undefined} 深度；没记录或记录非法返回 undefined。
+ */
+export function declaredDepth(manifest, targetVersion) {
+  const depths = manifest?.dsh?.compatibility?.dshDepth
+  const recorded = depths !== null && typeof depths === 'object' && !Array.isArray(depths)
+    ? depths[targetVersion]
+    : undefined
+  return DEPTHS.includes(recorded) ? recorded : undefined
+}
+
 /**
  * 把 profile 的依赖清单逐条判成"对目标版本是否兼容"。
  * @param {object} options 输入。
@@ -83,6 +104,7 @@ export async function evaluatePlugins(options) {
         exempted: false,
         peers: {},
         declared,
+        depth: declaredDepth(manifest, targetVersion),
         detail: error === undefined ? undefined : `无法读取插件 manifest：${error} (${path})`,
       })
       continue
@@ -101,6 +123,7 @@ export async function evaluatePlugins(options) {
         exempted: false,
         peers: {},
         declared,
+        depth: declaredDepth(manifest, targetVersion),
         detail: `兼容性判定失败：${failure instanceof Error ? failure.message : String(failure)}`,
       })
       continue
@@ -116,6 +139,7 @@ export async function evaluatePlugins(options) {
         exempted: false,
         peers: {},
         declared,
+        depth: declaredDepth(manifest, targetVersion),
       })
       continue
     }
@@ -138,6 +162,7 @@ export async function evaluatePlugins(options) {
       peers: issue.requirements ?? issue.peers ?? {},
       runtimeVersion: issue.runtimeVersion,
       declared,
+      depth: declaredDepth(manifest, targetVersion),
       detail,
     })
   }
