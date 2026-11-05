@@ -774,6 +774,10 @@ export function apply(ctx, config = {}) {
           try {
             text = await readFile(join(plugin.dir, 'package.json'), 'utf8')
             packageVersion = JSON.parse(text).version
+            if (typeof packageVersion !== 'string' || packageVersion === '') {
+              entries.push({ name: entry.name, depth: entry.depth, changed: false, error: '插件 package.json 缺 version 字段' })
+              continue
+            }
           } catch {
             continue
           }

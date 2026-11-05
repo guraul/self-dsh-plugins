@@ -12,7 +12,7 @@
  * 三个函数都不碰磁盘，方便单测；真正开 PR 的编排在别处。
  */
 
-/** 结论里允许写进矩阵的两种深度（回填只认这两个）。 */
+/** 允许写进矩阵的深度，由浅到深（回填只看这四个值，别的一律当非法）。 */
 const DEPTHS = ['L1', 'L2', 'L3', 'L4']
 
 /**
@@ -155,7 +155,12 @@ export function patchCompatibility(input) {
  * @returns {string} 一行 markdown。
  */
 export function compatRow(input) {
-  const how = input.how ?? `冒烟通过（${input.depth === 'L1' ? '兜底三项，插件未写 dsh.smoke' : '兜底三项 + 插件自报断言'}）`
+  const how = input.how ?? ({
+    L1: '装配/兜底三项通过，插件未写 dsh.smoke（行为未验证）',
+    L2: '兜底三项 + 插件自报断言通过',
+    L3: '沿用之前的更深记录（编译期已验），本次补冒烟',
+    L4: '沿用之前的更深记录（业务链路已实测）',
+  }[input.depth] ?? `本次回填：${String(input.depth)}`)
   return `| \`${input.name}\` | \`${input.packageVersion}\` | \`${input.version}\` | **${input.depth}** | ✅ 通过 | ${input.date ?? ''} | ${how} |`
 }
 
@@ -166,7 +171,9 @@ export function compatRow(input) {
  * @returns {string|undefined} 新文本；找不到矩阵表时 undefined。
  */
 export function appendCompatRow(text, row) {
-  const lines = text.split('\n')
+  // 注意用 `\r?\n` 切：直接 `split('\n')` 会把 `\r` 留在行尾，再按 CRLF 拼回去就成了 `\r\r\n`。
+  const newline = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
   let header = -1
   for (let i = 0; i < lines.length; i += 1) {
     if (lines[i].startsWith('| 插件 |')) {
@@ -181,6 +188,5 @@ export function appendCompatRow(text, row) {
     last = i
   }
   lines.splice(last + 1, 0, row)
-  // 保留原文档的行尾风格（CRLF 文档别混进 LF 行）。
-  return lines.join(text.includes('\r\n') ? '\r\n' : '\n')
+  return lines.join(newline)
 }
