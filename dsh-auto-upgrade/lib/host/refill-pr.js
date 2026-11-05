@@ -62,7 +62,8 @@ export async function openRefillPullRequest(options) {
   try {
     await mkdir(options.worktreePath, { recursive: true })
     // origin/main 可能陈旧：先 fetch，否则会基于过期的 main 开 PR 或 push 失败。
-    await options.git(['fetch', 'origin', 'main'], options.repoRoot)
+    const fetched = await options.git(['fetch', 'origin', 'main'], options.repoRoot)
+    if (!fetched.ok) return { ok: false, detail: `fetch origin main 失败：${String(fetched.error)}` }
     // 从 origin/main 切，保证不带上用户工作区的任何未提交改动。
     const added = await options.git(['worktree', 'add', '-b', branch, path, 'origin/main'], options.repoRoot)
     if (!added.ok) return { ok: false, detail: `创建 worktree 失败：${String(added.error)}` }

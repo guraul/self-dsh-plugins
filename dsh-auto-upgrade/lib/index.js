@@ -809,6 +809,7 @@ export function apply(ctx, config = {}) {
           throw new RequestError(409, CODE.BUSY, '试装/冒烟正在运行，等它结束再回填')
         }
         refillRun = true
+        try {
         if (profileDir === undefined || installation === undefined) {
           throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'profile 信息不可用')
         }
@@ -840,21 +841,23 @@ export function apply(ctx, config = {}) {
           const relDir = relative(repoRoot, plugin.dir)
           if (relDir === '' || relDir.startsWith('..')) continue
           let dry
+          let manifestText
+          let packageVersion = ''
           try {
-            dry = patchCompatibility({
-              text: await readFile(join(plugin.dir, 'package.json'), 'utf8'),
-              version, verdict: 'compatible', depth: entry.depth,
-            })
+            manifestText = await readFile(join(plugin.dir, 'package.json'), 'utf8')
+            packageVersion = String(JSON.parse(manifestText).version ?? '')
+            dry = patchCompatibility({ text: manifestText, version, verdict: 'compatible', depth: entry.depth })
           } catch {
             continue
           }
+          if (packageVersion === '') continue
           if (!dry.changed) continue
           entries.push({
             name: entry.name,
             relDir,
             depth: dry.depth,
             changed: true,
-            row: compatRow({ name: entry.name, packageVersion: `${entry.name}@?`, version, depth: dry.depth, date }),
+            row: compatRow({ name: entry.name, packageVersion: `${entry.name}@${packageVersion}`, version, depth: dry.depth, date }),
           })
         }
         const outcome = await openRefillPullRequest({
@@ -875,8 +878,11 @@ export function apply(ctx, config = {}) {
           patch: patchCompatibility,
           appendRow: appendCompatRow,
         })
-        refillRun = false
         writeJson(res, outcome.ok ? 200 : 500, { ok: outcome.ok, version, ...outcome })
+        } finally {
+          // 占位必须复位：任何一条抛错路径卡住它，端点就会永久 409（只能重启宿主恢复）。
+          refillRun = false
+        }
       },
     })
 
