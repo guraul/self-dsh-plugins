@@ -26,7 +26,7 @@ export function linkTargets(dependencies) {
 /**
  * 一次探针要跑的两条命令（argv 形态，不拼 shell 字符串）。
  * @param {{dshBin: string, pluginPath: string, profileName: string}} options 输入。
- * @returns {{add: string[], dump: string[]}} 两条命令的 argv。
+ * @returns {{add: string[], dump: string[]}} 两条 argv。
  */
 export function buildProbeCommands(options) {
   return {

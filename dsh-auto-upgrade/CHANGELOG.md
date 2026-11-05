@@ -7,18 +7,11 @@
 
 ### 新增
 
-- **升级前「试装」探针（issue #300 的 P1）**：preflight 只读 `peerDependencies` / `engines.dsh` 声明，
-  能发现「声明不覆盖目标版本」，发现不了「声明覆盖但实际装不上」（bundle 缺失、依赖指向未发布的包、
-  `cordis.patch.yml` 写坏）。
-  - `GET /probe` 读结论缓存与进度；`POST` 后台开跑（不阻断，并发 `409 E_BUSY`）。
-  - 做法：`mktemp -d` 一次性 `DSH_HOME` → 对 profile 里每个 `link:` / `file:` 插件跑
-    `dsh plugin --profile probe add <路径>` → `dsh --profile probe --dump-config` 里**恰好**出现
-    `- id: <插件名>` 才算装配通过。
-  - 结论按 `(dsh 版本, 插件名, 插件目录 mtime)` 缓存 24 小时；插件目录动过自动重跑。
-  - **只作警告，不进阻断判定**（装配失败率极低，误伤代价高于收益）。
-  - `lib/host/probe.js` 是纯逻辑 + 可注入执行器，单测不 spawn（8 条）。
-- `API.probe` 目前只在宿主侧：设置页展示留到 P1b，`test/client-protocol.test.mjs` 用显式
-  `HOST_ONLY` 白名单守住「客户端不漏接路由」这条不变量。
+- **升级前「试装」探针（#300 P1）**：声明覆盖 ≠ 装得上。`GET /probe` 读缓存/进度，`POST` 后台开跑
+  （不阻断，并发 `409`）。做法是一次性 `DSH_HOME` 里对每个 `link:` / `file:` 插件跑
+  `plugin add` + `--dump-config`，**恰好**出现 `- id: <插件名>` 才算装配通过；结论按
+  `(dsh 版本, 插件名, 目录 mtime)` 缓存 24h。**只作警告，不进阻断判定。**
+  单测 8 条 + 一条路由回归（早退不泄漏占位）+ 一条漏导入回归。
 
 ## [0.2.6] — 2026-11-05
 

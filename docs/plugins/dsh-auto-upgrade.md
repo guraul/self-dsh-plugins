@@ -217,9 +217,8 @@ pnpm run check                                # node --check
 
 ## 升级前「试装」探针（#300 P1）
 
-`GET /probe` 读结论缓存/进度，`POST` 后台开跑（不阻断、并发 `409`）。做法是一次性 `DSH_HOME` 里
-把每个 `link:`/`file:` 插件真装一遍：`plugin add` 退出码 0 **且** `--dump-config` 里恰好出现
-`- id: <插件名>` 才算装配通过；结论缓存 24h（键含插件目录 mtime）。**只作警告，不阻断升级。**
+`GET /probe` 读缓存/进度，`POST` 后台开跑（不阻断、并发 `409`）。一次性 `DSH_HOME` 里把每个
+`link:` / `file:` 插件真装一遍，判据见 `lib/host/probe.js`；**只作警告，不阻断升级**。
 
 ## 另需注意的两条设计约束
 
