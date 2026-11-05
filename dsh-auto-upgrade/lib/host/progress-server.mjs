@@ -35,6 +35,8 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2))
 const stateDir = args.state ?? ''
+/** 3080 的地址（宿主在跑的那个端口）。 */
+const base = args.base ?? 'http://127.0.0.1:3080'
 
 /**
  * 找 `url.txt`：launchd 管理时它在 job 的 stdout 旁边（和 helper 的 `resolve_log_path` 同源），
@@ -92,6 +94,19 @@ async function authenticates(url) {
   }
 }
 
+/**
+ * 3080 现在有没有人在应答——「重启中」最可靠的信号，不依赖 helper 写没写日志。
+ * @returns {Promise<boolean>} 有人在应答返回 true。
+ */
+async function baseAlive() {
+  try {
+    const response = await fetch(base, { redirect: 'manual', signal: AbortSignal.timeout(1200) })
+    return response.status > 0
+  } catch {
+    return false
+  }
+}
+
 /** 推出当前阶段（判据全部来自本机现有产物）。 */
 async function snapshot() {
   const elapsedMs = Date.now() - startedAt
@@ -121,7 +136,18 @@ async function snapshot() {
   if (live && candidate !== baseline) {
     return { phase: 'done', detail: '新进程已就绪', url: candidate, elapsedMs }
   }
-  if (/kickstart ok|relaunching/.test(tail)) return { phase: 'starting', detail: '正在拉起新进程…', elapsedMs }
+  const alive = await baseAlive()
+  if (!alive) {
+    // 3080 没人应答：要么在装包，要么在停/起之间。
+    if (/helper start/.test(tail) && !/install finished/.test(tail)) {
+      return { phase: 'installing', detail: '正在安装新版本…', elapsedMs }
+    }
+    return { phase: 'stopping', detail: '旧进程已停止，正在等待新进程…', elapsedMs }
+  }
+  if (/kickstart ok|relaunching/.test(tail) || alive) {
+    // 端口起来了，但 url.txt 还没变成「新的且能认证」——正在校验新地址。
+    return { phase: 'verifying', detail: '新进程已启动，正在校验新地址…', elapsedMs }
+  }
   if (/install finished/.test(tail) === false && /helper start/.test(tail)) {
     return { phase: 'installing', detail: '正在安装新版本…', elapsedMs }
   }
@@ -142,22 +168,27 @@ h1{margin:0 0 6px;font-size:17px;font-weight:600}.muted{color:#8b93a1;font-size:
 .sec{color:#5f6775;font-size:12px;margin-top:10px}</style>
 <div class=card><h1>dsh web 正在重启</h1><div class=muted id=detail>正在准备…</div>
 <div class=bar><div class=fill id=fill></div></div>
-<ul class=steps id=steps><li data-p=stopping>停止旧进程</li><li data-p=installing>安装新版本</li>
-<li data-p=starting>拉起新进程</li><li data-p=done>打开界面</li></ul><div class=sec id=sec>0 秒</div></div>
+<ul class=steps id=steps><li data-p=waiting>准备</li><li data-p=stopping>停止旧进程</li>
+<li data-p=installing>安装新版本</li><li data-p=starting>拉起新进程</li>
+<li data-p=verifying>校验新地址</li><li data-p=done>打开界面</li></ul><div class=sec id=sec>0 秒</div></div>
 <script>
-const order=['waiting','stopping','installing','starting','done'];
+const order=['waiting','stopping','installing','starting','verifying','done'];
 const fill=document.getElementById('fill'),detail=document.getElementById('detail'),
   steps=[...document.querySelectorAll('#steps li')],sec=document.getElementById('sec'),t0=Date.now();
+let shown=6;
 async function tick(){
   let s; try{ s=await (await fetch('/state',{cache:'no-store'})).json() }catch{ return }
   detail.textContent=s.detail||''; sec.textContent=Math.round((Date.now()-t0)/1000)+' 秒';
   const at=order.indexOf(s.phase);
-  fill.style.width=Math.max(8,((at+1)/order.length)*100)+'%';
+  const target=Math.max(8,((Math.max(at,0)+1)/order.length)*100);
+  // 每帧朝目标挪一点：即使阶段很少（重启只有两三秒），进度条也一直在动，不会「只滑一次」。
+  shown = target > shown ? Math.min(target, shown + 7) : target;
+  fill.style.width=shown+'%';
   steps.forEach(li=>{const i=order.indexOf(li.dataset.p);
     li.className=s.phase==='failed'&&li.dataset.p==='stopping'?'bad':(i<=at?'on':'')});
-  if(s.phase==='done'&&s.url){ location.replace(s.url); return }
+  if(s.phase==='done'&&s.url){ fill.style.width='100%'; setTimeout(()=>location.replace(s.url),600); return }
   if(s.phase==='failed'){ detail.textContent=s.detail; return }
-  setTimeout(tick,700);
+  setTimeout(tick,400);
 }
 tick();
 </script>`
@@ -174,7 +205,8 @@ const server = createServer((req, res) => {
         // 完成后留一小段让页面跳转，然后自己退出（不常驻）。
         setTimeout(() => server.close(() => process.exit(0)), DONE_GRACE_MS).unref()
       }
-    }).catch(() => {
+    }).catch((error) => {
+      console.warn(`[progress] 状态暂不可读：${error instanceof Error ? error.message : String(error)}`)
       // 状态文件读到一半 / 坏了也要答话，否则唯一的进度信息源会猝死（review 轮 1）。
       res.writeHead(500, { ...cors, 'content-type': 'application/json; charset=utf-8' })
       res.end('{"phase":"unknown","detail":"状态暂不可读"}')
