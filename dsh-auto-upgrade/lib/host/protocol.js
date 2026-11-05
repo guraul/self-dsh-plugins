@@ -20,6 +20,8 @@ export const API = {
   probe: `${API_PREFIX}/probe`,
   /** 升级后「逐插件冒烟」（issue #300 P2）：GET 读结论，POST 开跑。 */
   smoke: `${API_PREFIX}/smoke`,
+  /** 实测结论回填计划（issue #300 P4）：只读，返回补丁不写盘。 */
+  refillPlan: `${API_PREFIX}/refill`,
   plugins: `${API_PREFIX}/plugins`,
   pluginAction: `${API_PREFIX}/plugins/action`,
   policy: `${API_PREFIX}/policy`,

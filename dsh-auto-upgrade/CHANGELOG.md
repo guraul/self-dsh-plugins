@@ -3,6 +3,20 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.7.0] — 2026-11-05
+
+### 新增
+
+- **实测结论回填：补丁生成 + 只读计划接口（#300 P4 上半）**。矩阵靠人手填的欠账（仓库里挂了几天）
+  根因是「结论有了但没人写」。现在把「结论 → 补丁」做成纯逻辑：
+  - `buildRefillPlan()`：全量冒烟通过 → `compatible`/**L2**；只有兜底三项通过（`partial`，插件没写
+    `dsh.smoke`）→ `compatible`/**L1**；失败不记结论（走自动开 issue，不写进矩阵）。
+  - `patchCompatibility()`：**不重排文件**，只在 `dshReleases` / `dshDepth` 里插入或替换那一行，
+    **保留 CRLF**（im-bridge 的 package.json 是 CRLF，整份重排会炸出几百行假 diff）；
+    **深度只升不降**（已有 L3 时，只到 L2 的冒烟不会把它改浅），重复回填幂等。
+  - `GET /api/dsh-auto-upgrade/refill`：只读预览——列出该记的结论与矩阵行，不写盘、不开 PR。
+- 单测 10 条：结论映射、CRLF 插入/替换、幂等、只升不降、矩阵行格式、行追加。
+
 ## [0.6.1] — 2026-11-05
 
 ### 变更

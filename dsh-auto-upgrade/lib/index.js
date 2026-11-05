@@ -21,6 +21,7 @@ import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
 import { cacheHit, linkTargets, runProbes } from './host/probe.js'
 import { runSmokes } from './host/smoke.js'
+import { buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
@@ -732,6 +733,56 @@ export function apply(ctx, config = {}) {
           smokeRun = null
           throw error
         }
+      },
+    })
+
+    // —— 实测结论回填计划（issue #300 P4）——
+    // 只读：把「哪些插件该记什么结论、package.json 会变成什么样」算出来给前端看。
+    // 真正写盘并开 PR 是下一步（会走独立的 git worktree，不碰用户工作区）。
+    route(API.refillPlan, {
+      GET: async (_req, res) => {
+        let cached = {}
+        try {
+          cached = JSON.parse(await readFile(smokePath, 'utf8'))
+        } catch {
+          cached = {}
+        }
+        const results = Array.isArray(cached.results) ? cached.results : []
+        if (results.length === 0) {
+          writeJson(res, 200, { ok: true, skipped: true, detail: '还没有冒烟结果；先跑一次 POST /smoke' })
+          return
+        }
+        const version = installation === undefined ? undefined : await readInstalledVersion(installation.manifestPath)
+        const plan = buildRefillPlan({ version, results })
+        const date = new Date().toISOString().slice(0, 10)
+        // 复用冒烟那套「从 profile 依赖还原插件目录」的逻辑，避免再写一遍路径解析。
+        const { plugins: installed } = await collectSmokePlugins()
+        const byName = new Map(installed.map((plugin) => [plugin.name, plugin]))
+        const entries = []
+        for (const entry of plan.entries) {
+          const plugin = byName.get(entry.name)
+          if (plugin === undefined) continue
+          let text
+          let packageVersion
+          try {
+            text = await readFile(join(plugin.dir, 'package.json'), 'utf8')
+            packageVersion = JSON.parse(text).version
+          } catch {
+            continue
+          }
+          try {
+            const patched = patchCompatibility({ text, version: String(version), verdict: entry.verdict, depth: entry.depth })
+            entries.push({
+              name: entry.name,
+              depth: entry.depth,
+              changed: patched.changed,
+              row: compatRow({ name: entry.name, packageVersion: `${entry.name}@${String(packageVersion)}`, version: String(version), depth: entry.depth, date }),
+            })
+          } catch (error) {
+            entries.push({ name: entry.name, depth: entry.depth, changed: false, error: error instanceof Error ? error.message : String(error) })
+          }
+        }
+        writeJson(res, 200, { ok: true, version: version ?? null, entries })
       },
     })
 
