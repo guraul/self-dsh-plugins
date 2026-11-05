@@ -156,21 +156,44 @@ async function snapshot() {
 }
 
 /** 进度页（内联，不引外网资源）。 */
-const PAGE = `<!doctype html><meta charset="utf-8"><title>dsh web 正在重启</title>
-<style>:root{color-scheme:dark}body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
-background:#0f1115;color:#e6e6e6;font:15px/1.6 -apple-system,"PingFang SC",system-ui,sans-serif}
-.card{width:420px;padding:28px 32px;border-radius:14px;background:#171a21;box-shadow:0 8px 40px #0006}
-h1{margin:0 0 6px;font-size:17px;font-weight:600}.muted{color:#8b93a1;font-size:13px;margin-bottom:18px}
-.bar{height:6px;border-radius:3px;background:#242a35;overflow:hidden;margin-bottom:10px}
-.fill{height:100%;width:8%;background:linear-gradient(90deg,#4f7cff,#7aa2ff);transition:width .5s ease}
-.steps{margin:14px 0 0;padding:0;list-style:none;font-size:13px;color:#8b93a1}
-.steps li{padding:2px 0}.steps li.on{color:#e6e6e6}.steps li.bad{color:#ff7a7a}
-.sec{color:#5f6775;font-size:12px;margin-top:10px}</style>
-<div class=card><h1>dsh web 正在重启</h1><div class=muted id=detail>正在准备…</div>
-<div class=bar><div class=fill id=fill></div></div>
-<ul class=steps id=steps><li data-p=waiting>准备</li><li data-p=stopping>停止旧进程</li>
-<li data-p=installing>安装新版本</li><li data-p=starting>拉起新进程</li>
-<li data-p=verifying>校验新地址</li><li data-p=done>打开界面</li></ul><div class=sec id=sec>0 秒</div></div>
+const PAGE = `<!doctype html><meta charset="utf-8"><title>dsh web 正在重启 · RHINE LAB</title>
+<style>
+/* 配色取自 Rhine-Lab-Codex-Theme 的 Pioneer 终端面板（skin.css 变量 + skin.json accent）：
+   奶油白 #F6F1E5 / 石墨黑 #252B2A / 莱茵橙 #DC7946 / 深赭 #8B3C1C / 分隔线 #D5CDBD / 侧栏 #E8E2D3 */
+:root{color-scheme:light;--cream:#F6F1E5;--ink:#252B2A;--line:#D5CDBD;--side:#E8E2D3;
+--orange:#DC7946;--rust:#8B3C1C;--muted:#8C8878;--dim:#AAA99E}
+body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:var(--cream);
+color:var(--ink);font:15px/1.6 Arial,"PingFang SC","Microsoft YaHei",sans-serif}
+.card{width:460px;padding:26px 30px 22px;background:var(--cream);border:1px solid var(--line);border-radius:2px;
+box-shadow:0 10px 40px #252B2A14}
+.head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:14px}
+h1{margin:0;font-size:17px;font-weight:800;letter-spacing:.02em}
+.tag{font-size:10px;letter-spacing:1px;color:var(--rust);font-weight:600}
+.muted{color:var(--muted);font-size:13px;margin-bottom:14px;min-height:20px}
+.bar{height:8px;background:var(--side);border:1px solid var(--line);border-radius:2px;overflow:hidden}
+.fill{height:100%;width:6%;background:linear-gradient(90deg,var(--rust),var(--orange));transition:width .45s ease}
+.steps{display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;margin:16px 0 0;padding:0;list-style:none;
+font-size:12.5px;color:var(--dim)}
+.steps li{padding:3px 0 3px 16px;position:relative;letter-spacing:.5px}
+.steps li::before{content:"";position:absolute;left:0;top:9px;width:7px;height:7px;border:1px solid var(--line);
+border-radius:1px;background:transparent}
+.steps li.on{color:var(--ink)}
+.steps li.on::before{background:var(--orange);border-color:var(--rust)}
+.steps li.bad{color:var(--rust)}
+.steps li.bad::before{background:var(--rust);border-color:var(--rust)}
+.foot{display:flex;justify-content:space-between;margin-top:14px;padding-top:9px;border-top:1px solid var(--line);
+font-size:11px;letter-spacing:.5px;color:var(--muted)}
+</style>
+<div class=card>
+  <div class=head><h1>dsh web 正在重启</h1><span class=tag>RHINE LAB</span></div>
+  <div class=muted id=detail>正在准备…</div>
+  <div class=bar><div class=fill id=fill></div></div>
+  <ul class=steps id=steps><li data-p=waiting>准备</li><li data-p=stopping>停止旧进程</li>
+  <li data-p=installing>安装新版本</li><li data-p=starting>拉起新进程</li>
+  <li data-p=verifying>校验新地址</li><li data-p=done>打开界面</li></ul>
+  <div class=foot><span id=sec>0 秒</span><span>PIONEER TERMINAL</span></div>
+</div>
 <script>
 const order=['waiting','stopping','installing','starting','verifying','done'];
 const fill=document.getElementById('fill'),detail=document.getElementById('detail'),
@@ -181,7 +204,7 @@ async function tick(){
   detail.textContent=s.detail||''; sec.textContent=Math.round((Date.now()-t0)/1000)+' 秒';
   const at=order.indexOf(s.phase);
   const target=Math.max(8,((Math.max(at,0)+1)/order.length)*100);
-  // 每帧朝目标挪一点：即使阶段很少（重启只有两三秒），进度条也一直在动，不会「只滑一次」。
+  // 每帧朝目标挪一点：即使重启只有两三秒，进度条也一直在动，不会「只滑一次」。
   shown = target > shown ? Math.min(target, shown + 7) : target;
   fill.style.width=shown+'%';
   steps.forEach(li=>{const i=order.indexOf(li.dataset.p);
