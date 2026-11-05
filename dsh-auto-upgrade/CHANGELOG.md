@@ -3,6 +3,15 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.5.1] — 2026-11-05
+
+### 变更
+
+- 冒烟把**宿主事实**（`dshVersion` / `dshDir`）作为 `run(context)` 的参数交给插件自报断言。
+  原因：插件里 `import('@deepseek-ai/dsh-agent')` 解析到的是**插件自己 node_modules 里的副本**，
+  可能比宿主实际加载的旧——那样断言就变成「对着老版本自证清白」，升级后仍然绿、等于没验。
+  声明了 `dsh.smoke` 的插件应当用 `createRequire(join(context.dshDir,'package.json'))` 解析宿主那份。
+
 ## [0.5.0] — 2026-11-05
 
 ### 新增

@@ -695,6 +695,11 @@ export function apply(ctx, config = {}) {
               const { results } = await runSmokes({
                 plugins,
                 bundles,
+                // 宿主事实：插件的断言要对着**宿主实际加载的那份** dsh 验，而不是插件自己 node_modules 里的旧副本。
+                context: {
+                  dshVersion: installation === undefined ? undefined : await readInstalledVersion(installation.manifestPath),
+                  dshDir: installation === undefined ? undefined : installation.dshDir,
+                },
                 resolvable: (pkg) => existsSync(join(profileDir, 'node_modules', pkg)),
                 importModule: (plugin, modulePath) => import(pathToFileURL(join(plugin.dir, modulePath)).href),
               })
