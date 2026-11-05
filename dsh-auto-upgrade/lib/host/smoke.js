@@ -77,6 +77,7 @@ export function normalizeSmoke(result) {
  * @param {string[]} options.bundles profile 的 bundles。
  * @param {(pkg: string) => boolean} options.resolvable 客户端包解析器。
  * @param {(plugin: object, modulePath: string) => Promise<unknown>} options.importModule 动态导入（测试可注入）。
+ * @param {object} [options.context] 宿主事实（版本 / 安装目录等），原样交给插件的 `run()`。
  * @param {number} [options.timeoutMs] 覆盖默认超时。
  * @returns {Promise<object>} `{name, ok, partial, checks, detail?}`。
  */
@@ -104,7 +105,7 @@ export async function runSmoke(options) {
     const module = await options.importModule(plugin, plugin.smoke.module)
     if (typeof module?.run !== 'function') throw new Error('dsh.smoke 模块没有导出 run()')
     const raced = await Promise.race([
-      module.run({ name: plugin.name }),
+      module.run({ name: plugin.name, ...options.context }),
       new Promise((_resolve, reject) => setTimeout(() => reject(new Error(`冒烟超时（${String(timeoutMs)}ms）`)), timeoutMs).unref?.()),
     ])
     self = normalizeSmoke(raced)

@@ -224,7 +224,9 @@ pnpm run check                                # node --check
 
 `GET /smoke` 读结论，`POST` 后台开跑。宿主兜底三项（bundle 启用 / 插件目录 / `dsh.client.inject`
 可解析）+ 插件自报断言（`dsh.smoke = { module, timeoutMs }`，模块导出 `run()`）。没写 `dsh.smoke`
-的插件只跑兜底三项并标 `partial`——不假装验过行为。
+的插件只跑兜底三项并标 `partial`——不假装验过行为。`run(context)` 会收到宿主的
+`dshVersion` / `dshDir`：断言要验**宿主实际加载的那份**，别 import 到插件自己 node_modules 的旧副本。
+目前声明了 `dsh.smoke` 的有 `dsh-im-bridge-workspaces` 与 `dsh-subagents`。
 
 ## 重启/升级期间的进度页（#300）
 
