@@ -18,6 +18,10 @@
     2. **必须真能认证**：对候选 URL 发一次 `fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(3000) })`，
        状态 ∈ {200, 302, 303} 才接受，否则 `exit 1`（401 或连不上一律不写）。
     helper 日志只报 baseline 存在性（`baseline: log already has a token URL`），**绝不回显 URL**（内含 token）。
+  - **重试耗尽不再静默**：刷新循环上限 30 → 60 次（每次含 node 启动与最长 3s 认证超时），
+    成功才记 `url.txt refreshed`；60 次都没等到「新且可认证」的 URL 时写
+    `WARNING: url.txt was NOT refreshed (no new token URL authenticated within 60 retries); … grep 'dsh web: http' $OUT | tail -1`
+    ——静默 `done` 与本次事故是同一类失败，不许再有（控制面 review 补强）。
   - **R2 watchdog 的假承诺**：`lib/client.js` 的 `startWatchdog` 连续失败约 30s（15 次 × 2s）后从
     `reconnecting` 切到 `token-rotated`：文案不再说「页面会自动重新连接」，改成可执行指引——打开
     `.dsh-web/url.txt`，或 `grep 'dsh web: http' .dsh-web/web.out.log | tail -1`。相位 → 文案收敛到
@@ -29,9 +33,10 @@
 - 新增 `test/refresh-url.test.mjs`（7 条：baseline 未变 / 候选 401 / 新 URL 且 303 / 连不上 /
   `--print-latest` 有与无 / bad usage）与 `test/client-watchdog.test.mjs`（2 条：相位推进到
   `token-rotated`、终态文案含指引且不含自动重连承诺）；`test/helper.test.mjs` +2（生成脚本的
-  baseline 接线、**端到端**：relaunch 前抓 baseline → 假宿主打印新 URL → 认证 303 后才写 `url.txt`）。
-  用例总数 87 → 98。把「与 baseline 相同也照写」的判据删掉、或把认证判据改成恒 `true`，
-  对应用例立刻红（非空转反证）。
+  baseline 接线、**端到端**：relaunch 前抓 baseline → 假宿主打印新 URL → 认证 303 后才写 `url.txt`）
+  与耗尽用例（60 次拿不到可认证新 URL → 日志必有 WARNING、`url.txt` 原封不动，删掉 WARNING 行即红）。
+  用例总数 87 → 99。把「与 baseline 相同也照写」的判据删掉、或把认证判据改成恒 `true`、
+  或删掉耗尽 WARNING，对应用例立刻红（非空转反证）。
 
 ## [0.2.5] — 2026-10-31
 

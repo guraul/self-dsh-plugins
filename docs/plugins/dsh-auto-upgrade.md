@@ -209,6 +209,8 @@ pnpm run check                                # node --check
   `relaunch` **之前**用 `refresh-url.mjs --print-latest` 抓 baseline，刷新时 `--previous` 传回，
   与 baseline 相同就 `exit 1` 继续重试；② 候选 URL 必须真能认证——`fetch(url, { redirect: 'manual',
   signal: AbortSignal.timeout(3000) })` 状态 ∈ {200, 302, 303} 才写，401 / 连不上一律 `exit 1`。
+  重试上限 60 次；耗尽时 helper 日志写 `WARNING: url.txt was NOT refreshed …`（含 grep 最新 URL 的
+  指引），**绝不静默当成功**（`say "url.txt refreshed"` 只在真刷新成功后出现）。
 - 抓取逻辑在 `lib/host/token-url.js`（纯函数）+ `lib/host/refresh-url.mjs`（CLI），
   单测见 `test/token-url.test.mjs` 与 `test/refresh-url.test.mjs`（含端到端 helper 用例）。
   **别在 shell 里重新实现一份**。

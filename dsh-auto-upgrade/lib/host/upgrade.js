@@ -19,6 +19,8 @@ export const PAYLOAD_FILE = 'helper-payload.json'
 export const RESULT_FILE = 'result.json'
 /** helper 与重启日志文件名。 */
 export const LOG_FILE = 'restart.log'
+/** 刷新 `url.txt` 的最大重试次数（每次 ≥1s，外加 node 启动与最长 3s 的认证超时）。 */
+export const REFRESH_ATTEMPTS = 60
 
 /**
  * 安装命令参数（带安装脚本白名单）。
@@ -220,13 +222,21 @@ export function buildUpgradeScript(payload) {
     'relaunch',
     '',
     '# Give the relaunched host a moment to print its URL, then refresh url.txt.',
+    '# Exhaustion must NOT look like success (issue #293): a silent `done` after a',
+    '# failed refresh is the same class of failure this fix exists to remove.',
     'if [ -n "$REFRESH_SCRIPT" ]; then',
+    '  REFRESHED=0',
     '  i=0',
-    '  while [ "$i" -lt 30 ]; do',
-    '    if refresh_url; then say "url.txt refreshed"; break; fi',
+    `  while [ "$i" -lt ${REFRESH_ATTEMPTS} ]; do`,
+    '    if refresh_url; then REFRESHED=1; break; fi',
     '    sleep 1',
     '    i=$((i+1))',
     '  done',
+    '  if [ "$REFRESHED" -eq 1 ]; then',
+    '    say "url.txt refreshed"',
+    '  else',
+    `    say "WARNING: url.txt was NOT refreshed (no new token URL authenticated within ${REFRESH_ATTEMPTS} retries); open the newest line of the log instead: grep 'dsh web: http' $OUT | tail -1"`,
+    '  fi',
     'fi',
     'say "done"',
     'exit 0',

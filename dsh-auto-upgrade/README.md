@@ -138,3 +138,5 @@ node --test test/official-compat.test.mjs        # 需要本机装有 @deepseek-
 写入前有两道判据（issue #293）：**比重启前抓的 baseline 新**（`--print-latest` → `--previous`）
 **且真能认证**（`fetch` 状态 ∈ {200, 302, 303}），否则 `exit 1` 让 helper 继续重试——
 旧 token 与「新实例还没打印」的现场都不会再被写进 `url.txt`。
+60 次重试耗尽会在 helper 日志里留下 `WARNING: url.txt was NOT refreshed …`（含 grep 最新 URL 的
+指引），不会静默收尾。

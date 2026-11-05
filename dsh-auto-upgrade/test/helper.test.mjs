@@ -293,12 +293,14 @@ test('端到端：relaunch 前抓 baseline → 新 URL 认证 303 后才写 url.
  * @param {object} payload payload。
  * @param {string} dir 工作目录。
  * @param {number} [timeoutMs] 超时兜底（超时杀掉 helper 并返回 'timeout' 让用例红）。
+ * @param {string} [pathEnv] 覆盖 PATH（测试用假 sleep 压缩重试节奏）。
  * @returns {Promise<number|string>} 退出码或 'timeout'。
  */
-function runHelperAsync(payload, dir, timeoutMs) {
+function runHelperAsync(payload, dir, timeoutMs, pathEnv) {
   const script = join(dir, 'upgrade.sh')
   writeFileSync(script, buildUpgradeScript(payload))
-  const child = spawn('/bin/sh', [script], { stdio: 'ignore' })
+  const env = pathEnv === undefined ? process.env : { ...process.env, PATH: pathEnv }
+  const child = spawn('/bin/sh', [script], { stdio: 'ignore', env })
   const exit = new Promise((resolve) => child.on('close', (status) => resolve(status)))
   let timer
   const timeout = new Promise((resolve) => {
@@ -309,3 +311,62 @@ function runHelperAsync(payload, dir, timeoutMs) {
   })
   return Promise.race([exit, timeout]).finally(() => clearTimeout(timer))
 }
+
+test('刷新循环耗尽必须留 WARNING 且 url.txt 原封不动——静默“成功”即红（#293）', async () => {
+  // ① 生成脚本层面：耗尽路径必须显形（标记 + 上限 + 成功/失败两分支 + grep 指引）。
+  const script = buildUpgradeScript({
+    mode: 'restart',
+    hostPid: 1,
+    port: 3080,
+    npm: '/usr/bin/npm',
+    dshBin: '/usr/bin/dsh',
+    execPath: '/usr/bin/node',
+    args: ['--profile', 'web'],
+    cwd: '/tmp',
+    stateDir: '/tmp',
+    logPath: '/tmp/restart.log',
+    resultPath: '/tmp/result.json',
+    outLog: '/tmp/out.log',
+    smokeOut: '/tmp/smoke.out',
+    refreshScript: '/opt/dsh/lib/host/refresh-url.mjs',
+  })
+  assert.match(script, /REFRESHED=0/, '必须有刷新成功标记')
+  assert.match(script, /while \[ "\$i" -lt 60 \]/, '重试上限 60 次')
+  assert.match(script, /if \[ "\$REFRESHED" -eq 1 \]; then/, '耗尽与成功必须分两支')
+  assert.match(script, /say "url\.txt refreshed"/, '成功仍记 refreshed')
+  assert.match(script, /WARNING: url\.txt was NOT refreshed \(no new token URL authenticated within 60 retries\)/, '耗尽必须写 WARNING')
+  assert.match(script, /grep 'dsh web: http' \$OUT \| tail -1/, 'WARNING 必须给 grep 最新 URL 的出路')
+
+  // ② 端到端：日志里只有重启前的 URL、新实例一直不打印 → 60 次全部失败。
+  const fixture = await makeFixture()
+  const { payload, dir, out } = fixture
+  const urlFile = join(dir, 'url.txt')
+  const stale = 'http://127.0.0.1:3080/?token=STALE_EVEN_OLDER_2\n'
+  await writeFile(out, 'dsh web: http://127.0.0.1:3080/?token=PRE_RESTART_BASELINE_1\n')
+  await writeFile(urlFile, stale)
+
+  // 新实例（noop 宿主）永远不再打印 URL：复刻「拿不到可认证新 URL」的冷启动现场。
+  const noopHost = join(dir, 'noop-host.mjs')
+  await writeFile(noopHost, 'setTimeout(() => {}, 1000)\n')
+  payload.execPath = process.execPath
+  payload.args = [noopHost, '--profile', 'web', '--no-open']
+  payload.refreshScript = fileURLToPath(new URL('../lib/host/refresh-url.mjs', import.meta.url))
+
+  // 假 sleep（PATH 前置）：60 次重试的真实节奏是 1 分钟起步，测试里压到几秒。
+  const bin = join(dir, 'bin')
+  await mkdir(bin, { recursive: true })
+  const fakeSleep = join(bin, 'sleep')
+  await writeFile(fakeSleep, '#!/bin/sh\nexit 0\n')
+  await chmod(fakeSleep, 0o755)
+
+  const status = await runHelperAsync(payload, dir, 60000, `${bin}:${process.env.PATH}`)
+
+  assert.equal(status, 0, `helper exit=${status}`)
+  const log = await readFile(payload.logPath, 'utf8')
+  assert.match(log, /WARNING: url\.txt was NOT refreshed \(no new token URL authenticated within 60 retries\)/, '耗尽必须在日志里留 WARNING')
+  assert.match(log, /grep 'dsh web: http'/, 'WARNING 必须带 grep 指引（$OUT 已展开成真实路径）')
+  assert.match(log, /\| tail -1/)
+  assert.doesNotMatch(log, /url\.txt refreshed/, '耗尽时不许说 refreshed')
+  assert.equal(await readFile(urlFile, 'utf8'), stale, 'url.txt 必须原封不动')
+  assert.match(log, /done/)
+})
