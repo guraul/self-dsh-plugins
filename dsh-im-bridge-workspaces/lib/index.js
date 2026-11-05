@@ -8947,6 +8947,7 @@ function emptyChatState() {
 		officeSkillsRegistered: false,
 		officeToolRegistered: false,
 		approvalRelayInstalled: false,
+		approvalDuringTurn: false,
 		queue: Promise.resolve(),
 		lastActivity: "",
 		activityClearAt: 0,
@@ -9982,6 +9983,7 @@ function apply(ctx, config) {
 			st.lastToolByCallId.clear();
 			st.modelStreamPhase = "idle";
 			st.streamStatusTick = 0;
+			st.approvalDuringTurn = false;
 			try {
 				await ws.replyStream(frame, streamId, cfg().startHint, false);
 				stopThinking = startThinking(ws, frame, streamId, startedAt, cfg().agentTimeoutSec, () => {
@@ -10027,7 +10029,10 @@ function apply(ctx, config) {
 				let reply = truncate(body, (cfg().maxReplyBytes || 2e4) - 200) + footerOf(ms);
 				if (collected.skipped.length > 0) reply = truncate(`${reply}\n⚠️ ${collected.skipped.length} 张图片未发送（过大、越权或不存在）`, cfg().maxReplyBytes || 2e4);
 				console.log(`[im-bridge] ${ref.key} 完成 (${Buffer.byteLength(reply, "utf8")}B, ${fmtDuration(ms)})`);
-				await sendFinal(ws, frame, streamId, reply);
+				if (st.approvalDuringTurn) {
+					await sendFinal(ws, frame, streamId, "🔐 审批已完成（结果见上方卡片），继续处理…");
+					await sendFinal(ws, frame, generateReqId("stream"), reply);
+				} else await sendFinal(ws, frame, streamId, reply);
 				if (collected.images.length > 0) await sendCollectedPngs(ws, resolveChatId(frame, ref.sender), collected.images);
 			} catch (error) {
 				if (stopThinking) stopThinking();
@@ -10035,7 +10040,11 @@ function apply(ctx, config) {
 				const message = error instanceof Error ? error.message : String(error);
 				console.error(`[im-bridge] agent 失败: ${message}`);
 				try {
-					await sendFinal(ws, frame, streamId, `处理失败: ${truncate(message, 400)}\n\n---\n❌ 耗时 ${fmtDuration(ms)}`);
+					const failure = `处理失败: ${truncate(message, 400)}\n\n---\n❌ 耗时 ${fmtDuration(ms)}`;
+					if (st.approvalDuringTurn) {
+						await sendFinal(ws, frame, streamId, "🔐 审批已完成（结果见上方卡片），继续处理…");
+						await sendFinal(ws, frame, generateReqId("stream"), failure);
+					} else await sendFinal(ws, frame, streamId, failure);
 				} catch (retryError) {
 					const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
 					console.error(`[im-bridge] 错误回复也失败: ${retryMessage}`);
@@ -10467,6 +10476,7 @@ function apply(ctx, config) {
 					resolveRelay(decision);
 				}
 			});
+			st.approvalDuringTurn = true;
 			const onAbort = () => {
 				console.warn(`[im-bridge] 审批被中止（工具调用取消）id=${draft.id} tool=${request.toolName}`);
 				approvals.settle(draft.id, "rejected", "unavailable");
