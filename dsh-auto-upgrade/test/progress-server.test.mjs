@@ -134,15 +134,33 @@ test('#300 进度：3080 没人应答时是「停止/等待」，不是一直 wa
   }
 })
 
-test('#300 进度：3080 起来了但 url.txt 还没换新令牌 → 「校验新地址」', async () => {
+test('#300 进度：3080 活着、新地址还没出来 → 「校验新地址」', async () => {
   const host = await fakeHost()
   const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
   const urlFile = join(stateDir, 'url.txt')
+  // 地址指向一个没人听的端口：等价于「新令牌还没写出来」，此时端口活着就是在校验。
+  await writeFile(urlFile, 'http://127.0.0.1:1/?token=NOT_READY_YET_01\n')
+  const progress = await startProgress(stateDir, urlFile, host.origin)
+  try {
+    const state = await (await fetch(`${progress.base}/state`)).json()
+    assert.equal(state.phase, 'verifying', '端口活着但地址还不能认证，就是在校验')
+  } finally {
+    progress.kill()
+    await host.close()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('#300 进度：端口活着但旧令牌还能认证 → 报「旧进程正在退出」，不倒退成「校验新地址」', async () => {
+  const host = await fakeHost()
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  const urlFile = join(stateDir, 'url.txt')
+  // 点击那一刻的 url.txt：旧令牌仍然有效（这是最容易误判成「已就绪」的现场）。
   await writeFile(urlFile, `${host.origin}/?token=OLD_TOKEN_STILL_VALID_01\n`)
   const progress = await startProgress(stateDir, urlFile, host.origin)
   try {
     const state = await (await fetch(`${progress.base}/state`)).json()
-    assert.equal(state.phase, 'verifying', '端口活着但地址还没换新，就是在校验')
+    assert.equal(state.phase, 'stopping', '旧进程还没退干净，不该显示「已启动」')
   } finally {
     progress.kill()
     await host.close()

@@ -101,7 +101,7 @@ export function upsertInObject(text, objectKey, entryKey, value) {
  * @param {string} entryKey 键名。
  * @returns {string|undefined} 已有值。
  */
-export function readInObject(text, objectKey, entryKey) {
+function readInObject(text, objectKey, entryKey) {
   const range = findObjectRange(text, objectKey)
   if (range === undefined) return undefined
   const escaped = entryKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

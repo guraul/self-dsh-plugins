@@ -138,16 +138,17 @@ async function snapshot() {
   }
   const alive = await baseAlive()
   if (!alive) {
-    // 3080 没人应答：要么在装包，要么在停/起之间。
+    // 3080 没人应答：在装包 → installing；已经 kickstart 过但还没起来 → starting；
+    // 其余（刚开始等旧进程退出）→ stopping。三条都可达，`starting` 不再是死代码。
     if (/helper start/.test(tail) && !/install finished/.test(tail)) {
       return { phase: 'installing', detail: '正在安装新版本…', elapsedMs }
     }
+    if (/kickstart ok|relaunching/.test(tail)) return { phase: 'starting', detail: '正在拉起新进程…', elapsedMs }
     return { phase: 'stopping', detail: '旧进程已停止，正在等待新进程…', elapsedMs }
   }
-  if (/kickstart ok|relaunching/.test(tail) || alive) {
-    // 端口起来了，但 url.txt 还没变成「新的且能认证」——正在校验新地址。
-    return { phase: 'verifying', detail: '新进程已启动，正在校验新地址…', elapsedMs }
-  }
+  // 端口活着但**旧令牌还能认证**：这是宿主还没退干净的窗口，别报「校验新地址」（会倒退一步）。
+  if (live) return { phase: 'stopping', detail: '旧进程正在退出…', elapsedMs }
+  return { phase: 'verifying', detail: '新进程已启动，正在校验新地址…', elapsedMs }
   if (/install finished/.test(tail) === false && /helper start/.test(tail)) {
     return { phase: 'installing', detail: '正在安装新版本…', elapsedMs }
   }

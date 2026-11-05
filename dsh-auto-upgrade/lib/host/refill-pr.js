@@ -103,8 +103,12 @@ export async function openRefillPullRequest(options) {
     const committed = await options.git(['commit', '-m', `chore(compat): 回填 ${options.version} 的实测结论`], path)
     if (!committed.ok) {
       // 记录已经是最新的：不是错误，干净地当成「无需回填」。
-      const detail = String(committed.error ?? '')
-      if (/nothing to commit|no changes added/i.test(detail)) return { ok: true, skipped: true, detail: '记录已是最新，无需回填' }
+      // git 把「nothing to commit」打在 **stdout**，只认 error/stderr 会漏（会误报 500）。
+      const detail = `${String(committed.stdout ?? '')}\n${String(committed.error ?? '')}`
+      if (/nothing to commit|no changes added|nothing added to commit/i.test(detail)) {
+        return { ok: true, skipped: true, detail: '记录已是最新，无需回填' }
+      }
+      return { ok: false, detail: `git commit 失败：${detail.trim()}` }
       return { ok: false, detail: `git commit 失败：${detail}` }
     }
     const pushed = await options.git(['push', 'origin', `${branch}:${branch}`], path)
