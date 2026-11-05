@@ -1,27 +1,18 @@
 /**
  * 升级前「试装」探针（issue #300）。
  *
- * 现有的升级前检查只读每个插件的 `peerDependencies` / `engines.dsh` 声明——
- * 它能发现「声明不覆盖目标版本」，发现不了「声明覆盖但实际装不上」
- * （bundle 文件缺失、依赖解析到未发布的包、`cordis.patch.yml` 写坏）。
- *
- * 探针的做法是：在一次性 `DSH_HOME` 里用**目标版本**的 dsh 把插件真装一遍，
- * 再看 `--dump-config` 里有没有它。判据只有两条，彼此独立：
- *
- *   1. `dsh plugin add <路径>` 退出码 0；
- *   2. `dsh --dump-config` 的输出里出现插件名。
- *
- * 结论只作为**警告**展示，不进阻断判定（装配失败率极低，误伤代价高）。
+ * 现有升级前检查只读 `peerDependencies` / `engines.dsh` 声明——能发现「声明不覆盖目标版本」，
+ * 发现不了「声明覆盖但实际装不上」（bundle 缺失、依赖解析到未发布的包、`cordis.patch.yml` 写坏）。
+ * 探针在一次性 `DSH_HOME` 里用当前 dsh 把插件真装一遍，判据两条且彼此独立：
+ * ① `plugin add` 退出码 0；② `--dump-config` 的输出里出现插件名。
+ * 结论只作警告，不进阻断判定（装配失败率极低，误伤代价高）。
  */
 
 /** 结论缓存有效期：一天。同一 (目标版本, 插件, 插件目录 mtime) 不重复试装。 */
 export const PROBE_TTL_MS = 24 * 60 * 60 * 1000
 
 /**
- * 从 profile 的 `dependencies` 里挑出「本机路径型」插件。
- *
- * 只有 `link:` / `file:` 这类能用路径装回一次性 profile；npm 装的包属于
- * 「外面没变、装不装得上是同一个问题」，不在这里重复验。
+ * 从 profile 的 `dependencies` 里挑出「本机路径型」插件（只有 `link:` / `file:` 能用路径装回去）。
  * @param {Record<string, unknown>} dependencies profile 的 `dependencies`。
  * @returns {{name: string, path: string}[]} 可试装的插件（含绝对路径）。
  */
@@ -90,10 +81,8 @@ export function cacheHit(entry, now, ttlMs = PROBE_TTL_MS) {
 }
 
 /**
- * 跑一批探针：命中缓存就直接用，否则真装一遍。
- *
- * `run` 由调用方注入（生产是 `toolchain.run`），既方便单测，也让这里不必
- * 关心 spawn 细节与超时。
+ * 跑一批探针：命中缓存就直接用，否则真装一遍。`run` 由调用方注入（生产是
+ * `toolchain.run`），单测因此不必 spawn。
  * @param {object} options 输入。
  * @param {{name: string, path: string, mtimeMs?: number}[]} options.targets 待试装插件。
  * @param {string} options.targetVersion 目标 dsh 版本（只用于缓存键与展示）。
