@@ -1,15 +1,9 @@
 /**
- * 实测结论回填（issue #300 的 P4）。
+ * 实测结论回填（issue #300 的 P4）：把「冒烟结论 → 补丁」做成纯函数，不碰磁盘。
  *
- * 冒烟/试装跑完，结论只躺在 `~/.dsh-auto-upgrade/smoke.json` 里没人看；矩阵要靠人手填，
- * 仓库里挂了几天的欠账就是这么来的。这里把「结论 → 补丁」做成纯函数：
- *
- *   - `buildRefillPlan()`：决定哪些插件该记什么结论、什么深度；
- *   - `patchCompatibility()`：在**不重排整个文件**的前提下把记录插进 `package.json`
- *     （保留 CRLF —— im-bridge 的 package.json 是 CRLF，整份重排会炸出几百行假 diff）；
- *   - `appendCompatRow()`：往 `docs/COMPATIBILITY.md` 的矩阵表里插一行。
- *
- * 三个函数都不碰磁盘，方便单测；真正开 PR 的编排在别处。
+ * - `buildRefillPlan()`：哪些插件该记什么结论、什么深度；
+ * - `patchCompatibility()`：不重排整个文件，只插/换那一行（**保留 CRLF**——整份重排会炸出几百行假 diff）；
+ * - `appendCompatRow()`：往 `docs/COMPATIBILITY.md` 矩阵表尾插一行。
  */
 
 /** 允许写进矩阵的深度，由浅到深（回填只看这四个值，别的一律当非法）。 */
@@ -106,7 +100,7 @@ export function upsertInObject(text, objectKey, entryKey, value) {
  * @param {string} text 文本。
  * @param {string} objectKey 对象名。
  * @param {string} entryKey 键名。
- * @returns {string|undefined} 已有值；没有则 undefined。
+ * @returns {string|undefined} 已有值。
  */
 export function readInObject(text, objectKey, entryKey) {
   const range = findObjectRange(text, objectKey)
@@ -145,7 +139,7 @@ export function patchCompatibility(input) {
 
 /**
  * 组装 `docs/COMPATIBILITY.md` 矩阵表的一行。
- * @param {object} input 输入。
+ * @param {object} input 输入：`name` / `packageVersion` / `version` / `depth` / `date` / `how`。
  * @param {string} input.name 包名。
  * @param {string} input.packageVersion 插件版本。
  * @param {string} input.version 验过的 dsh 版本。
