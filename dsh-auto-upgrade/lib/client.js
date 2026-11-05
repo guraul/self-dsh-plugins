@@ -563,6 +563,11 @@ window.__ModuleLoader__.load({
           io.setBlocked(null)
           if (typeof io.setLastResult === 'function') io.setLastResult(null)
           io.setHandoff({ step: 'preflight', log: [] })
+          // 宿主已拉起独立的进度服务：直接跳过去，由它在完成时把我们送到新地址。
+          if (typeof result.progressUrl === 'string' && result.progressUrl !== '') {
+            window.location.href = result.progressUrl
+            return
+          }
           if (typeof result.taskId === 'string') followTask(result.taskId)
           startWatchdog(io.watchRef, io.getTarget() ?? null, (state) => io.setHandoff((previous) => ({ ...(previous ?? { log: [] }), step: state })))
           return
@@ -1336,6 +1341,10 @@ window.__ModuleLoader__.load({
         setBusy(false)
         if (result.ok !== true) {
           setNotice(result.error ?? 'handoff failed')
+          return
+        }
+        if (typeof result.progressUrl === 'string' && result.progressUrl !== '') {
+          window.location.href = result.progressUrl
           return
         }
         setNotice(t('overlay.reconnecting'))

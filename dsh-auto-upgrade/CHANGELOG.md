@@ -3,6 +3,18 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.5.0] — 2026-11-05
+
+### 新增
+
+- **重启/升级期间的可视进度页（#300 的重启 UI）**：宿主在交接前 detached 拉起
+  `lib/host/progress-server.mjs`，前端拿到 `progressUrl` 就跳过去：进度条按
+  `waiting → stopping → installing → starting → done` 推进，完成后**自动跳到新令牌地址**。
+  - 为什么必须另起进程：宿主退出后 3080 无人应答；重启完又换了新令牌，旧页面问不了新宿主。
+  - **done 排除点击时 `url.txt` 里的旧令牌**（与 #293 同源）；`result.json` 只认本轮（按 mtime）。
+  - 只监听 `127.0.0.1`、不开 CORS、只读本机；完成 15 秒 / 最多 20 分钟后自退。
+  - 起不来 → 退回 watchdog；失败态如实显示步骤并给回到界面的出路。
+
 ## [0.4.0] — 2026-11-05
 
 ### 新增

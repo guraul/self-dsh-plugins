@@ -226,6 +226,12 @@ pnpm run check                                # node --check
 可解析）+ 插件自报断言（`dsh.smoke = { module, timeoutMs }`，模块导出 `run()`）。没写 `dsh.smoke`
 的插件只跑兜底三项并标 `partial`——不假装验过行为。
 
+## 重启/升级期间的进度页（#300）
+
+交接前宿主 detached 拉起 `lib/host/progress-server.mjs`（随机端口，写 `progress-port.json`），
+前端跳过去、完成后自动跳新令牌地址。只监听 `127.0.0.1`、只读本机、完成 15s / 最多 20 分钟后自退；
+起不来退回 watchdog。**它在 done 阶段返回带令牌的地址（仅本机回环），别把这个端口转发到外网。**
+
 ## 另需注意的两条设计约束
 
 - **本包故意不声明 `@deepseek-ai/dsh*` peerDependencies**（只声明 `react`）：否则升级之后，平台闸门会把
