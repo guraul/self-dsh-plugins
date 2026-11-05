@@ -108,6 +108,7 @@ window.__ModuleLoader__.load({
       'settings.pluginBad': '不兼容',
       'settings.pluginExempt': '已豁免',
       'settings.pluginUnknown': '信息不足',
+      'settings.pluginUnverified': '未验证',
       'settings.detail': '不兼容详情',
       'settings.noPlugins': '没有第三方插件',
       'settings.restartLog': '重启/升级日志',
@@ -189,6 +190,7 @@ window.__ModuleLoader__.load({
       'settings.pluginBad': 'incompatible',
       'settings.pluginExempt': 'exempted',
       'settings.pluginUnknown': 'unknown',
+      'settings.pluginUnverified': 'unverified',
       'settings.detail': 'Incompatibility details',
       'settings.noPlugins': 'No third-party plugins',
       'settings.restartLog': 'Restart / upgrade log',
@@ -469,6 +471,18 @@ window.__ModuleLoader__.load({
     function behaviourUnverified(plugin) {
       if (plugin?.declared?.verdict !== 'compatible') return false
       return plugin.depth !== 'L2' && plugin.depth !== 'L3' && plugin.depth !== 'L4'
+    }
+
+    /**
+     * 门禁放行时该显示哪种状态：没写自述 → 「未验证」；只到 L1 → 「可装配」；L2+ → 「兼容」。
+     *
+     * 否则会出现「从没验过的插件显示兼容」——这正是 #300 要堵的口径漏洞。
+     * @param {any} plugin 插件判定项。
+     * @returns {'ok'|'assembled'|'unverified'} 状态。
+     */
+    function passState(plugin) {
+      if (plugin?.declared?.verdict !== 'compatible') return 'unverified'
+      return behaviourUnverified(plugin) ? 'assembled' : 'ok'
     }
 
     /**
@@ -1408,12 +1422,16 @@ window.__ModuleLoader__.load({
           key: 's',
           className: plugin.compatible === false
             ? (plugin.exempted === true ? 'dsh-au-warn' : 'dsh-au-bad')
-            : (plugin.known === false ? 'dsh-au-muted' : (behaviourUnverified(plugin) ? 'dsh-au-warn' : 'dsh-au-ok')),
+            : (plugin.known === false
+              ? 'dsh-au-muted'
+              : (passState(plugin) === 'ok' ? 'dsh-au-ok' : (passState(plugin) === 'assembled' ? 'dsh-au-warn' : 'dsh-au-muted'))),
         }, plugin.compatible === false
           ? (plugin.exempted === true ? t('settings.pluginExempt') : t('settings.pluginBad'))
           : (plugin.known === false
             ? t('settings.pluginUnknown')
-            : (behaviourUnverified(plugin) ? t('settings.pluginAssembled') : t('settings.pluginOk')))),
+            : (passState(plugin) === 'ok'
+              ? t('settings.pluginOk')
+              : (passState(plugin) === 'assembled' ? t('settings.pluginAssembled') : t('settings.pluginUnverified'))))),
         plugin.detail === undefined ? undefined : h('details', { key: 'd', className: 'dsh-au-details' }, [
           h('summary', { key: 's' }, t('settings.detail')),
           h('div', { key: 'b', className: 'dsh-au-detail-body' }, plugin.detail),
@@ -1608,6 +1626,7 @@ window.__ModuleLoader__.load({
     exports.startWatchdog = startWatchdog
     exports.phaseText = phaseText
     exports.behaviourUnverified = behaviourUnverified
+    exports.passState = passState
     return module.exports
   },
 })

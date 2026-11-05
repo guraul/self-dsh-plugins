@@ -162,6 +162,7 @@ export async function evaluatePlugins(options) {
       peers: issue.requirements ?? issue.peers ?? {},
       runtimeVersion: issue.runtimeVersion,
       declared,
+      depth: declaredDepth(manifest, targetVersion),
       detail,
     })
   }

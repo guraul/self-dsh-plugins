@@ -134,3 +134,12 @@ test('#300 深度口径：自述兼容但深度只到 L1（或没记）→ 显�
     assert.equal(exported.behaviourUnverified(plugin), expected, JSON.stringify(plugin))
   }
 })
+
+test('#300 深度口径：门禁放行的插件按「未验证 / 可装配 / 兼容」三态显示，不许把没验过的叫兼容', async () => {
+  const exported = await loadClient()
+  assert.equal(exported.passState({ declared: { verdict: 'compatible' }, depth: 'L2' }), 'ok')
+  assert.equal(exported.passState({ declared: { verdict: 'compatible' }, depth: 'L1' }), 'assembled')
+  assert.equal(exported.passState({ declared: { verdict: 'compatible' } }), 'assembled', '没记深度同样只能算可装配')
+  assert.equal(exported.passState({ declared: { verdict: 'unverified' } }), 'unverified', '从没验过就该显示未验证')
+  assert.equal(exported.passState({}), 'unverified')
+})
