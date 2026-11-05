@@ -716,6 +716,50 @@ function unwrapConfig(value: unknown): Config {
 }
 
 /**
+ * 插件 fiber 是否已失活：`uid` 被清空（DISPOSED）或正在卸载（UNLOADING）。
+ *
+ * `apply` 的启动续段是一个游离的 async 块，不受 cordis 生命周期约束：启动失败
+ * （端口被占等）或热重载把 fiber 失活后，它仍会继续往下跑，此时 `ctx.on` /
+ * `ctx.effect` 会抛 `CordisError('INACTIVE_EFFECT')`——在游离续段里它变成
+ * unhandled rejection → dsh `fatal load failure`，一个插件没起来把整个进程带崩
+ * （issue #294）。
+ * @param ctx - 插件上下文。
+ * @returns 已失活返回 true。
+ */
+export function isFiberInactive(ctx: Context): boolean {
+  const fiber: { uid?: number | null, state?: number } | undefined = ctx.fiber
+  if (fiber === undefined) return false
+  if (fiber.uid === null) return true
+  // 5 = `FiberState.UNLOADING`：uid 还在，但 cordis 已经拒绝新的 effect 注册。
+  return fiber.state === 5
+}
+
+/**
+ * 在插件上下文上执行一次 effect 注册（`ctx.on` / `ctx.effect`），fiber 已失活时
+ * 跳过而不是抛出。
+ *
+ * 只吞 `INACTIVE_EFFECT`：注册动作自身的其它错误必须原样上抛，不能被这里遮住。
+ * @param ctx - 插件上下文。
+ * @param label - 被跳过时写进日志的注册标签。
+ * @param run - 实际的注册动作。
+ * @returns 注册动作的返回值；因失活被跳过时为 undefined。
+ * @throws 注册动作抛出的、非 `INACTIVE_EFFECT` 的错误。
+ */
+export function guardInactiveEffect<T>(ctx: Context, label: string, run: () => T): T | undefined {
+  if (isFiberInactive(ctx)) {
+    console.warn(`[im-bridge] 插件上下文已失活，跳过注册: ${label}`)
+    return undefined
+  }
+  try {
+    return run()
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code !== 'INACTIVE_EFFECT') throw error
+    console.warn(`[im-bridge] 插件上下文已失活，跳过注册: ${label}`)
+    return undefined
+  }
+}
+
+/**
  * Mount the WeCom bridge: settings namespace, then a deferred WebSocket after Loader settle.
  * @param ctx - host plugin context.
  * @param config - composition entry used as the settings `base` layer.
@@ -741,6 +785,18 @@ export function apply(ctx: Context, config: Config): void {
     }, 'im-bridge: settings reader')
   })
   const cfg = (): Config => unwrapConfig(config)
+
+  /**
+   * 启动续段在一个 `await` 之后发现插件 fiber 已失活：记一条 warn 并中止整个
+   * 续段。只跳过注册不够——后面还会建企微 WebSocket，失活的插件不该再起连接。
+   * @param where - 检查点位置，写进日志。
+   * @returns 已失活返回 true，调用方应立即 `return`。
+   */
+  function abortIfInactive(where: string): boolean {
+    if (!isFiberInactive(ctx)) return false
+    console.warn(`[im-bridge] 插件上下文已失活，中止启动（${where}）`)
+    return true
+  }
 
   const chats = new Map<string, ChatState>()
 
@@ -1101,6 +1157,7 @@ export function apply(ctx: Context, config: Config): void {
       timer.unref()
     })
     await Promise.race([workspaceInit, workspaceInitTimeout])
+    if (abortIfInactive('工作区初始化后')) return
     const { botId, secret } = cfg()
     if (!botId || !secret) {
       console.warn(
@@ -1469,6 +1526,7 @@ export function apply(ctx: Context, config: Config): void {
       }
     }
 
+    if (abortIfInactive('session/event 注册前')) return
     ctx.on('session/event', (session: TitledSession, event: LoggedEvent) => {
       const thinking = cfg().thinking
       const prefix = thinking?.activityPrefix ?? DEFAULT_THINKING.activityPrefix
@@ -1523,6 +1581,7 @@ export function apply(ctx: Context, config: Config): void {
       default: { WSClient: new (options: { botId: string; secret: string }) => WecomClient }
       generateReqId: (kind: string) => string
     }
+    if (abortIfInactive('WebSocket 创建前')) return
 
     /**
      * Gate image input on the configured model's declared input modalities.
@@ -2314,6 +2373,10 @@ export function apply(ctx: Context, config: Config): void {
      */
     function installRootApprovalRelay(): void {
       if (rootApprovalRelayInstalled) return
+      if (isFiberInactive(ctx)) {
+        console.warn('[im-bridge] 插件上下文已失活，跳过 root 审批应答方注册')
+        return
+      }
       rootApprovalRelayInstalled = true
       const events = ctx as unknown as {
         on(
@@ -2463,8 +2526,9 @@ export function apply(ctx: Context, config: Config): void {
 
     ws.connect()
 
-    ctx.effect(() => () => {
-      try { ws.close?.() } catch { /* already closed */ }
-    }, 'im-bridge: wecom websocket')
+    guardInactiveEffect(ctx, 'im-bridge: wecom websocket', () =>
+      ctx.effect(() => () => {
+        try { ws.close?.() } catch { /* already closed */ }
+      }, 'im-bridge: wecom websocket'))
   })()
 }
