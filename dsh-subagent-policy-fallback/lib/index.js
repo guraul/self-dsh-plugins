@@ -90,7 +90,7 @@ export function apply(ctx, config = {}) {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       if (ctx.logger !== undefined && ctx.logger !== null && typeof ctx.logger.warn === 'function') {
-        ctx.logger.warn(`subagent-policy-fallback: 会话 ${String(agent?.session?.id)} 补策略失败：${reason}`)
+        ctx.logger.warn(`dsh-subagent-policy-fallback: 会话 ${String(agent?.session?.id)} 补策略失败：${reason}`)
       }
     }
   })
@@ -120,7 +120,7 @@ export function apply(ctx, config = {}) {
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     if (ctx.logger !== undefined && ctx.logger !== null && typeof ctx.logger.warn === 'function') {
-      ctx.logger.warn(`subagent-policy-fallback: 回填存活会话失败：${reason}`)
+      ctx.logger.warn(`dsh-subagent-policy-fallback: 回填存活会话失败：${reason}`)
     }
   }
 }

@@ -23,7 +23,7 @@
 | `lib/index.js` | 宿主入口：`name` / `inject = ['sessions']` / `apply` 注册 `agent/created` + 回填存活会话 + `enabled` 开关 + 挂载日志 + 进程内计数（`readStats`） |
 | `lib/policy.js` | 纯逻辑：幂等检查、读设置、追加事件、审计日志、批量回填 |
 | `lib/status.js` | 只读自检：`describeStatus(ctx)` 返回 `{ mounted, serviceAvailable, allowedRoutes, backfilledSessions }`，不做 CLI |
-| `test/policy.test.mjs` | 假 ctx / 假 session 的单测（16 条） |
+| `test/policy.test.mjs` | 假 ctx / 假 session 的单测（17 条） |
 | `scripts/lint.js` | 对 `lib/**`、`test/**` 逐个 `node --check` |
 | `cordis.patch.yml` | 把本插件插进宿主组合 |
 
@@ -63,7 +63,7 @@ describeStatus(ctx)            ──► { mounted, serviceAvailable, allowedRou
 
 ```sh
 cd dsh-subagent-policy-fallback
-pnpm test        # 16 条：注入 / 已有事件 / 子会话 / 服务缺失 / enabled=false / apply 回填 / 幂等 / 三种挂载日志 / describeStatus
+pnpm test        # 17 条：注入 / 已有事件 / 子会话 / 服务缺失 / enabled=false / apply 回填 / 幂等 / 三种挂载日志 / 审计日志抛错仍计数 / describeStatus
 pnpm run lint    # lib/ + test/ 全量 node --check
 ```
 
@@ -76,7 +76,7 @@ pnpm run lint    # lib/ + test/ 全量 node --check
 1. 在设置里打开 subagent 模型选择并配置 ≥2 条路线；
 2. 恢复一个旧会话，确认宿主日志先出现挂载行
    `dsh-subagent-policy-fallback: 已挂载，设置里允许 N 条 subagent 模型路由`，
-   再出现 `subagent-policy-fallback: 为会话 <id> 补齐 N 条 subagent 模型路由`；
+   再出现 `dsh-subagent-policy-fallback: 为会话 <id> 补齐 N 条 subagent 模型路由`；
    **没有挂载行 = 插件没加载**（查 profile 的 `bundles` 与 peer 范围），别先去怀疑会话本身；
 3. 再恢复 / 重载一次，确认没有第二条策略事件；
 4. 在子会话里确认 subagent 仍按父会话策略工作（本插件不会给它单独写事件）。
