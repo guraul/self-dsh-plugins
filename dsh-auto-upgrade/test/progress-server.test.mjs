@@ -22,8 +22,9 @@ async function fakeHost() {
 }
 
 /** 起进度服务并等它写出端口。 */
-async function startProgress(stateDir, urlFile) {
-  const child = spawn(process.execPath, [SERVER, '--state', stateDir, '--url-file', urlFile, '--port', '0'], {
+async function startProgress(stateDir, urlFile, base) {
+  const child = spawn(process.execPath, [SERVER, '--state', stateDir, '--url-file', urlFile, '--port', '0',
+    ...(base === undefined ? [] : ['--base', base])], {
     stdio: 'ignore',
   })
   const portFile = join(stateDir, 'progress-port.json')
@@ -115,6 +116,36 @@ test('#300 进度服务：上一轮的 result.json 不算本轮失败', async ()
     assert.notEqual(state.phase, 'failed', '陈旧 result.json 不该让重试立刻误报失败')
   } finally {
     progress.kill()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('#300 进度：3080 没人应答时是「停止/等待」，不是一直 waiting（否则页面看着像没动）', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  // 指一个必然没人听的端口：等价于「旧进程已经停了」。
+  const progress = await startProgress(stateDir, join(stateDir, 'url.txt'), 'http://127.0.0.1:1')
+  try {
+    const state = await (await fetch(`${progress.base}/state`)).json()
+    assert.equal(state.phase, 'stopping', '端口不通就该报「正在等新进程」，而不是干等')
+    assert.equal(state.url, undefined)
+  } finally {
+    progress.kill()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('#300 进度：3080 起来了但 url.txt 还没换新令牌 → 「校验新地址」', async () => {
+  const host = await fakeHost()
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  const urlFile = join(stateDir, 'url.txt')
+  await writeFile(urlFile, `${host.origin}/?token=OLD_TOKEN_STILL_VALID_01\n`)
+  const progress = await startProgress(stateDir, urlFile, host.origin)
+  try {
+    const state = await (await fetch(`${progress.base}/state`)).json()
+    assert.equal(state.phase, 'verifying', '端口活着但地址还没换新，就是在校验')
+  } finally {
+    progress.kill()
+    await host.close()
     await rm(stateDir, { recursive: true, force: true })
   }
 })
