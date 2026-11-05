@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   failedResults,
   maybeReportSmokeFailures,
+  safeDetail,
   planSmokeIssue,
   smokeIssueBody,
   smokeIssueTitle,
@@ -87,9 +88,11 @@ test('maybeReportSmokeFailures：有失败就开单并把编号带回来', async
   const seen = []
   const result = await maybeReportSmokeFailures({
     version: '0.2.2-rc.1', results: [failing], slug: 'o/r',
-    report: async (input) => { seen.push(input); return { number: 42 } },
+    report: async (input) => { seen.push(input); return { number: 42, created: true } },
   })
-  assert.deepEqual(result, { opened: true, number: 42 })
+  assert.equal(result.opened, true)
+  assert.equal(result.number, 42)
+  assert.equal(result.created, true)
   assert.match(seen[0].title, /冒烟失败/)
   assert.equal(seen[0].slug, 'o/r')
 })
@@ -101,4 +104,21 @@ test('maybeReportSmokeFailures：开单失败被降级成 reason，绝不把冒�
   })
   assert.equal(result.opened, false)
   assert.match(result.reason, /report-failed.*gh 未登录/)
+})
+
+test('safeDetail：抹掉本机家目录并截断，避免把本机信息写进 issue', () => {
+  assert.equal(safeDetail('/Users/gubin/repo/x.mjs 不存在'), '~/repo/x.mjs 不存在')
+  assert.equal(safeDetail('short'), 'short')
+  assert.equal(safeDetail(undefined), '')
+  assert.ok(safeDetail('x'.repeat(500)).length <= 200)
+})
+
+test('maybeReportSmokeFailures：version 缺失时用 unknown，不丢开单', async () => {
+  const seen = []
+  const result = await maybeReportSmokeFailures({
+    version: undefined, results: [failing], slug: 'o/r',
+    report: async (input) => { seen.push(input); return { number: 7, created: true } },
+  })
+  assert.equal(result.opened, true)
+  assert.match(seen[0].title, /unknown/)
 })

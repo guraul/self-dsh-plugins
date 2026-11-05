@@ -708,14 +708,16 @@ export function apply(ctx, config = {}) {
               await writeFile(smokePath, `${JSON.stringify({ at, results }, null, 2)}\n`)
               // 冒烟失败 → 自动开 issue（同版本按标题去重）；开单失败只降级成 reason，不影响冒烟结果。
               const reported = await maybeReportSmokeFailures({
-                version: await readInstalledVersion(installation.manifestPath),
+                // `installation` 可能为 undefined（resolveInstallation 失败）：冒烟本身只要 profileDir，
+                // 这里不能直接把 undefined 传下去，否则整个冒烟被误判成失败（review 轮 1 的 major）。
+                version: installation === undefined ? undefined : await readInstalledVersion(installation.manifestPath),
                 results,
                 at,
                 slug: repositorySlug(ownPackage),
                 report: (input) => createIssue({ ...input, runGh: runGhSeam }),
               })
               if (reported.opened) {
-                console.warn(`[dsh-auto-upgrade] 冒烟失败已开 issue #${String(reported.number)}`)
+                console.warn(`[dsh-auto-upgrade] 冒烟失败已关联 issue #${String(reported.number)}（created=${String(reported.created)}）`)
               } else if (reported.reason !== 'no-failures') {
                 console.warn(`[dsh-auto-upgrade] 冒烟失败但未开 issue：${String(reported.reason)}`)
               }

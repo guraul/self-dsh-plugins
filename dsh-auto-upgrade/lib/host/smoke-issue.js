@@ -36,6 +36,15 @@ export function smokeIssueTitle(input) {
 }
 
 /**
+ * 把断言细节弄成可以进公开 issue 的样子：截断，并把本机家目录抹掉。
+ * @param {string} detail 原始细节。
+ * @returns {string} 处理后的细节。
+ */
+export function safeDetail(detail) {
+  return String(detail ?? '').replace(/\/Users\/[^/\s]+/g, '~').slice(0, 200)
+}
+
+/**
  * 组装 issue 正文：逐插件列出失败断言，附复现方式。
  * @param {{version: string, failed: object[], at?: number}} input 输入。
  * @returns {string} Markdown 正文。
@@ -51,7 +60,7 @@ export function smokeIssueBody(input) {
   for (const item of input.failed) {
     const bad = (item.checks ?? []).filter((check) => check.ok !== true)
     const names = bad.map((check) => `\`${check.name}\``).join('<br>')
-    const details = bad.map((check) => check.detail ?? '').filter((text) => text !== '').join('<br>')
+    const details = bad.map((check) => safeDetail(check.detail)).filter((text) => text !== '').join('<br>')
     lines.push(`| \`${item.name}\` | ${names || '（整体失败）'} | ${details || item.detail || '—'} |`)
   }
   lines.push(
@@ -97,7 +106,7 @@ export function planSmokeIssue(input) {
  * @param {number} [input.at] 时间戳。
  * @param {string|undefined} input.slug 仓库 slug（`owner/repo`）。
  * @param {(args: {slug: string, title: string, body: string}) => Promise<{number: number}>} input.report 开单函数。
- * @returns {Promise<{opened: boolean, number?: number, reason?: string}>} 结果。
+ * @returns {Promise<{opened: boolean, number?: number, created?: boolean, reason?: string}>} 结果。
  */
 export async function maybeReportSmokeFailures(input) {
   const plan = planSmokeIssue({ version: input.version, results: input.results, at: input.at })
@@ -105,7 +114,7 @@ export async function maybeReportSmokeFailures(input) {
   if (typeof input.slug !== 'string' || input.slug === '') return { opened: false, reason: 'no-slug' }
   try {
     const created = await input.report({ slug: input.slug, title: plan.title, body: plan.body })
-    return { opened: true, number: created.number }
+    return { opened: true, number: created.number, created: created.created }
   } catch (error) {
     return { opened: false, reason: `report-failed: ${error instanceof Error ? error.message : String(error)}` }
   }
