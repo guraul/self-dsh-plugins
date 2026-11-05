@@ -95,7 +95,7 @@ pnpm install
 
 ```sh
 cd dsh-subagent-policy-fallback
-pnpm test        # 16 条：注入、幂等、子会话、服务缺失、enabled=false、apply 回填、三种挂载日志、describeStatus
+pnpm test        # 17 条：注入、幂等、子会话、服务缺失、enabled=false、apply 回填、三种挂载日志、审计日志抛错仍计数、describeStatus
 pnpm run lint    # lib/ + test/ 全量 node --check
 ```
 
@@ -105,7 +105,7 @@ pnpm run lint    # lib/ + test/ 全量 node --check
 2. 恢复一个旧会话（或从历史会话 fork），让其中的 subagent 显式选模型；
 3. 宿主日志里应先出现挂载行
    `dsh-subagent-policy-fallback: 已挂载，设置里允许 N 条 subagent 模型路由`，
-   再出现 `subagent-policy-fallback: 为会话 <id> 补齐 N 条 subagent 模型路由`；
+   再出现 `dsh-subagent-policy-fallback: 为会话 <id> 补齐 N 条 subagent 模型路由`；
 4. 同一个会话再次恢复 / 插件重载，不应出现第二条策略事件。
 
 ## 已知限制

@@ -8,7 +8,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { apply, inject, name } from '../lib/index.js'
-import { POLICY_EVENT, SERVICE_NAME } from '../lib/policy.js'
+import { POLICY_EVENT, SERVICE_NAME, backfillSessions } from '../lib/policy.js'
 import { describeStatus } from '../lib/status.js'
 
 const ROUTES = [
@@ -109,8 +109,10 @@ test('注入生效：顶层会话拿到策略事件与审计日志', () => {
   assert.equal(ctx.infos.length, 2)
   assert.match(ctx.infos[0], /^dsh-subagent-policy-fallback: 已挂载，设置里允许 2 条 subagent 模型路由$/)
   assert.equal(backfillInfos(ctx).length, 1)
-  assert.match(ctx.infos[1], /补齐 2 条 subagent 模型路由/)
-  assert.match(ctx.infos[1], /session-1/)
+  assert.equal(
+    ctx.infos[1],
+    'dsh-subagent-policy-fallback: 为会话 session-1 补齐 2 条 subagent 模型路由',
+  )
 })
 
 test('会话日志已有策略事件 → 跳过', () => {
@@ -227,12 +229,24 @@ test('回填时 sessions.list() 抛错 → 插件仍正常挂载、后续 agent/
   apply(ctx)
 
   assert.equal(ctx.warns.length, 1)
-  assert.match(ctx.warns[0], /回填存活会话失败/)
-  assert.match(ctx.warns[0], /store offline/)
+  assert.equal(ctx.warns[0], 'dsh-subagent-policy-fallback: 回填存活会话失败：store offline')
 
   // 挂载没被拖垮：之后新会话照旧能拿到策略
   ctx.emitCreated(session)
   assert.equal(session.appended.length, 1)
+})
+
+test('审计日志 info 抛错 → 事件仍落盘、计数不漏', () => {
+  const session = createSession({ id: 'logged' })
+  const ctx = createCtx({ service: createService() })
+  ctx.logger.info = () => {
+    throw new Error('logger broken')
+  }
+
+  assert.equal(backfillSessions(ctx, [session]), 1)
+  assert.equal(session.appended.length, 1)
+  assert.equal(session.appended[0].type, POLICY_EVENT)
+  assert.equal(ctx.warns.length, 0)
 })
 
 test('挂载日志：服务存在 → 报已挂载与允许路由数', () => {

@@ -83,12 +83,18 @@ export function backfillSession(ctx, session) {
   if (allowedModels === undefined) return false
 
   session.append(POLICY_EVENT, { allowedModels })
-  if (ctx.logger !== undefined && ctx.logger !== null && typeof ctx.logger.info === 'function') {
-    ctx.logger.info(
-      `subagent-policy-fallback: 为会话 ${String(session.id)} 补齐 ${allowedModels.length} 条 subagent 模型路由`,
-    )
+  // 返回值先定死：事件已落盘，日志抛错也不能把它改写成「失败 → 计数漏计」。
+  const appended = true
+  try {
+    if (ctx.logger !== undefined && ctx.logger !== null && typeof ctx.logger.info === 'function') {
+      ctx.logger.info(
+        `dsh-subagent-policy-fallback: 为会话 ${String(session.id)} 补齐 ${allowedModels.length} 条 subagent 模型路由`,
+      )
+    }
+  } catch {
+    // 审计行打不出来只损失可观测性，不影响补写结果。
   }
-  return true
+  return appended
 }
 
 /**
@@ -105,7 +111,7 @@ export function backfillSessions(ctx, sessions) {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       if (ctx?.logger !== undefined && ctx.logger !== null && typeof ctx.logger.warn === 'function') {
-        ctx.logger.warn(`subagent-policy-fallback: 会话 ${String(session?.id)} 补策略失败：${reason}`)
+        ctx.logger.warn(`dsh-subagent-policy-fallback: 会话 ${String(session?.id)} 补策略失败：${reason}`)
       }
     }
   }
