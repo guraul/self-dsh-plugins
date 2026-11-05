@@ -7,8 +7,7 @@ import { API } from '../lib/host/protocol.js'
 const client = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
 test('浏览器半边与本文件的路由表一致（无构建 = 靠测试保证）', () => {
-  // 只有宿主侧用、浏览器半边还没接入的路由放这里（接了 UI 就从这里删掉）。
-  // `probe` 属 #300 的 P1：后端先落地（试装探针），设置页展示在 P1b 补。
+  // 只在宿主侧用、浏览器半边还没接入的路由（#300 的 probe 属 P1 后端，P1b 接 UI 后删掉）。
   const HOST_ONLY = new Set([API.probe])
   const expected = Object.values(API).filter((path) => !HOST_ONLY.has(path))
   const found = new Set(client.match(/\/api\/dsh-auto-upgrade[\w/-]*/g) ?? [])
