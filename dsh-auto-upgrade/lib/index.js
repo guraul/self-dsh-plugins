@@ -10,6 +10,7 @@
  *   （见 `lib/host/upgrade.js` 的说明）。
  * @module dsh-plugin-auto-upgrade
  */
+import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -324,6 +325,40 @@ export function apply(ctx, config = {}) {
      */
     const route = (path, handlers) => {
       disposers.push(webServer.register({ kind: 'exact', path, handler: createRoute(handlers, isLoopbackRequest) }))
+    }
+
+    /**
+     * 起一个「重启进度服务」（issue #300 的重启 UI）。
+     *
+     * 点升级/重启后本宿主会退出，页面就再也问不到进度；而重启完又换了新令牌，旧页面
+     * 连新宿主都问不了（401）。所以进度必须由**不随宿主死掉**的独立进程来报。
+     * 它 detached 存活，端口由系统分配（写进 `progress-port.json`），完成或超时后自己退出。
+     * @returns {Promise<string|undefined>} 进度页地址；起不来则 undefined（退回 watchdog 行为）。
+     */
+    const startProgressServer = async () => {
+      const scriptPath = fileURLToPath(new URL('./host/progress-server.mjs', import.meta.url))
+      const portFile = join(stateDir, 'progress-port.json')
+      await rm(portFile, { force: true }).catch(() => {})
+      try {
+        const child = spawn(process.execPath, [
+          scriptPath,
+          '--state', stateDir,
+          '--label', typeof process.env.XPC_SERVICE_NAME === 'string' ? process.env.XPC_SERVICE_NAME : '',
+          '--port', '0',
+        ], { detached: true, stdio: 'ignore' })
+        child.unref()
+        for (let i = 0; i < 40; i += 1) {
+          try {
+            const { port } = JSON.parse(await readFile(portFile, 'utf8'))
+            return `http://127.0.0.1:${String(port)}/`
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 50))
+          }
+        }
+      } catch (error) {
+        console.warn(`[dsh-auto-upgrade] 进度服务启动失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+      return undefined
     }
 
     /**
@@ -795,7 +830,8 @@ export function apply(ctx, config = {}) {
         const task = tasks.start('update', { from: installed ?? null, to: target })
         task.setPhase('preflight')
         task.append(`目标：${installed ?? '未知'} → ${target}`)
-        writeJson(res, 202, { ok: true, taskId: task.id, handoff: true })
+        const progressUrl = await startProgressServer()
+        writeJson(res, 202, { ok: true, taskId: task.id, handoff: true, ...(progressUrl === undefined ? {} : { progressUrl }) })
         void runHandoff({
           task,
           mode: 'update',
@@ -840,7 +876,8 @@ export function apply(ctx, config = {}) {
         const task = tasks.start('rollback', { from: installed ?? null, to: target })
         task.setPhase('preflight')
         task.append(`回滚：${installed ?? '未知'} → ${target}`)
-        writeJson(res, 202, { ok: true, taskId: task.id, handoff: true })
+        const progressUrl = await startProgressServer()
+        writeJson(res, 202, { ok: true, taskId: task.id, handoff: true, ...(progressUrl === undefined ? {} : { progressUrl }) })
         void runHandoff({ task, mode: 'rollback', target, current: installed, skipBackup: body.backup !== true })
       },
     })
@@ -865,7 +902,8 @@ export function apply(ctx, config = {}) {
         const task = tasks.start('restart', {})
         task.setPhase('stop')
         task.append('只重启，不安装任何东西')
-        writeJson(res, 202, { ok: true, taskId: task.id, handoff: true })
+        const progressUrl = await startProgressServer()
+        writeJson(res, 202, { ok: true, taskId: task.id, handoff: true, ...(progressUrl === undefined ? {} : { progressUrl }) })
         void runHandoff({ task, mode: 'restart' })
       },
     })
