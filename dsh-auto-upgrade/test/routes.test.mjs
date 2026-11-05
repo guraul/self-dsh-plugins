@@ -840,3 +840,20 @@ test('自述矩阵：已知不兼容与 unverified 混在一起时，issue 只�
     await env.close()
   }
 })
+
+test('POST /probe：没有可试装项时早退，且不泄漏占位（否则后续永久 409）', async (t) => {
+  // 没有 link:/file: 插件 → 走 skipped 早退分支（这条路径曾漏释放 probeRun，见 #300 review 轮 2）
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const first = await fetch(`${env.host.base}${API.probe}`, { method: 'POST', body: '{}' })
+    assert.equal(first.status, 200)
+    assert.equal((await first.json()).skipped, true)
+    const again = await fetch(`${env.host.base}${API.probe}`, { method: 'POST', body: '{}' })
+    assert.equal(again.status, 200, '早退必须释放占位，否则这里变 409')
+    const state = await (await fetch(`${env.host.base}${API.probe}`)).json()
+    assert.equal(state.running, false, 'GET 不许永远 running')
+  } finally {
+    await env.close()
+  }
+})

@@ -543,6 +543,8 @@ export function apply(ctx, config = {}) {
           throw new RequestError(500, CODE.PRECONDITION, `读 profile 依赖失败：${error instanceof Error ? error.message : String(error)}`)
         }
         if (targets.length === 0) {
+          // 早退必须先释放占位，否则后续 POST 永远 409、GET 永远 running（#300 review 轮 2）。
+          probeRun = null
           writeJson(res, 200, { ok: true, skipped: true, detail: 'profile 里没有 link:/file: 插件，无可试装项' })
           return
         }

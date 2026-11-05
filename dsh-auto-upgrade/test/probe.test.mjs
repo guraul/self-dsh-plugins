@@ -108,14 +108,9 @@ test('runProbes：add 失败就不再 dump，且成功失败都进缓存', async
   assert.equal(Object.keys(cache).length, 2, '失败也缓存，避免反复重试同一个坏插件')
 })
 
-test('宿主侧助手不能漏导入（漏了 `run` 会静默失效——#300 的真实 blocker）', async () => {
+test('探针路由用到的助手都已导入（漏了 `run` 会静默失效——#300 的真实 blocker）', async () => {
   const source = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
-  const names = (module) => {
-    const matched = new RegExp(`import \\{([^}]*)\\} from '\\./host/${module}\\.js'`).exec(source)
-    assert.ok(matched, `必须从 ${module}.js 导入`)
-    return matched[1].split(',').map((item) => item.trim())
+  for (const name of ['run', 'cacheHit', 'runProbes', 'linkTargets']) {
+    assert.match(source, new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./host/`), `缺少 ${name} 的导入`)
   }
-  assert.ok(names('toolchain').includes('run'), 'probe 路由要用 run 执行 dsh')
-  assert.ok(names('probe').includes('cacheHit'), 'GET 要用 cacheHit 标 stale')
-  assert.ok(names('probe').includes('runProbes'), 'POST 要用 runProbes 驱动')
 })
