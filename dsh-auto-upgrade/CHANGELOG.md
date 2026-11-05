@@ -3,6 +3,17 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.6.0] — 2026-11-05
+
+### 新增
+
+- **冒烟失败自动开 issue（#300 P2b）**：冒烟只在写 `smoke.json` 里等于没人看——升级打挂插件后
+  要立刻有人知道。现在失败会按「版本 + 失败插件」生成标题并复用 `/report-issue` 的同名去重开单：
+  - **只有 `ok:false` 才开**；`partial`（插件没写 `dsh.smoke`，只跑了兜底三项）明确不算失败；
+  - 标题插件名超过 3 个折叠成「等 N 个」；正文逐插件列出失败断言与 `detail`，附复现用的
+    `GET` / `POST /api/dsh-auto-upgrade/smoke`；
+  - 开单失败（gh 未登录、无 repository）**只降级成日志**，不影响冒烟结果本身。
+
 ## [0.5.1] — 2026-11-05
 
 ### 变更

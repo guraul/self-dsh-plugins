@@ -227,6 +227,7 @@ pnpm run check                                # node --check
 的插件只跑兜底三项并标 `partial`——不假装验过行为。`run(context)` 会收到宿主的
 `dshVersion` / `dshDir`：断言要验**宿主实际加载的那份**，别 import 到插件自己 node_modules 的旧副本。
 目前声明了 `dsh.smoke` 的有 `dsh-im-bridge-workspaces` 与 `dsh-subagents`。
+冒烟失败会自动开 issue（按标题去重，`partial` 不算失败；开单失败只记日志）。
 
 ## 重启/升级期间的进度页（#300）
 

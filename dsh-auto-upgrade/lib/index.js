@@ -21,6 +21,7 @@ import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
 import { cacheHit, linkTargets, runProbes } from './host/probe.js'
 import { runSmokes } from './host/smoke.js'
+import { maybeReportSmokeFailures } from './host/smoke-issue.js'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
 import { DEFAULT_GITHUB_API, fetchReleaseNotes, repositorySlug } from './host/notes.js'
@@ -703,7 +704,21 @@ export function apply(ctx, config = {}) {
                 resolvable: (pkg) => existsSync(join(profileDir, 'node_modules', pkg)),
                 importModule: (plugin, modulePath) => import(pathToFileURL(join(plugin.dir, modulePath)).href),
               })
-              await writeFile(smokePath, `${JSON.stringify({ at: Date.now(), results }, null, 2)}\n`)
+              const at = Date.now()
+              await writeFile(smokePath, `${JSON.stringify({ at, results }, null, 2)}\n`)
+              // 冒烟失败 → 自动开 issue（同版本按标题去重）；开单失败只降级成 reason，不影响冒烟结果。
+              const reported = await maybeReportSmokeFailures({
+                version: await readInstalledVersion(installation.manifestPath),
+                results,
+                at,
+                slug: repositorySlug(ownPackage),
+                report: (input) => createIssue({ ...input, runGh: runGhSeam }),
+              })
+              if (reported.opened) {
+                console.warn(`[dsh-auto-upgrade] 冒烟失败已开 issue #${String(reported.number)}`)
+              } else if (reported.reason !== 'no-failures') {
+                console.warn(`[dsh-auto-upgrade] 冒烟失败但未开 issue：${String(reported.reason)}`)
+              }
             } catch (error) {
               smokeError = error instanceof Error ? error.message : String(error)
               console.warn(`[dsh-auto-upgrade] 冒烟失败：${smokeError}`)
