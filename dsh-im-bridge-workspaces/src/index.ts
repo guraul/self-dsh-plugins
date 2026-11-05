@@ -301,6 +301,8 @@ interface ChatState {
   officeToolRegistered: boolean
   /** Approval answerer already registered on this Agent's context. */
   approvalRelayInstalled: boolean
+  /** 本轮对话内派出过审批卡片：结束时先收尾流式消息，再另起一条发最终回复。 */
+  approvalDuringTurn: boolean
   queue: Promise<unknown>
   lastActivity: string
   activityClearAt: number
@@ -319,6 +321,7 @@ function emptyChatState(): ChatState {
     officeSkillsRegistered: false,
     officeToolRegistered: false,
     approvalRelayInstalled: false,
+    approvalDuringTurn: false,
     queue: Promise.resolve(),
     lastActivity: '',
     activityClearAt: 0,
@@ -1756,6 +1759,7 @@ export function apply(ctx: Context, config: Config): void {
       st.lastToolByCallId.clear()
       st.modelStreamPhase = 'idle'
       st.streamStatusTick = 0
+      st.approvalDuringTurn = false
       try {
         await ws.replyStream(frame, streamId, cfg().startHint, false)
         stopThinking = startThinking(
@@ -1824,7 +1828,14 @@ export function apply(ctx: Context, config: Config): void {
           )
         }
         console.log(`[im-bridge] ${ref.key} 完成 (${Buffer.byteLength(reply, 'utf8')}B, ${fmtDuration(ms)})`)
-        await sendFinal(ws, frame, streamId, reply)
+        if (st.approvalDuringTurn) {
+          // 本轮中途弹过审批卡片：卡片已经排在当前流式消息之后，若继续更新同一条消息，
+          // 最终回复会显示在卡片上方。先把流式消息收尾，再用新消息发回复。
+          await sendFinal(ws, frame, streamId, '🔐 审批已完成（结果见上方卡片），继续处理…')
+          await sendFinal(ws, frame, generateReqId('stream'), reply)
+        } else {
+          await sendFinal(ws, frame, streamId, reply)
+        }
         if (collected.images.length > 0) {
           await sendCollectedPngs(ws, resolveChatId(frame, ref.sender), collected.images)
         }
@@ -1834,7 +1845,14 @@ export function apply(ctx: Context, config: Config): void {
         const message = error instanceof Error ? error.message : String(error)
         console.error(`[im-bridge] agent 失败: ${message}`)
         try {
-          await sendFinal(ws, frame, streamId, `处理失败: ${truncate(message, 400)}\n\n---\n❌ 耗时 ${fmtDuration(ms)}`)
+          const failure = `处理失败: ${truncate(message, 400)}\n\n---\n❌ 耗时 ${fmtDuration(ms)}`
+          if (st.approvalDuringTurn) {
+            // 与成功路径同理：失败文案也不回写到卡片上方那条流式消息里。
+            await sendFinal(ws, frame, streamId, '🔐 审批已完成（结果见上方卡片），继续处理…')
+            await sendFinal(ws, frame, generateReqId('stream'), failure)
+          } else {
+            await sendFinal(ws, frame, streamId, failure)
+          }
         } catch (retryError) {
           const retryMessage = retryError instanceof Error ? retryError.message : String(retryError)
           console.error(`[im-bridge] 错误回复也失败: ${retryMessage}`)
@@ -2371,6 +2389,8 @@ export function apply(ctx: Context, config: Config): void {
         resolveRelay = resolve
       })
       approvals.add({ ...draft, settle: (decision) => { resolveRelay(decision) } })
+      // 本轮派出过审批：结束时要把流式消息收尾，最终回复另起一条，避免回复显示在卡片上方。
+      st.approvalDuringTurn = true
 
       const onAbort = (): void => {
         console.warn(`[im-bridge] 审批被中止（工具调用取消）id=${draft.id} tool=${request.toolName}`)
@@ -2540,6 +2560,8 @@ export function apply(ctx: Context, config: Config): void {
       subTitle: string,
       fallbackText: string,
     ): Promise<void> {
+      // 第一优先同类型 button_interaction：实测可用；企微按钮没有「禁用」字段，
+      // 所以结果态会留下一个点了不响应的「已处理」，这是平台限制。
       try {
         await ws.updateTemplateCard(frame, approvalDoneCard(entry.taskId, title, desc, subTitle))
         console.log(`[im-bridge] 审批结果卡片已更新(button_interaction) id=${entry.id}`)
