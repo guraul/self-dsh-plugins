@@ -16,7 +16,7 @@
 | 路径 | 作用 |
 |---|---|
 | `lib/index.js` | 宿主入口：15 条路由、两条门禁、交接调度、一键开 issue |
-| `lib/client.js` | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页（含常驻升级入口与降级护栏出路）+ 重连 watchdog |
+| `lib/client.js` | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页（含常驻升级入口与降级护栏出路）+ 重连 watchdog（连续失败约 30s 后切「令牌已更换」指引，不再承诺「会自动重新连接」，issue #293） |
 | `lib/host/*.js` | 纯逻辑：协议常量 / loopback 围栏 / HTTP 管道 / SemVer / 工具链 / registry / 兼容性 / 会话 / 状态 / 任务 / 备份 / helper |
 | `docs/design/` | T1 设计：接口清单 + 数据流图 + 用户拍板结论 |
 | `docs/acceptance/` | 验收报告：逐条证据 + **明确没验证什么** |
@@ -205,8 +205,13 @@ pnpm run check                                # node --check
 - dsh web 实例日志目录下的 `url.txt`（本机 `<repo>/.dsh-web/url.txt`）：helper 拉起新宿主后，
   从 `launchctl print` 给出的 `stdout path` 里取**最后一条** `?token=…` 写回；拿不到 launchd
   路径时退回 helper 自己的 `$OUT`。token 是进程级的，别指望它跨重启不变。
+  **写入前两判据缺一不可**（issue #293 的竞态修复）：① 只认重启后新出现的 URL——helper 在
+  `relaunch` **之前**用 `refresh-url.mjs --print-latest` 抓 baseline，刷新时 `--previous` 传回，
+  与 baseline 相同就 `exit 1` 继续重试；② 候选 URL 必须真能认证——`fetch(url, { redirect: 'manual',
+  signal: AbortSignal.timeout(3000) })` 状态 ∈ {200, 302, 303} 才写，401 / 连不上一律 `exit 1`。
 - 抓取逻辑在 `lib/host/token-url.js`（纯函数）+ `lib/host/refresh-url.mjs`（CLI），
-  单测见 `test/token-url.test.mjs`。**别在 shell 里重新实现一份**。
+  单测见 `test/token-url.test.mjs` 与 `test/refresh-url.test.mjs`（含端到端 helper 用例）。
+  **别在 shell 里重新实现一份**。
 
 ## 另需注意的两条设计约束
 

@@ -3,6 +3,36 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.6] — 2026-11-05
+
+### 修复
+
+- **升级后 `url.txt` 不再写入旧 token（竞态），watchdog 不再承诺回不来的「自动重连」（issue #293）。**
+  2026-11-05 升级 `0.2.2-alpha.2 → 0.2.2-rc.1` 后用户打不开页面：`url.txt` 里是 401 的旧 token，
+  而日志最后一条 URL 是 303 有效——两处根因都在本插件，一起修：
+  - **R1 `refresh-url.mjs` 的竞态**：helper `kickstart` 后新实例还没打印，日志最后一条仍是**上一次
+    启动**的 URL；旧逻辑把它写进 `url.txt` 后 `exit 0`，helper 的 30 次重试当场停止，`url.txt`
+    从此永远 401。现在写入前**两判据缺一不可**：
+    1. **只认重启后新出现的 URL**：helper 在 `relaunch` 之前先用新增的 `--print-latest` 模式抓一次
+       baseline，刷新时经 `--previous <baseline>` 传回；与 baseline 相同 → `exit 1`（继续重试）；
+    2. **必须真能认证**：对候选 URL 发一次 `fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(3000) })`，
+       状态 ∈ {200, 302, 303} 才接受，否则 `exit 1`（401 或连不上一律不写）。
+    helper 日志只报 baseline 存在性（`baseline: log already has a token URL`），**绝不回显 URL**（内含 token）。
+  - **R2 watchdog 的假承诺**：`lib/client.js` 的 `startWatchdog` 连续失败约 30s（15 次 × 2s）后从
+    `reconnecting` 切到 `token-rotated`：文案不再说「页面会自动重新连接」，改成可执行指引——打开
+    `.dsh-web/url.txt`，或 `grep 'dsh web: http' .dsh-web/web.out.log | tail -1`。相位 → 文案收敛到
+    共用的 `phaseText()`，浮层渲染 / 设置页进度 / 设置页提示三处都走它，防止两处漂移。
+  - 升级 / 备份 / 校验 / 重启的既有语义一行未动；**无新依赖**（Node 内置 `fetch` + `AbortSignal.timeout`）。
+
+### 内部
+
+- 新增 `test/refresh-url.test.mjs`（7 条：baseline 未变 / 候选 401 / 新 URL 且 303 / 连不上 /
+  `--print-latest` 有与无 / bad usage）与 `test/client-watchdog.test.mjs`（2 条：相位推进到
+  `token-rotated`、终态文案含指引且不含自动重连承诺）；`test/helper.test.mjs` +2（生成脚本的
+  baseline 接线、**端到端**：relaunch 前抓 baseline → 假宿主打印新 URL → 认证 303 后才写 `url.txt`）。
+  用例总数 87 → 98。把「与 baseline 相同也照写」的判据删掉、或把认证判据改成恒 `true`，
+  对应用例立刻红（非空转反证）。
+
 ## [0.2.5] — 2026-10-31
 
 ### 新增

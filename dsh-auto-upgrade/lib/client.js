@@ -81,6 +81,7 @@ window.__ModuleLoader__.load({
       'overlay.sessionsWarning': '{count} 个会话正在执行，升级会中断它们。仍要继续？',
       'overlay.handingOff': '正在交接给升级助手（{step}）…',
       'overlay.reconnecting': '服务重启中，页面会自动重新连接…',
+      'overlay.tokenRotated': '访问令牌已更换：本页持有的令牌已失效，页面无法自己重连。打开 .dsh-web/url.txt 复制新地址，或运行 grep \'dsh web: http\' .dsh-web/web.out.log | tail -1',
       'overlay.upgradedTo': '已升级到 {version}',
       'overlay.rolledBackTo': '已回滚到 {version}',
       'overlay.failedAt': '上次升级失败（{step}），服务已按原样恢复',
@@ -160,6 +161,7 @@ window.__ModuleLoader__.load({
       'overlay.sessionsWarning': '{count} sessions are running; upgrading interrupts them. Continue anyway?',
       'overlay.handingOff': 'Handing over to the upgrade helper ({step})…',
       'overlay.reconnecting': 'Service is restarting; this page will reconnect automatically…',
+      'overlay.tokenRotated': 'The launch token rotated: this page holds a dead token and cannot reconnect on its own. Open .dsh-web/url.txt for the new URL, or run: grep \'dsh web: http\' .dsh-web/web.out.log | tail -1',
       'overlay.upgradedTo': 'Upgraded to {version}',
       'overlay.rolledBackTo': 'Rolled back to {version}',
       'overlay.failedAt': 'The last upgrade failed ({step}); the service was restored as-is',
@@ -435,21 +437,47 @@ window.__ModuleLoader__.load({
       document.head.appendChild(tag)
     }
 
+    /** watchdog 轮询间隔（毫秒）。 */
+    const WATCHDOG_INTERVAL_MS = 2000
+    /** 连续失败多少次后判定「令牌已更换」：15 × 2s ≈ 30s（issue #293）。 */
+    const WATCHDOG_TOKEN_TICKS = 15
+
+    /**
+     * 交接 / watchdog 状态 → 展示文案（浮层与设置页共用，防两处漂移）。
+     * `token-rotated` 是「等不回来」的终态：token 是进程级的，本页旧令牌过不了新宿主，
+     * 再报「会自动重新连接」就是假承诺，改为给出取新地址的可执行指引（issue #293）。
+     * @param {(key:string, params?:Record<string,unknown>) => string} t 翻译函数。
+     * @param {string|undefined} phase 状态名。
+     * @returns {string} 展示文案。
+     */
+    function phaseText(t, phase) {
+      if (phase === 'reconnecting') return t('overlay.reconnecting')
+      if (phase === 'token-rotated') return t('overlay.tokenRotated')
+      return t('overlay.handingOff', { step: phase ?? '…' })
+    }
+
     /**
      * 升级交接后的重连 watchdog：轮询 /status，等新宿主应答就重载页面。
+     * token 是进程级的（issue #293）：连续失败约 30s（15 × 2s）后切到
+     * 「令牌已更换」状态，不再让页面承诺「会自动重新连接」。
      * @param {{current:any}} ref 保存定时器的 ref。
      * @param {string|null} expected 期望的新版本（restart 时为 null）。
      * @param {(text:string)=>void} onState 状态回调。
+     * @param {{intervalMs?:number, tokenTicks?:number}} [options] 计时参数（默认即线上节奏，单测可注入加快）。
      * @returns {void}
      */
-    function startWatchdog(ref, expected, onState) {
+    function startWatchdog(ref, expected, onState, options = {}) {
       if (ref.current !== null) return
+      const intervalMs = options.intervalMs ?? WATCHDOG_INTERVAL_MS
+      const tokenTicks = options.tokenTicks ?? WATCHDOG_TOKEN_TICKS
       let sawDown = false
+      let failedTicks = 0
       const tick = async () => {
         const snapshot = await request(API.status)
         if (snapshot.ok !== true) {
           sawDown = true
-          onState('reconnecting')
+          failedTicks += 1
+          onState(failedTicks >= tokenTicks ? 'token-rotated' : 'reconnecting')
           return
         }
         if (sawDown || (expected !== null && snapshot.dsh?.installed === expected)) {
@@ -463,7 +491,7 @@ window.__ModuleLoader__.load({
           }
         }
       }
-      ref.current = setInterval(tick, 2000)
+      ref.current = setInterval(tick, intervalMs)
       void tick()
     }
 
@@ -1109,10 +1137,7 @@ window.__ModuleLoader__.load({
       }
 
       if (handoff !== null) {
-        const stepText = handoff.step === 'reconnecting'
-          ? t('overlay.reconnecting')
-          : t('overlay.handingOff', { step: handoff.step ?? '…' })
-        copy.push(h('p', { key: 'handoff', className: 'dsh-au-warn' }, stepText))
+        copy.push(h('p', { key: 'handoff', className: 'dsh-au-warn' }, phaseText(t, handoff.step)))
         if ((handoff.log ?? []).length > 0) {
           copy.push(h('pre', { key: 'log', className: 'dsh-au-pre' }, handoff.log.join('\n')))
         }
@@ -1315,7 +1340,7 @@ window.__ModuleLoader__.load({
         }
         setNotice(t('overlay.reconnecting'))
         startWatchdog(watchRef, expected, (phase) => {
-          if (phase === 'reconnecting') setNotice(t('overlay.reconnecting'))
+          if (phase === 'reconnecting' || phase === 'token-rotated') setNotice(phaseText(t, phase))
         })
       }
 
@@ -1379,9 +1404,7 @@ window.__ModuleLoader__.load({
       return h('div', { 'data-dsh-auto-upgrade': 'settings', className: 'dsh-au-section' }, [
         notice === null ? null : h('div', { key: 'notice', className: 'dsh-au-warn' }, notice),
         progress === null ? null : h('div', { key: 'progress', className: 'dsh-au-panel' }, [
-          h('div', { key: 'l', className: 'dsh-au-warn' }, progress.step === 'reconnecting'
-            ? t('overlay.reconnecting')
-            : t('overlay.handingOff', { step: progress.step ?? '…' })),
+          h('div', { key: 'l', className: 'dsh-au-warn' }, phaseText(t, progress.step)),
           (progress.log ?? []).length === 0 ? null : h('div', { key: 'pre', className: 'dsh-au-pre' }, progress.log.join('\n')),
         ]),
         // 缓存里的 installed 只解释「上次检查时是 X」；「当前版本」永远是上面的实时值。
@@ -1555,6 +1578,9 @@ window.__ModuleLoader__.load({
     // 以及「本页已补检过」的闸门重置器（让每条用例都能独立验证「每次页面加载最多一次」）。
     exports.suggestChannel = suggestChannel
     exports.resetStaleRecheck = () => { staleRecheck = null }
+    // 导出给单测（`test/client-watchdog.test.mjs`）：watchdog 的相位推进与相位 → 文案映射。
+    exports.startWatchdog = startWatchdog
+    exports.phaseText = phaseText
     return module.exports
   },
 })
