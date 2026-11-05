@@ -7,10 +7,17 @@ import { API } from '../lib/host/protocol.js'
 const client = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
 test('浏览器半边与本文件的路由表一致（无构建 = 靠测试保证）', () => {
+  // 只有宿主侧用、浏览器半边还没接入的路由放这里（接了 UI 就从这里删掉）。
+  // `probe` 属 #300 的 P1：后端先落地（试装探针），设置页展示在 P1b 补。
+  const HOST_ONLY = new Set([API.probe])
+  const expected = Object.values(API).filter((path) => !HOST_ONLY.has(path))
   const found = new Set(client.match(/\/api\/dsh-auto-upgrade[\w/-]*/g) ?? [])
-  assert.deepEqual([...found].sort(), Object.values(API).sort())
-  for (const path of Object.values(API)) {
+  assert.deepEqual([...found].sort(), expected.sort())
+  for (const path of expected) {
     assert.ok(client.includes(`'${path}'`), `client is missing ${path}`)
+  }
+  for (const path of HOST_ONLY) {
+    assert.ok(!client.includes(`'${path}'`), `${path} 已接进 client，请从 HOST_ONLY 删掉`)
   }
 })
 

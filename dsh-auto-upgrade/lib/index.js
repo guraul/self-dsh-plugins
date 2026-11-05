@@ -11,12 +11,14 @@
  * @module dsh-plugin-auto-upgrade
  */
 import { readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
+import { linkTargets, runProbes } from './host/probe.js'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
 import { DEFAULT_GITHUB_API, fetchReleaseNotes, repositorySlug } from './host/notes.js'
@@ -487,6 +489,89 @@ export function apply(ctx, config = {}) {
     route(API.preflight, {
       GET: async (_req, res) => {
         writeJson(res, 200, { ok: true, preflight: await runPreflight() })
+      },
+    })
+
+    // —— 升级前「试装」探针（issue #300）——
+    // 现有 preflight 只读声明，看不出「声明覆盖但装不上」。探针在一个一次性
+    // DSH_HOME 里把每个 link:/file: 插件真装一遍；结论只作警告，不进阻断判定。
+    const probeCachePath = join(stateDir, 'probe-cache.json')
+    /** @type {null | {startedAt:number, target:string}} */
+    let probeRun = null
+
+    /** 把缓存文件的键拆回字段，供 UI 直接用。 */
+    const probeEntries = (cache) => Object.entries(cache ?? {}).map(([key, value]) => {
+      const [version, name] = key.split('|')
+      return { version, name, ...value }
+    })
+
+    route(API.probe, {
+      GET: async (_req, res) => {
+        let cache = {}
+        try {
+          cache = JSON.parse(await readFile(probeCachePath, 'utf8'))
+        } catch {
+          cache = {}
+        }
+        writeJson(res, 200, {
+          ok: true,
+          running: probeRun !== null,
+          startedAt: probeRun === null ? null : probeRun.startedAt,
+          target: probeRun === null ? null : probeRun.target,
+          entries: probeEntries(cache),
+        })
+      },
+      POST: async (_req, res) => {
+        if (probeRun !== null) throw new RequestError(409, CODE.BUSY, '试装探针正在运行')
+        if (installation === undefined || profileDir === undefined) {
+          throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'profile 信息不可用')
+        }
+        const target = (await readInstalledVersion(installation.manifestPath)) ?? 'unknown'
+        /** @type {{name:string, path:string, mtimeMs?:number}[]} */
+        let targets = []
+        try {
+          const manifest = JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+          targets = linkTargets(manifest.dependencies)
+        } catch (error) {
+          throw new RequestError(500, CODE.PRECONDITION, `读 profile 依赖失败：${error instanceof Error ? error.message : String(error)}`)
+        }
+        if (targets.length === 0) {
+          writeJson(res, 200, { ok: true, skipped: true, detail: 'profile 里没有 link:/file: 插件，无可试装项' })
+          return
+        }
+        probeRun = { startedAt: Date.now(), target }
+        writeJson(res, 202, { ok: true, startedAt: probeRun.startedAt, target, count: targets.length })
+        void (async () => {
+          let home
+          try {
+            home = await mkdtemp(join(tmpdir(), 'dsh-au-probe-'))
+            let cache = {}
+            try {
+              cache = JSON.parse(await readFile(probeCachePath, 'utf8'))
+            } catch {
+              cache = {}
+            }
+            const { cache: next } = await runProbes({
+              targets,
+              targetVersion: target,
+              dshBin: installation.dshBin,
+              profileName: 'probe',
+              dshHome: home,
+              cache,
+              now: Date.now(),
+              run: async (command, args, options) => {
+                const result = await run(command, args, { ...options, timeoutMs: 180000 })
+                return { status: result.code, stdout: result.stdout }
+              },
+            })
+            await writeFile(probeCachePath, `${JSON.stringify(next, null, 2)}\n`)
+          } catch (error) {
+            console.warn(`[dsh-auto-upgrade] 试装探针失败：${error instanceof Error ? error.message : String(error)}`)
+          } finally {
+            if (home !== undefined) await rm(home, { recursive: true, force: true }).catch(() => {})
+            probeRun = null
+          }
+        })()
       },
     })
 

@@ -16,6 +16,8 @@ export const API = {
   checkAuto: `${API_PREFIX}/check/auto`,
   checkRun: `${API_PREFIX}/check/run`,
   preflight: `${API_PREFIX}/preflight`,
+  /** 升级前「试装」探针（issue #300）：GET 读缓存/进度，POST 开跑。 */
+  probe: `${API_PREFIX}/probe`,
   plugins: `${API_PREFIX}/plugins`,
   pluginAction: `${API_PREFIX}/plugins/action`,
   policy: `${API_PREFIX}/policy`,
