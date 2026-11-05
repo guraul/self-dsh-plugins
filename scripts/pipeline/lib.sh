@@ -4,7 +4,7 @@
 #
 # 与 agent-mobile 版本的区别：本仓库没有服务器、没有部署，故不含
 # SERVER_HOST / SERVER_USER / remote() / BFF_REPO 等部署侧常量。
-# 本仓库的"交付物"是插件被本机 DSH profile 正确装配（装配验证已移交 dsh-auto-upgrade 的升级前试装）。
+# 本仓库的"交付物"是插件被本机 DSH profile 正确装配（原装配验证脚本已删除；接续方案见 issue #300，尚未实现）。
 
 set -euo pipefail
 
