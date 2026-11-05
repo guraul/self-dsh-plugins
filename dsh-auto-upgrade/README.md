@@ -26,7 +26,7 @@
 | 回滚（重装指定旧版本） | ✅ |
 | detached 重启交接（launchd 在管时用 `kickstart -k`，否则 detached spawn） | ✅ |
 | **真机**升级链路（备份 → 停服 → `npm install -g` → 对版 + 冒烟 → `kickstart` 拉起） | ✅ 2026-10-17 真机成功两次（见验收报告 §3.1） |
-| 任务进度流（阶段 + 日志尾轮询）、页面重连 watchdog | ✅ |
+| 任务进度流（阶段 + 日志尾轮询）、页面重连 watchdog（连续失败约 30s 后切「令牌已更换」指引） | ✅ |
 | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页 | ✅ |
 | 客户端注入声明 `dsh.client.inject` 对齐 DSH 0.2.1（旧 `@deepseek-ai/dsh-client-ui-slots` 已不存在） | ✅ 有守卫测试（声明包必须真实存在）；改声明需重启 dsh web 才生效，重启后要确认浮层/设置页仍挂载 |
 | **设置页常驻升级入口**（浮层被「不再提示」关掉也有地方升级；与浮层同一份计划卡/流程） | ✅ |
@@ -135,3 +135,8 @@ node --test test/official-compat.test.mjs        # 需要本机装有 @deepseek-
 另：重启交接成功后，helper 会把 **dsh web 的 token URL** 写回该实例日志目录下的 `url.txt`
 （本机是 `<repo>/.dsh-web/url.txt`）。token 是进程级的、每次启动都变，只打印到 stdout，
 所以只能从日志里取（`launchctl print` 的 `stdout path` → 最后一条 `?token=…`）。
+写入前有两道判据（issue #293）：**比重启前抓的 baseline 新**（`--print-latest` → `--previous`）
+**且真能认证**（`fetch` 状态 ∈ {200, 302, 303}），否则 `exit 1` 让 helper 继续重试——
+旧 token 与「新实例还没打印」的现场都不会再被写进 `url.txt`。
+60 次重试耗尽会在 helper 日志里留下 `WARNING: url.txt was NOT refreshed …`（含 grep 最新 URL 的
+指引），不会静默收尾。

@@ -1,10 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { buildUpgradeScript, installArgs, plainInstallArgs, shellQuote } from '../lib/host/upgrade.js'
 
@@ -212,4 +214,159 @@ test('launchd 里没有这个 job 时退回 detached spawn', async () => {
   const log = await readFile(fixture.payload.logPath, 'utf8')
   assert.match(log, /no launchd job named com\.test\.dsh-web/)
   await waitForFile(fixture.out, /--profile web --no-open/)
+})
+
+test('helper 生成的脚本：relaunch 前抓 baseline，刷新只认 --previous（#293）', () => {
+  const script = buildUpgradeScript({
+    mode: 'restart',
+    hostPid: 1,
+    port: 3080,
+    npm: '/usr/bin/npm',
+    dshBin: '/usr/bin/dsh',
+    execPath: '/usr/bin/node',
+    args: ['--profile', 'web'],
+    cwd: '/tmp',
+    stateDir: '/tmp',
+    logPath: '/tmp/restart.log',
+    resultPath: '/tmp/result.json',
+    outLog: '/tmp/out.log',
+    smokeOut: '/tmp/smoke.out',
+    refreshScript: '/opt/dsh/lib/host/refresh-url.mjs',
+  })
+  const printAt = script.indexOf('--print-latest')
+  const relaunchCallAt = script.indexOf('\nrelaunch\n')
+  assert.ok(printAt > 0, '必须生成 baseline 捕获（--print-latest）')
+  assert.ok(relaunchCallAt > 0, '必须生成列首的 relaunch 调用')
+  assert.ok(printAt < relaunchCallAt, 'baseline 必须在 relaunch 之前抓，否则抓到的还是旧 URL')
+  assert.match(script, /"\$EXEC" "\$REFRESH_SCRIPT" --previous "\$BASELINE"/)
+  assert.ok(script.indexOf('if refresh_url; then') > relaunchCallAt, '刷新循环在 relaunch 之后')
+  assert.doesNotMatch(script, /say "[^"]*\$BASELINE/, 'baseline 是旧 token 的 URL，只报存在性、绝不回显')
+})
+
+test('端到端：relaunch 前抓 baseline → 新 URL 认证 303 后才写 url.txt（#293）', async () => {
+  const fixture = await makeFixture()
+  const { payload, dir, out } = fixture
+  const urlFile = join(dir, 'url.txt')
+
+  // 假宿主服务：任何 token URL 都回 303（模拟「新 token 被接受后换址」）。
+  const server = createServer((_req, res) => {
+    res.writeHead(303, { location: '/' })
+    res.end()
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${server.address().port}`
+  const oldUrl = `${origin}/?token=PRE_RESTART_BASELINE_1`
+  const newUrl = `${origin}/?token=POST_RESTART_CANDIDATE_2`
+
+  try {
+    // 重启前日志里只有旧 URL（真实竞态现场：新实例还没打印）。
+    await writeFile(out, `dsh web: ${oldUrl}\n`)
+
+    // 假宿主：被 relaunch 拉起时往日志追加新 URL（模拟新实例打印），4s 后自己退出。
+    const fakeHost = join(dir, 'fake-host.mjs')
+    await writeFile(fakeHost, [
+      "import { appendFileSync } from 'node:fs'",
+      `appendFileSync(${JSON.stringify(out)}, ${JSON.stringify(`dsh web: ${newUrl}\n`)})`,
+      'setTimeout(() => {}, 4000)',
+      '',
+    ].join('\n'))
+    payload.execPath = process.execPath
+    payload.args = [fakeHost, '--profile', 'web', '--no-open']
+    payload.refreshScript = fileURLToPath(new URL('../lib/host/refresh-url.mjs', import.meta.url))
+
+    // 异步跑 helper：同进程的假宿主服务要靠事件循环应答，spawnSync 会把它冻住。
+    const status = await runHelperAsync(payload, dir, 45000)
+
+    assert.equal(status, 0, `helper exit=${status}`)
+    assert.equal(await readFile(urlFile, 'utf8'), `${newUrl}\n`, '必须写入重启后的新 URL，而不是 baseline')
+    const log = await readFile(payload.logPath, 'utf8')
+    assert.match(log, /baseline: log already has a token URL/)
+    assert.match(log, /url\.txt refreshed/)
+  } finally {
+    server.closeAllConnections?.()
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+/**
+ * 异步跑一遍生成的 helper（同进程里的假宿主服务需要事件循环，不能用 spawnSync）。
+ * @param {object} payload payload。
+ * @param {string} dir 工作目录。
+ * @param {number} [timeoutMs] 超时兜底（超时杀掉 helper 并返回 'timeout' 让用例红）。
+ * @param {string} [pathEnv] 覆盖 PATH（测试用假 sleep 压缩重试节奏）。
+ * @returns {Promise<number|string>} 退出码或 'timeout'。
+ */
+function runHelperAsync(payload, dir, timeoutMs, pathEnv) {
+  const script = join(dir, 'upgrade.sh')
+  writeFileSync(script, buildUpgradeScript(payload))
+  const env = pathEnv === undefined ? process.env : { ...process.env, PATH: pathEnv }
+  const child = spawn('/bin/sh', [script], { stdio: 'ignore', env })
+  const exit = new Promise((resolve) => child.on('close', (status) => resolve(status)))
+  let timer
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      resolve('timeout')
+    }, timeoutMs)
+  })
+  return Promise.race([exit, timeout]).finally(() => clearTimeout(timer))
+}
+
+test('刷新循环耗尽必须留 WARNING 且 url.txt 原封不动——静默“成功”即红（#293）', async () => {
+  // ① 生成脚本层面：耗尽路径必须显形（标记 + 上限 + 成功/失败两分支 + grep 指引）。
+  const script = buildUpgradeScript({
+    mode: 'restart',
+    hostPid: 1,
+    port: 3080,
+    npm: '/usr/bin/npm',
+    dshBin: '/usr/bin/dsh',
+    execPath: '/usr/bin/node',
+    args: ['--profile', 'web'],
+    cwd: '/tmp',
+    stateDir: '/tmp',
+    logPath: '/tmp/restart.log',
+    resultPath: '/tmp/result.json',
+    outLog: '/tmp/out.log',
+    smokeOut: '/tmp/smoke.out',
+    refreshScript: '/opt/dsh/lib/host/refresh-url.mjs',
+  })
+  assert.match(script, /REFRESHED=0/, '必须有刷新成功标记')
+  assert.match(script, /while \[ "\$i" -lt 60 \]/, '重试上限 60 次')
+  assert.match(script, /if \[ "\$REFRESHED" -eq 1 \]; then/, '耗尽与成功必须分两支')
+  assert.match(script, /say "url\.txt refreshed"/, '成功仍记 refreshed')
+  assert.match(script, /WARNING: url\.txt was NOT refreshed \(no new token URL authenticated within 60 retries\)/, '耗尽必须写 WARNING')
+  assert.match(script, /grep 'dsh web: http' \$LOG_PATH \| tail -1/, 'WARNING 必须指向 refresh 真正读的那个日志（$LOG_PATH，不是 $OUT）')
+
+  // ② 端到端：日志里只有重启前的 URL、新实例一直不打印 → 60 次全部失败。
+  const fixture = await makeFixture()
+  const { payload, dir, out } = fixture
+  const urlFile = join(dir, 'url.txt')
+  const stale = 'http://127.0.0.1:3080/?token=STALE_EVEN_OLDER_2\n'
+  await writeFile(out, 'dsh web: http://127.0.0.1:3080/?token=PRE_RESTART_BASELINE_1\n')
+  await writeFile(urlFile, stale)
+
+  // 新实例（noop 宿主）永远不再打印 URL：复刻「拿不到可认证新 URL」的冷启动现场。
+  const noopHost = join(dir, 'noop-host.mjs')
+  await writeFile(noopHost, 'setTimeout(() => {}, 1000)\n')
+  payload.execPath = process.execPath
+  payload.args = [noopHost, '--profile', 'web', '--no-open']
+  payload.refreshScript = fileURLToPath(new URL('../lib/host/refresh-url.mjs', import.meta.url))
+
+  // 假 sleep（PATH 前置）：60 次重试的真实节奏是 1 分钟起步，测试里压到几秒。
+  const bin = join(dir, 'bin')
+  await mkdir(bin, { recursive: true })
+  const fakeSleep = join(bin, 'sleep')
+  await writeFile(fakeSleep, '#!/bin/sh\nexit 0\n')
+  await chmod(fakeSleep, 0o755)
+
+  const status = await runHelperAsync(payload, dir, 60000, `${bin}:${process.env.PATH}`)
+
+  assert.equal(status, 0, `helper exit=${status}`)
+  const log = await readFile(payload.logPath, 'utf8')
+  assert.match(log, /WARNING: url\.txt was NOT refreshed \(no new token URL authenticated within 60 retries\)/, '耗尽必须在日志里留 WARNING')
+  assert.match(log, /grep 'dsh web: http'/, 'WARNING 必须带 grep 指引（$OUT 已展开成真实路径）')
+  assert.match(log, /\| tail -1/)
+  assert.doesNotMatch(log, /url\.txt refreshed/, '耗尽时不许说 refreshed')
+  assert.equal(await readFile(urlFile, 'utf8'), stale, 'url.txt 必须原封不动')
+  assert.match(log, /done/)
 })
