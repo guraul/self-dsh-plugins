@@ -8869,6 +8869,8 @@ const DEFAULT_PERSONA_EN = join(PACKAGE_ROOT, "persona.default.en.md");
 const LOCALE_SETTINGS_NS = "locale";
 /** 兜底默认绑定升级为 registry 记录的最小重试间隔。 */
 const DEFAULT_BINDING_RETRY_MS = 3e4;
+/** 本轮中途弹过审批卡片时，先收尾流式消息用的占位文案（成功/失败路径共用）。 */
+const APPROVAL_DONE_HINT = "🔐 审批已完成（结果见上方卡片），继续处理…";
 /** Settings namespace paired with the browser card. */
 const IM_BRIDGE_NS = "im-bridge";
 /** Cordis diagnostic name. */
@@ -10030,7 +10032,7 @@ function apply(ctx, config) {
 				if (collected.skipped.length > 0) reply = truncate(`${reply}\n⚠️ ${collected.skipped.length} 张图片未发送（过大、越权或不存在）`, cfg().maxReplyBytes || 2e4);
 				console.log(`[im-bridge] ${ref.key} 完成 (${Buffer.byteLength(reply, "utf8")}B, ${fmtDuration(ms)})`);
 				if (st.approvalDuringTurn) {
-					await sendFinal(ws, frame, streamId, "🔐 审批已完成（结果见上方卡片），继续处理…");
+					await sendFinal(ws, frame, streamId, APPROVAL_DONE_HINT);
 					await sendFinal(ws, frame, generateReqId("stream"), reply);
 				} else await sendFinal(ws, frame, streamId, reply);
 				if (collected.images.length > 0) await sendCollectedPngs(ws, resolveChatId(frame, ref.sender), collected.images);
@@ -10042,7 +10044,7 @@ function apply(ctx, config) {
 				try {
 					const failure = `处理失败: ${truncate(message, 400)}\n\n---\n❌ 耗时 ${fmtDuration(ms)}`;
 					if (st.approvalDuringTurn) {
-						await sendFinal(ws, frame, streamId, "🔐 审批已完成（结果见上方卡片），继续处理…");
+						await sendFinal(ws, frame, streamId, APPROVAL_DONE_HINT);
 						await sendFinal(ws, frame, generateReqId("stream"), failure);
 					} else await sendFinal(ws, frame, streamId, failure);
 				} catch (retryError) {
