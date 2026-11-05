@@ -9,13 +9,13 @@
  *   `GET /state` 当前阶段（JSON，给页面轮询）。
  *
  * 存活策略：观察到完成后再留 15 秒（让页面跳转），或最多 20 分钟——**不常驻**。
- * 只监听 127.0.0.1，只读本机文件，不写任何状态。
+ * 只监听 127.0.0.1，只读本机状态（唯一写出的东西是 `progress-port.json`，用于告诉宿主端口）。
  *
  * 用法（由宿主在交接前拉起，detached）：
  *   node progress-server.mjs --state <stateDir> --url-file <url.txt> --base http://127.0.0.1:3080
  */
 import { execFileSync } from 'node:child_process'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
 
@@ -60,6 +60,24 @@ function resolveUrlFile() {
 }
 
 const urlFile = resolveUrlFile()
+/**
+ * 启动瞬间 `url.txt` 里的地址 = **旧进程的**地址（点击时它还是有效的）。
+ * done 判据必须排除它，否则会立刻把用户送回一个即将死掉的页面（与 issue #293 同源）。
+ */
+const baseline = (await readOrSafe(urlFile)).trim()
+
+/**
+ * 读文件，失败返回空串（启动阶段用）。
+ * @param {string} path 路径。
+ * @returns {Promise<string>} 内容或空串。
+ */
+async function readOrSafe(path) {
+  try {
+    return await readFile(path, 'utf8')
+  } catch {
+    return ''
+  }
+}
 const startedAt = Date.now()
 
 /**
@@ -95,15 +113,28 @@ async function authenticates(url) {
  */
 async function snapshot() {
   const elapsedMs = Date.now() - startedAt
-  const result = JSON.parse((await readOr(join(stateDir, 'result.json'))) || 'null') ?? null
+  // 只认本轮写的 result.json：上一轮失败的 ok:false 会一直留在磁盘上，
+  // 不按 mtime 过滤就会在重试时立刻误报失败、永远不跳转（review 轮 1 的 major 2）。
+  let fresh = false
+  try {
+    fresh = (await stat(join(stateDir, 'result.json'))).mtimeMs > startedAt
+  } catch {
+    fresh = false
+  }
+  const result = fresh ? JSON.parse((await readOr(join(stateDir, 'result.json'))) || 'null') : null
   if (result !== null && result.ok === false) {
-    return { phase: 'failed', detail: `上次升级失败于 ${String(result.failedStep ?? '未知步骤')}，服务已按原样恢复`, elapsedMs }
+    return {
+      phase: 'failed',
+      detail: `本轮升级失败于 ${String(result.failedStep ?? '未知步骤')}，服务已按原样恢复`,
+      hint: `若页面打不开：打开 ${urlFile} 里的地址，或 grep 'dsh web: http' 日志后取最后一条`,
+      elapsedMs,
+    }
   }
   const log = await readOr(join(stateDir, 'restart.log'))
   const tail = log.split('\n').slice(-40).join('\n')
   const candidate = (await readOr(urlFile)).trim()
   const live = candidate === '' ? false : await authenticates(candidate)
-  if (live) {
+  if (live && candidate !== baseline) {
     return { phase: 'done', detail: '新进程已就绪', url: candidate, elapsedMs }
   }
   if (/kickstart ok|relaunching/.test(tail)) return { phase: 'starting', detail: '正在拉起新进程…', elapsedMs }
@@ -165,15 +196,20 @@ tick();
 
 const server = createServer((req, res) => {
   const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
-  const cors = { 'access-control-allow-origin': '*', 'cache-control': 'no-store' }
+  // 页面与 /state 同源，不需要 CORS；不加 `*`，免得任意网页都能探到带令牌的地址。
+  const cors = { 'cache-control': 'no-store' }
   if (path === '/state') {
-    void snapshot().then((state) => {
+    snapshot().then((state) => {
       res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify(state))
       if (state.phase === 'done') {
         // 完成后留一小段让页面跳转，然后自己退出（不常驻）。
         setTimeout(() => server.close(() => process.exit(0)), DONE_GRACE_MS).unref()
       }
+    }).catch(() => {
+      // 状态文件读到一半 / 坏了也要答话，否则唯一的进度信息源会猝死（review 轮 1）。
+      res.writeHead(500, { ...cors, 'content-type': 'application/json; charset=utf-8' })
+      res.end('{"phase":"unknown","detail":"状态暂不可读"}')
     })
     return
   }

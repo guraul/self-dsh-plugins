@@ -344,6 +344,8 @@ export function apply(ctx, config = {}) {
           scriptPath,
           '--state', stateDir,
           '--label', typeof process.env.XPC_SERVICE_NAME === 'string' ? process.env.XPC_SERVICE_NAME : '',
+          // 非 launchd 时的兜底：url.txt 就在实例日志目录旁边。
+          '--url-file', join(stateDir, 'url.txt'),
           '--port', '0',
         ], { detached: true, stdio: 'ignore' })
         child.unref()
