@@ -1,9 +1,6 @@
 /**
- * im-bridge 的冒烟断言（契约见 `docs/plugins/dsh-auto-upgrade.md` 的 `dsh.smoke`）。
- *
- * 只验「纯函数 + 导出面」这类 5 秒内能确定的事——真连企业微信收发消息属人工实测。
- * 重点是 issue #299 那一类：dsh 改了 `installModelSelection` 的签名，声明和试装都看不出来，
- * 只有这里能立刻报红。
+ * im-bridge 的冒烟断言（`dsh.smoke` 契约见 `docs/plugins/dsh-auto-upgrade.md`）。
+ * 重点是 #299 那一类：dsh 改了 `installModelSelection` 签名，声明和试装都看不出来。
  */
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
