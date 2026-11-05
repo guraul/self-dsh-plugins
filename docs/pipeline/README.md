@@ -14,8 +14,6 @@
                 → 分支 task/<issue号>-<slug> + worktree .worktrees/<issue号>-<slug>（基于 origin/main）
 3. 开发         cd 到 worktree 内开发；提交信息建议带 #<issue号>
 4. 本地自测     scripts/pipeline/check-all.sh <插件目录>     # 测试 / check / typecheck
-                scripts/pipeline/install-check.sh <插件目录> # 一次性 DSH_HOME 里验证装配
-                scripts/pipeline/compat-matrix.sh <dsh版本>  # 对任意 dsh 版本跑全插件装配验收（兼容矩阵）
 5. 开 PR        （在 worktree 内）scripts/pipeline/open-pr.sh
                 → 自动推送 + 开 PR，body 首行 Closes #<issue号>
 6. CI           GitHub Actions（.github/workflows/ci.yml）：只跑测试 + node --check 语法检查
@@ -66,12 +64,8 @@
 
 | 文件 | 作用 | 详述 |
 |---|---|---|
-| `audit-subagents.mjs` | product 子代理会话审计：只读、确定性、不调模型 | 本节 §audit-subagents.mjs |
-| `audit-subagents.test.mjs` | 上者的单测 + fixture 集成（`node --test`） | 本节 §audit-subagents.mjs |
 | `check-all.sh` | 逐插件跑 `test` / `check` / `typecheck`，末尾再跑一次构建一致性检查 | 本节 §check-all.sh |
 | `build-check.sh` | 比对各消费仓装的共享包是不是同一个构建（读 `.dsh/build-check.json` 的 `repos`） | 本节 §build-check.sh |
-| `compat-matrix.sh` | 对任意 dsh 版本跑全插件装配验收（兼容矩阵） | 本节 §compat-matrix.sh |
-| `install-check.sh` | 一次性 `DSH_HOME` 里验证插件装配 | 本节 §install-check.sh |
 | `install-hooks.sh` | 安装 `pre-push` 钩子（拦直推 / 删 `origin/main`） | 本节 §pre-push-main-guard.sh / install-hooks.sh |
 | `lib.sh` | 公共常量、日志函数、工具函数；被其他脚本 source | 本节 §lib.sh |
 | `merge-pr.sh` | 审核闸门 → CI → squash 合并 → 清理 → 快进 main（转发壳） | 本节 §merge-pr.sh |
@@ -83,6 +77,8 @@
 | `status.sh` | 只读状态总览（分支 / worktree / 插件 / profile） | 本节 §status.sh |
 | `test-review.sh` | **本仓没有这个文件**：`agent-mobile` 侧 `review.sh` 的 8 组断言测试（转发到共享包后的回归测试） | 本节 §review.sh |
 
+> **已删除（2026-11-05）**：`install-check.sh`（无自动调用且与 `compat-matrix.sh` 重复）、`compat-matrix.sh` 与其定期验证工作流 `.github/workflows/compat-matrix.yml`（周报与升级事件脱钩、只测 L1 装得上）、`audit-subagents.mjs` 及其单测与 LaunchAgent 模板 `.dsh-web/com.deepseek.dsh-audit.plist`（从未运行、只覆盖形态 B、会误判 reviewer）。能力移交 `dsh-auto-upgrade`（issue #300：升级前试装 + 升级后冒烟）。
+
 ### lib.sh
 
 ```bash
@@ -91,7 +87,7 @@ source scripts/pipeline/lib.sh
 ```
 公共常量（`REPO_ROOT` / `GH_REPO` / `FETCH_RETRY` / `PLUGIN_DIRS`）、日志函数（`die` / `info` / `ok` / `mark`）、工具函数（`slugify` / `is_issue_number` / `pkg_script` / `pkg_name` / `worktree_for_branch` / `main_worktree` / `require_gh` / `resolve_pipeline_cli` / `require_pipeline_pkg`）。
 
-`PLUGIN_DIRS` 是**插件目录名白名单**，`status.sh` / `check-all.sh` / `install-check.sh` 全部只从这里取插件。包名不另存副本——需要时用 `pkg_name()` 从各插件 `package.json` 现读。
+`PLUGIN_DIRS` 是**插件目录名白名单**，`status.sh` / `check-all.sh` 全部只从这里取插件。包名不另存副本——需要时用 `pkg_name()` 从各插件 `package.json` 现读。
 
 ### 新增插件检查清单
 
@@ -99,7 +95,7 @@ source scripts/pipeline/lib.sh
 
 | # | 动作 | 不做会怎样 |
 |---|---|---|
-| 1 | 把目录名加进 `lib.sh` 的 `PLUGIN_DIRS` | `install-check.sh` / `check-all.sh` 显式传参报「未知插件目录」；不传参的「跑全部」静默漏掉它；`status.sh` 插件段看不到它 |
+| 1 | 把目录名加进 `lib.sh` 的 `PLUGIN_DIRS` | `check-all.sh` 显式传参报「未知插件目录」；不传参的「跑全部」静默漏掉它；`status.sh` 插件段看不到它 |
 | 2 | 在 CI 矩阵（`.github/workflows/ci.yml`）里加该插件条目 | 该插件的 `node --test` / `node scripts/lint.js` 永远不跑 |
 | 3 | 根 `README.md` 与 `AGENTS.md` 的插件索引表各加一行 | 新人 / agent 不知道它存在 |
 | 4 | 写 `docs/plugins/<插件>.md`（并在 `docs/plugins/README.md` 索引里挂上） | 改之前没有「改哪里、注意什么、怎么验证」可查 |
@@ -275,55 +271,6 @@ scripts/pipeline/check-all.sh dsh-external-discuss   # 只跑指定插件（可�
 | 输出 | 各插件完整输出直接打到 stdout（适合人看）；末尾给汇总表 |
 | 退出码 | 0 = 全部通过（含跳过项）；1 = 有检查失败，或某插件三项都没定义 |
 
-### install-check.sh
-
-```bash
-scripts/pipeline/install-check.sh                    # 全部插件（以 lib.sh 的 PLUGIN_DIRS 为准）
-scripts/pipeline/install-check.sh dsh-external-discuss
-```
-| 项 | 说明 |
-|---|---|
-| 机制 | 每个插件新建一个 `H=$(mktemp -d)`，`DSH_HOME=$H pnpm dlx @deepseek-ai/dsh@<当前版本> plugin --profile headless add <插件绝对路径>`，再 `--dump-config` 并 grep 该插件 `package.json` 里的 `name`——grep 到即"装配成功" |
-| ⚠️ 安全 | **绝不触碰真实 `~/.dsh`**；全程只写临时目录，`trap ... EXIT` 兜底清理（异常退出也清理） |
-| 退出码 | 0 = 全部插件装配成功；1 = 任一插件 add 失败或 dump-config 里没有该包名 |
-
-### compat-matrix.sh
-
-「我要升到 `0.2.2-alpha.2`，现在这几个插件还兼容吗？」——一条命令回答，并顺手给出该写回
-`dsh.compatibility.dshReleases` 的建议值（issue #108）。
-
-```bash
-scripts/pipeline/compat-matrix.sh 0.2.2-alpha.2                              # 全部插件
-scripts/pipeline/compat-matrix.sh 0.2.1-rc.5 dsh-im-bridge-workspaces       # 只验指定插件
-scripts/pipeline/compat-matrix.sh 0.2.2-alpha.2 --json                      # 机器可读（给将来 CI 定期跑留口）
-```
-| 项 | 说明 |
-|---|---|
-| 机制 | 同 `install-check.sh`：每个插件一个临时 `DSH_HOME` + `pnpm dlx @deepseek-ai/dsh@<目标版本> plugin add` + `--dump-config` grep 包名 |
-| 与 install-check 的区别 | install-check 只验**当前已装**版本、只给 pass/fail；本脚本验**任意目标版本**，并把结果与插件 `package.json` 的 `dsh.compatibility.dshReleases[<目标版本>]` **并排**输出 |
-| 只验 L1 | 判据只有「能否装配」。`pass` **不代表业务链路可用**，输出末尾会再提醒一次 |
-| 漂移三分类 | ① 无记录 → `未验证→<建议值>`；② 矩阵 `incompatible` 但 L1 通过 → **「记录更严」**（文案带上矩阵记录的深度，例：「矩阵 L3 记不兼容，本脚本只到 L1」；`dsh-im-bridge` 的 `TS2554` 就是这种，**不是错误**）；③ 矩阵 `compatible` 但 L1 失败 → **⚠️ 真冲突**，退出码 1 |
-| 记录深度 | 读插件的 `dsh.compatibility.dshDepth[<目标版本>]`（L1/L2/L3/L4，定义见 [COMPATIBILITY.md](../COMPATIBILITY.md)），表格里单列「记录深度」；没有就写「未记录」，**不虚报** |
-| ⚠️ 只读 | **绝不**自动改写任何插件的 `dshReleases`。写回矩阵是人的决定（要 review），见 [COMPATIBILITY.md](../COMPATIBILITY.md) |
-| 需构建的插件 | 检测到 `scripts.build` 会提示先 `pnpm --dir <插件> run build:host` + `build:client`（本脚本不构建） |
-| 版本预检 | 目标版本在 npm 上不存在 → 直接明确失败，不产生误导性表格 |
-| 退出码 | 0 = 全部装配成功（含「记录更严」）；1 = 有插件装配失败，或矩阵与实测真冲突 |
-
-### 定期验证（`.github/workflows/compat-matrix.yml`）
-
-「没人记得去跑 `compat-matrix.sh`」这件事由 CI 兜底（issue #114）：
-
-| 项 | 说明 |
-|---|---|
-| 触发 | 每周一 03:00 UTC（北京 11:00）；也可在 Actions 里 `Run workflow` 手动指定版本 |
-| 动作 | 对最新 `next` 版本跑一遍 `compat-matrix.sh --json`（L1 装配验收，全插件） |
-| 落点 | **一条滚动 issue**「兼容矩阵定期验证（自动）」——存在就覆盖正文，不会越刷越多 |
-| 边界 | **只读**：不改任何插件的 `dshReleases` / `dshDepth`，不开 PR、不部署 |
-| 红不红 | 有插件装配失败 → job 失败，但 issue 照常更新（先让人看到表） |
-
-issue 里会单列「需要人回填的」（`未验证→compatible` 的那批）与「记录比 L1 更严」的两类，
-按需回填矩阵后再把结论写进 [`COMPATIBILITY.md`](../COMPATIBILITY.md)。
-
 ### gate（跨仓共用审核闸门）
 
 ```bash
@@ -369,36 +316,6 @@ scripts/pipeline/review-loop-check.sh     # 无参数
 **什么时候跑**：切换 / 升级审核链路之后（步骤见 [`review-loop.md`](./review-loop.md)），以及怀疑「插件莫名其妙没加载」时先跑一遍——它把「声明没进 profile」「软链悬空」「bundle 没装配」这三种静默失败直接分行打出来。**它不启动会话、不调模型、不改配置**；链路是否真通仍需人工在新会话里调一次 `product_delegate`，脚本通过时会把这句话打在最后一行。
 
 **退出码**：**0** = 四组检查全过（仍需做上面那条人工验证）；**1** = 至少一项 `✗`（`✗` 行打到 stderr，末行指向 `review-loop.md` §三 的回滚步骤）。参数 / 用法错误不单独区分——脚本无参数。
-
-### audit-subagents.mjs
-
-定时审计 product 子代理会话（issue #10）：**只读、确定性、不调模型**。用 launchd / cron 直接跑，不要挂到 DSH 的 schedule 提醒上（那会唤醒会话、花模型调用）。
-
-```bash
-node scripts/pipeline/audit-subagents.mjs                       # 最近 24h（默认）
-node scripts/pipeline/audit-subagents.mjs --hours 0 --json      # 全部历史 + 机器可读
-node scripts/pipeline/audit-subagents.mjs --self-test           # 内置 fixture 断言（不读真实会话）
-node --test scripts/pipeline/audit-subagents.test.mjs           # 单测 + 两类 fixture 集成
-```
-
-**扫什么**：`$DSH_HOME/sessions/<workspace>/<session>/session.v4.jsonl.zstd`，按 mtime 取最近 `--hours` 小时（`0` = 不限）。
-
-**多帧 zstd**：DSH 是逐条追加的多帧压缩，Node 内置 `zstdDecompressSync` 只解首帧，本机 `zstd` CLI 报 `incorrect library version`。脚本按 magic `28 b5 2f fd` 找所有候选偏移逐帧解，解不出的伪偏移 / 截断帧跳过。
-
-**判定规则**（只对 product 子代理会话生效）：
-
-| 规则 | 条件 | 含义 |
-|---|---|---|
-| 识别 | `origin === 'subagent'` 且满足任一：`subagent/descriptor.provider` 以 `product-subagents:` 开头 / `agentPreset === 'product-relay'` / 调过 `product_*` 工具 | 只有 product 子代理才判，普通 subagent 与主会话跳过 |
-| A | `agentPreset !== 'product-relay'` | preset 漂移（composition 约束没生效） |
-| B | `tool/call` 出现 `bash` / `read` / `write` / `edit` / `glob` / `grep` | 本地自执行，绕过产品路径 |
-| C | `product_submit` 调用 0 次 **且** 有 `turn/end` | 走完了却没走产品路径；进行中的会话不判 |
-
-**输出**：日报 `.dsh-web/audit/<YYYY-MM-DD>.json`（每个会话一行判定记录，同日重跑覆盖）；stdout 一行 `audited N sessions, X violations (A=… B=… C=…)`。有违规 → exit 1，并在 stderr 列出会话与命中的规则；全绿 → exit 0、无 stderr。参数 / IO 错误 exit 2。`--json` 把完整报告打到 stdout（仍写日报）。
-
-**调度**：模板 [`.dsh-web/com.deepseek.dsh-audit.plist`](../../.dsh-web/com.deepseek.dsh-audit.plist)（每天 03:30，**不自动加载**），日志追加到 `.dsh-web/audit/run.log`。
-
-**已知口径**：`agentPreset` 取会话首行 `session.agentPreset`；早期（product-relay preset 引入前）的历史会话会因 A 规则被判违规，用默认 24h 窗口即可只看现行状态。
 
 ### pre-push-main-guard.sh / install-hooks.sh
 
@@ -460,7 +377,7 @@ scripts/pipeline/install-hooks.sh     # 幂等，可重复执行
    - **留痕**：跳过审计写入 `.dsh-web/reviews/skips/`；按全局规则，本 PR 不计入「已审核」
    ```
 2. **合并只能 squash**；PR body 首行必须 `Closes #<issue号>`（`open-pr.sh` 已内置）。
-3. **绝不用真实 `~/.dsh` 做安装实验**：一律走 `install-check.sh`（一次性 `DSH_HOME`，装完即删）。
+3. **绝不用真实 `~/.dsh` 做安装实验**：一律走一次性 `DSH_HOME`（装完即删）——原 `install-check.sh` 已于 2026-11-05 删除，能力移交 `dsh-auto-upgrade` 的升级前试装（issue #300）。
 4. **版本豁免（version exemption）是逃生舱**：只在拿到用户对**具体版本组合**的明确同意后才用（CLI 需 `--accept-risk`）；用完必须撤销，`dsh plugin --profile web version-exemptions` 应回到 `{}`。插件升版本或 DSH 升版本都会让它自动失效。
 5. **不要 `rm -rf` 已装插件的目录**：宿主已把模块载入内存，目录一删，任何重组合 / 重启都会失败。
 6. **改了 `link:` 目标路径后，必须在 `~/.dsh/profiles/web` 跑一次 `pnpm install`**，否则 `node_modules/<包名>` 的软链会悬空（表现为插件加载失败）。
@@ -474,7 +391,7 @@ scripts/pipeline/install-hooks.sh     # 幂等，可重复执行
 | 服务器 / 部署 | 有（106.13.181.13，rsync + systemd + 线上 curl 验证） | **没有** |
 | 部署脚本 | `deploy.sh` / `rollback.sh` / `fix-opencode-binary.sh` | **不存在**，也不移植 |
 | CI 工作流 | `deploy-web.yml`（tsc + vitest → expo export → rsync → 切软链 → restart → 验证） | `ci.yml`（**只跑测试 + `node --check`**，零部署步骤） |
-| 交付物 | 生产静态站 9928 上的新版本 | **插件被本机 DSH profile 正确装配**（对应 `install-check.sh`） |
+| 交付物 | 生产静态站 9928 上的新版本 | **插件被本机 DSH profile 正确装配**（一次性 `DSH_HOME` 装配验证；原 `install-check.sh` 已于 2026-11-05 删除，能力移交 `dsh-auto-upgrade` #300） |
 | 额外脚本 | — | 见 [§二「脚本清单」](#脚本清单)：完整文件清单**以 `ls scripts/pipeline/` 为准**，本表不重复列举、也不写死数量 |
 | 仓库 | `guraul/agent-mobile` | `guraul/self-dsh-plugins` |
 | 文档语言 | 中英混排 | **一律中文** |
@@ -488,7 +405,7 @@ scripts/pipeline/install-hooks.sh     # 幂等，可重复执行
 | node | `24.21.0`（`nvm use`；`.nvmrc` 未设时以本机为准） |
 | pnpm | `12.x` 可用（`pnpm --version`；CI 由 `pnpm/action-setup@v4` 装） |
 | gh | 已登录，`gh auth status` 通过（`gh pr` / `gh issue` / `gh pr checks` 都用到） |
-| dsh | `dsh --version` 能取到版本号（`install-check.sh` 用它拉同版本一次性安装） |
+| dsh | `dsh --version` 能取到版本号（原 `install-check.sh` 用它拉同版本一次性安装，该脚本已于 2026-11-05 删除） |
 | shell | macOS 自带 bash 3.2（脚本已按 3.2 写） |
 | 网络 | `git fetch origin main` / `gh` / `pnpm dlx` 可用 |
 

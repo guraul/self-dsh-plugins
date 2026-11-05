@@ -118,7 +118,7 @@ GitHub Issue（任务入口）
 | 2 | memx 迁到共享包 | **已完成**（memx PR #56）：`tools/` + `.dsh/pipeline.json` + 五个转发壳 + `test-forwarding.sh`（13 组）；`new-task.sh` 固定 `--worktrees-dir /Users/gubin/workspace/memx-worktrees`（包 PR #23 补的参数；memx 被 opencode 加载源码，worktree 必须建在仓外） | 无。memx 无 CI，按 `ci: []` 如实声明 |
 | 3 | 本仓 `review.sh` 未统一到共享包 | **已完成**（本仓 PR #278，`70eaa3d`）：`prepare` / `prompt` 已转发到包的 `review` 子命令（`--facts` / `--include` / 提示词生成都由包提供）；四仓（agent-mobile / homebase / memx / 本仓）一致 | 剩余已知边界：`publish`（把判定发到 GitHub 当 review）仍留本仓自己实现，包侧 `review publish` 只落盘记录 |
 
-> **`#117` 不是欠账**：它是 `compat-matrix.yml` 每周把结果写进去的**滚动 issue**，按设计长期 open（最近一次成功：2026-11-02）。此前台账把它列为「未完成」是误判。
+> **`#117` 不是欠账**：它是 `compat-matrix.yml` 每周把结果写进去的**滚动 issue**，按设计长期 open（最近一次成功：2026-11-02）。此前台账把它列为「未完成」是误判。（2026-11-05 补记：该工作流与其脚本已删除，能力移交 #300，#117 已关闭。）
 
 ## 五、变更记录
 
@@ -155,3 +155,4 @@ GitHub Issue（任务入口）
 | 2026-11-04 | memx 接入共享包（memx PR #56） | `tools/` + `.dsh/pipeline.json` + 五个转发壳 + `test-forwarding.sh`（13 组）；`new-task.sh` 固定 `--worktrees-dir /Users/gubin/workspace/memx-worktrees`（仓外 worktree 容器）；欠账 #2 清零 |
 | 2026-11-04 | 四仓 `doctor` 一致 | 四仓（self-dsh-plugins / agent-mobile / homebase / memx）同一构建 `cc13260 2026-11-04T12:18:01Z` |
 | 2026-11-04 | 台账收口（#279） | §三 阶段 7 补五行（包四个入口 / 本仓 #278 / memx #56 / 四仓 `doctor`），§四 欠账 #2 / #3 改「已完成」；`README.md` 脚本清单与 §review.sh 的跨仓状态、刷新共享包的构建标识、memx 仓外 worktree 容器说明同步更新 |
+| 2026-11-05 | 删除 `install-check` / `compat-matrix` / `audit-subagents`（#301 / PR #302） | 能力移交 `dsh-auto-upgrade` #300（升级前试装 + 升级后逐插件冒烟）；文档同步清引用，脚本与 CI 文件删除由另一单负责 |

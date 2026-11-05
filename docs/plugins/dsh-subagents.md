@@ -44,7 +44,7 @@ reviewer 默认走**形态 B**（`codebuddy/glm-5.3-flash`）：独立模型家�
 ## 已知坑
 
 1. **provider 重名会让整个 profile 插件树启动失败。** 旧插件注册了 `product-subagents:opencode` 等；
-   本插件 PR4 也要用同一前缀（`scripts/pipeline/audit-subagents.mjs` 硬编码了它）。因此**挂载前必须先卸载旧插件**，
+   本插件 PR4 也要用同一前缀（`scripts/pipeline/audit-subagents.mjs` 硬编码了它；该脚本已于 2026-11-05 删除）。因此**挂载前必须先卸载旧插件**，
    两者不能同时挂。
 2. **不要提前注册 provider。** PR2 的 `lib/index.js` 是空的，这是刻意的：装配验证只验「装得进去」，
    注册对不对留到 PR4 一次验完，否则一个红灯查不出是装配问题还是注册问题。
@@ -69,7 +69,7 @@ reviewer 默认走**形态 B**（`codebuddy/glm-5.3-flash`）：独立模型家�
 scripts/pipeline/check-all.sh dsh-subagents
 
 # 一次性 DSH_HOME 装配验证（绝不碰真实 ~/.dsh）
-scripts/pipeline/install-check.sh dsh-subagents
+# scripts/pipeline/install-check.sh dsh-subagents   # 已于 2026-11-05 删除，能力移交 dsh-auto-upgrade 的升级前试装
 
 # 手工
 cd dsh-subagents && node --test && node --check lib/cli.js

@@ -95,7 +95,7 @@ node --test "test/*.test.mjs"        # 116 项（数据层 87 + 界面 29）
 node --check lib/index.js && node --check lib/client.js
 
 # 仓库级装配验收（一次性 DSH_HOME，装完即删，不碰真实 ~/.dsh、不重启）
-scripts/pipeline/install-check.sh dsh-zhihu-sidebar
+# scripts/pipeline/install-check.sh dsh-zhihu-sidebar   # 已于 2026-11-05 删除，能力移交 dsh-auto-upgrade 的升级前试装
 ```
 
 **测试与装配都过了 ≠ UI 对**：界面要看到效果必须重启 dsh web（会掐断当前会话），

@@ -60,13 +60,13 @@
 
 ### 真实验收怎么走
 
-在一次性 DSH profile 里验证装配（**绝不碰真实 `~/.dsh`**）——这是本插件唯一可信的完整校验：
+在一次性 DSH profile 里验证装配（**绝不碰真实 `~/.dsh`**）——原这是本插件唯一可信的完整校验，其脚本已于 2026-11-05 删除、能力移交 `dsh-auto-upgrade`（issue #300）：
 
 ```sh
-scripts/pipeline/install-check.sh dsh-im-bridge-workspaces
+# scripts/pipeline/install-check.sh dsh-im-bridge-workspaces   # 已于 2026-11-05 删除，能力移交 dsh-auto-upgrade 的升级前试装
 ```
 
-它新建 `mktemp -d` 的 `DSH_HOME`，`pnpm dlx @deepseek-ai/dsh@<当前版本> plugin --profile headless add <插件绝对路径>`，
+该脚本已于 2026-11-05 删除（能力移交 `dsh-auto-upgrade` 的升级前试装）；它当时的机制：新建 `mktemp -d` 的 `DSH_HOME`，`pnpm dlx @deepseek-ai/dsh@<当前版本> plugin --profile headless add <插件绝对路径>`，
 再用 `--dump-config` grep 到包名 `@mhfire/dsh-im-bridge` 即「装配成功」，装完即删。
 
 ### DSH 版本兼容（peer 声明怎么放宽）
@@ -80,7 +80,7 @@ scripts/pipeline/install-check.sh dsh-im-bridge-workspaces
   `tsc` 报 `TS2554: Expected 1 arguments, but got 2`（`src/index.ts:1285`），且 `reasoningEffort` 会静默失效。
   已如实记为 `incompatible`。注意门禁用 `includePrerelease`，`^0.2.1-rc.2` 在运行期仍会放行 alpha.2
   ——那不等于我们宣称支持它。
-- 放宽前请重跑上面的 `install-check.sh`；**不要**用 `dsh plugin allow-version` 的版本豁免代替验证。
+- 放宽前请重跑上面的装配验证（原 `install-check.sh` 已于 2026-11-05 删除，能力移交 `dsh-auto-upgrade` 的升级前试装）；**不要**用 `dsh plugin allow-version` 的版本豁免代替验证。
 
 ### 本机开发命令（依赖已装好时）
 
