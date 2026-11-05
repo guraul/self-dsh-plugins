@@ -12,8 +12,9 @@
     `compatible`/**L1**；失败不记结论（走自动开 issue）。
   - `patchCompatibility()`：不重排文件，只插/换 `dshReleases` / `dshDepth` 那一行，**保留 CRLF**；
     **深度只升不降**；写完 `JSON.parse` 自检；重复回填幂等。
-  - `GET /api/dsh-auto-upgrade/refill`：只读预览，不写盘、不开 PR（写入与开 PR 是下一步）。
-- 单测 12 条。
+  - `compatRow()`：生成矩阵行（**插入表格**留到真正写盘那一步，避免没用的代码先落地）。
+  - `GET /api/dsh-auto-upgrade/refill`：只读预览，不写盘、不开 PR。
+- 单测 10 条。
 
 ## [0.6.1] — 2026-11-05
 

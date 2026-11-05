@@ -2,7 +2,6 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  appendCompatRow,
   buildRefillPlan,
   compatRow,
   patchCompatibility,
@@ -87,20 +86,6 @@ test('compatRow：写清包版本、dsh 版本、深度与「怎么验的」', (
   assert.match(l1, /行为未验证|插件未写 dsh\.smoke/, 'L1 要说明行为没验')
 })
 
-test('appendCompatRow：插在矩阵表末尾，不动表头', () => {
-  const doc = ['# 兼容矩阵', '', '| 插件 | 包版本 |', '|---|---|', '| `a` | `a@1` |', '', '尾巴'].join('\n')
-  const next = appendCompatRow(doc, '| `b` | `b@1` |')
-  assert.ok(next !== undefined)
-  const lines = next.split('\n')
-  assert.equal(lines[4], '| `a` | `a@1` |', '原有行不动')
-  assert.equal(lines[5], '| `b` | `b@1` |', '新行追加在表尾')
-  assert.equal(lines[6], '', '表格之后的空行还在')
-})
-
-test('appendCompatRow：文档里没有矩阵表时返回 undefined', () => {
-  assert.equal(appendCompatRow('# 空文档', '| x |'), undefined)
-})
-
 test('patchCompatibility：深度只升不降——已有 L3 时不会被只到 L2 的冒烟改浅', () => {
   const withL3 = CRLF_FIXTURE.replace('"0.2.1-rc.2": "L2"', '"0.2.1-rc.2": "L3"')
   const result = patchCompatibility({ text: withL3, version: '0.2.1-rc.2', verdict: 'compatible', depth: 'L2' })
@@ -118,16 +103,6 @@ test('patchCompatibility：返回实际采用的深度（只升不降时以旧�
   assert.equal(kept.depth, 'L3', '矩阵行必须跟补丁保持一致')
   const raised = patchCompatibility({ text: withL3, version: '0.9.9', verdict: 'compatible', depth: 'L1' })
   assert.equal(raised.depth, 'L1')
-})
-
-test('appendCompatRow：CRLF 文档插入后仍是纯 CRLF，绝不出现 \\r\\r\\n', () => {
-  const doc = ['# 矩阵', '', '| 插件 | 包版本 |', '|---|---|', '| `a` | `a@1` |', '', '尾'].join('\r\n')
-  const next = appendCompatRow(doc, '| `b` | `b@1` |')
-  assert.ok(next !== undefined)
-  assert.equal(next.includes('\r\r'), false, '双 CR 是最典型的行尾拼错')
-  assert.equal((next.match(/\n/g) ?? []).length, (doc.match(/\n/g) ?? []).length + 1)
-  assert.match(next, /\| `a` \| `a@1` \|\r\n\| `b` \| `b@1` \|/, '新行要用 CRLF 接在表格末尾')
-  assert.equal(next.split('\n').every((line, index, all) => index === all.length - 1 || line.endsWith('\r')), true, '除最后一行外都要以 CR 结尾')
 })
 
 test('compatRow：L3/L4 的说明不能写成「兜底 + 自报断言」', () => {

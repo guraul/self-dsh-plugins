@@ -227,7 +227,7 @@ pnpm run check                                # node --check
 的插件只跑兜底三项并标 `partial`——不假装验过行为。`run(context)` 会收到宿主的
 `dshVersion` / `dshDir`：断言要验**宿主实际加载的那份**，别 import 到插件自己 node_modules 的旧副本。
 目前声明了 `dsh.smoke` 的有 `dsh-im-bridge-workspaces` 与 `dsh-subagents`。
-冒烟失败会自动开 issue（按标题去重；开单失败只记日志）。`GET /refill` 是只读预览：算出「该记什么结论、矩阵行」，**不写盘也不开 PR**。`partial` 只在兜底三项全过时才算「通过」，兜底本身失败照样开单。
+冒烟失败会自动开 issue（按标题去重；开单失败只记日志）。`GET /refill` 是只读预览：算出「该记什么结论、矩阵行」，**不写盘也不开 PR**（插表格与开 PR 在下一步）。`partial` 只在兜底三项全过时才算「通过」，兜底本身失败照样开单。
 
 ## 重启/升级期间的进度页（#300）
 

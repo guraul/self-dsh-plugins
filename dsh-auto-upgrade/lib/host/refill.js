@@ -3,7 +3,6 @@
  *
  * - `buildRefillPlan()`：哪些插件该记什么结论、什么深度；
  * - `patchCompatibility()`：不重排整个文件，只插/换那一行（**保留 CRLF**——整份重排会炸出几百行假 diff）；
- * - `appendCompatRow()`：往 `docs/COMPATIBILITY.md` 矩阵表尾插一行。
  */
 
 /** 允许写进矩阵的深度，由浅到深（回填只看这四个值，别的一律当非法）。 */
@@ -156,31 +155,4 @@ export function compatRow(input) {
     L4: '沿用之前的更深记录（业务链路已实测）',
   }[input.depth] ?? `本次回填：${String(input.depth)}`)
   return `| \`${input.name}\` | \`${input.packageVersion}\` | \`${input.version}\` | **${input.depth}** | ✅ 通过 | ${input.date ?? ''} | ${how} |`
-}
-
-/**
- * 把一行插进矩阵表末尾（表头保持不变，行序保持追加）。
- * @param {string} text COMPATIBILITY.md 原文。
- * @param {string} row 要插的行。
- * @returns {string|undefined} 新文本；找不到矩阵表时 undefined。
- */
-export function appendCompatRow(text, row) {
-  // 注意用 `\r?\n` 切：直接 `split('\n')` 会把 `\r` 留在行尾，再按 CRLF 拼回去就成了 `\r\r\n`。
-  const newline = text.includes('\r\n') ? '\r\n' : '\n'
-  const lines = text.split(/\r?\n/)
-  let header = -1
-  for (let i = 0; i < lines.length; i += 1) {
-    if (lines[i].startsWith('| 插件 |')) {
-      header = i
-      break
-    }
-  }
-  if (header === -1) return undefined
-  let last = header
-  for (let i = header + 1; i < lines.length; i += 1) {
-    if (!lines[i].startsWith('|')) break
-    last = i
-  }
-  lines.splice(last + 1, 0, row)
-  return lines.join(newline)
 }
