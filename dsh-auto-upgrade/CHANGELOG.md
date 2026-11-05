@@ -3,6 +3,16 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.8.2] — 2026-11-05
+
+### 变更
+
+- **进度页改用莱茵生命（Rhine Lab）风格**：配色取自 `Galaxy-2001/Rhine-Lab-Codex-Theme` 的 Pioneer
+  终端面板（`skin.css` 变量 + `skin.json` 的 accent）——奶油白 `#F6F1E5` / 石墨黑 `#252B2A` /
+  莱茵橙 `#DC7946` / 深赭 `#8B3C1C` / 分隔线 `#D5CDBD`。进度条走「深赭 → 橙」渐变，阶段用方块标记
+  （已过实心、未到空框），右上 `RHINE LAB`、底部 `PIONEER TERMINAL`。
+- 动效保持克制（用户要求）：仍是每帧朝目标挪 7%、400ms 轮询、完成后停 600ms 再跳转，没有加扫描线/数字滚动。
+
 ## [0.8.1] — 2026-11-05
 
 ### 修复
