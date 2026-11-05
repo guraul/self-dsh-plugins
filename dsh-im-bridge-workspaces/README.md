@@ -232,3 +232,23 @@ launchctl kickstart -k gui/$(id -u)/com.deepseek.dsh-web.self-dsh-plugins
 - 卡片被点后企微要求 5 秒内回执才能更新卡片；网络差时卡片会停留在「待审批」的样子，
   但审批结果本身仍然生效（以随后的文字回执为准）。
 - 群聊里卡片所有成员可见；非发起者点击会被拒绝并收到提示。
+
+---
+
+## 10. 来源与许可
+
+本插件 fork 自 npm 包 [`@mhfire/dsh-im-bridge@0.4.4`](https://www.npmjs.com/package/@mhfire/dsh-im-bridge)，
+上游仓库为 [MHfire/dsh-im-bridge](https://github.com/MHfire/dsh-im-bridge)，上游许可为 **MIT**。
+上游原版说明见 [README.upstream.md](./README.upstream.md)。
+
+本 fork 相对上游的改动：
+
+| 改动 | 说明 |
+| --- | --- |
+| 多工作区 `/ws` | 命令切换、`/ws add` 登记、按工作区分流会话（见第 1 节） |
+| 接收图片 | 企微图片转 DSH 附件，按文件头魔数识别格式（见第 8 节） |
+| `{{cwd}}` 提示词变量 | 人设文件里可引用当前工作目录（`registerPromptVariable` 注册） |
+| 审批转接 | 审批请求转企微卡片 / 文本兜底（见第 9 节） |
+| DSH 版本适配 | 放宽 peer 依赖，并在 `package.json` 的 `dsh.compatibility` 登记各 DSH 版本的 verdict |
+
+本 fork 的改动同样以 **MIT** 许可发布，版权声明见 [`LICENSE`](./LICENSE)。
