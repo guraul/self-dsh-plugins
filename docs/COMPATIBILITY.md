@@ -39,7 +39,7 @@
 | 深度 | 验的是什么 | 怎么验 | 能得出什么结论 |
 |---|---|---|---|
 | **L1 装配** | profile 能否把这个插件装进去 | 一次性 `DSH_HOME` + `plugin add` + `--dump-config` grep 包名（原 `install-check.sh` / `compat-matrix.sh`，已于 2026-11-05 删除，能力移交 `dsh-auto-upgrade` #300） | 插件不会因为装配失败而「莫名其妙没加载」 |
-| **L2 启动** | 加载后会不会当场报错 | headless 起一次，看插件自身日志有没有异常栈 | 初始化路径没炸 |
+| **L2 启动 + 冒烟** | 加载后会不会当场报错，**行为断言还过不过** | ① headless 起一次，看插件自身日志有没有异常栈；② 升级后跑插件的 `dsh.smoke` 断言（`/api/dsh-auto-upgrade/smoke`，见 #300 P2） | 初始化路径没炸，且插件自报的基本行为没漂 |
 | **L3 编译期** | 依赖的官方 API 有没有变 | 该版本依赖下 `tsc` / `pnpm run build`（只对有构建步骤的插件有意义） | 类型契约没漂移（im-bridge 的 `TS2554` 就是这层抓到的） |
 | **L4 业务链路** | 功能是否真的可用 | 真机实测：发消息 / 点按钮 / `/ws` 切换 | 端到端可用 |
 
@@ -59,6 +59,10 @@
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.1` | `0.2.2-alpha.2` | **L3** | ❌ **不兼容（未放宽）**<br>装配/加载可过，但 `tsc` 报 `TS2554`，且 `reasoningEffort` 静默失效 | 2026-10-29 | 一次性 `DSH_HOME` 装配 + headless 启动均通过；**CI 解析到 alpha.2 类型后 `pnpm run typecheck` 失败** → 见文末「已知差异」 |
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.2` | `0.2.2-rc.1` | **L3** | ✅ 通过（**已放宽**） | 2026-11-05 | 按 rc.1 类型跑 `tsc` 通过（临时 `paths` 指向已装的 rc.1）；`pnpm test` 54/54；`build:host` 产物 `node --check` 通过；按 arity 分流 `installModelSelection`（issue #299） |
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.2` | `0.2.2-alpha.2` | **L3** | ✅ 通过（**已放宽**） | 2026-11-05 | 同上，按 alpha.2 类型跑 `tsc` 通过（arity 同为 1，走同一条适配路径） |
+
+> **显示口径（#300 P3）**：只有 **L2 及以上**的自述 `compatible` 才在界面上显示「兼容」；
+> 只到 **L1** 或没记深度 → 显示「**可装配 · 未验证行为**」。理由：声明覆盖 ≠ 行为验证过
+> ——2026-11-05 的 `installModelSelection` 签名变更就是装配通过、冒烟才抓到的。
 
 **未验证的版本不要写进表**。验不过的版本按下面"失败时怎么记"处理；写进表的每条都要有深度（缺了就写「未记录」）。
 

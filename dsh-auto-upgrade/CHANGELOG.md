@@ -3,6 +3,17 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.6.1] — 2026-11-05
+
+### 变更
+
+- **深度口径接进判定与显示（#300 P3）**：新增 `declaredDepth()` 读 `dsh.compatibility.dshDepth[<版本>]`，
+  插件判定项带 `depth`。设置页插件表里，自述 `compatible` 但深度**只到 L1**（或没记）的，
+  不再显示「兼容」，改显示「**可装配 · 未验证行为（L1）**」并标黄。
+  - 依据：L1 = 装配通过（试装），L2 = 启动 + 冒烟通过。声明覆盖不等于行为验过
+    ——2026-11-05 的 `installModelSelection` 签名变更就是装配通过、冒烟才抓到的。
+  - 单测：`declaredDepth` 的合法/非法/缺失，`behaviourUnverified` 的 8 种组合。
+
 ## [0.6.0] — 2026-11-05
 
 ### 新增

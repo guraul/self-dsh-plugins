@@ -104,6 +104,7 @@ window.__ModuleLoader__.load({
       'settings.pluginsFor': '已装插件兼容性（按 {target} 评估）',
       'settings.pluginsForInstalled': '已装插件兼容性（按本机已装版本评估）',
       'settings.pluginOk': '兼容',
+      'settings.pluginAssembled': '可装配 · 未验证行为（L1）',
       'settings.pluginBad': '不兼容',
       'settings.pluginExempt': '已豁免',
       'settings.pluginUnknown': '信息不足',
@@ -184,6 +185,7 @@ window.__ModuleLoader__.load({
       'settings.pluginsFor': 'Installed plugin compatibility (evaluated against {target})',
       'settings.pluginsForInstalled': 'Installed plugin compatibility (evaluated against the installed version)',
       'settings.pluginOk': 'compatible',
+      'settings.pluginAssembled': 'installable · behaviour unverified (L1)',
       'settings.pluginBad': 'incompatible',
       'settings.pluginExempt': 'exempted',
       'settings.pluginUnknown': 'unknown',
@@ -454,6 +456,19 @@ window.__ModuleLoader__.load({
       if (phase === 'reconnecting') return t('overlay.reconnecting')
       if (phase === 'token-rotated') return t('overlay.tokenRotated')
       return t('overlay.handingOff', { step: phase ?? '…' })
+    }
+
+    /**
+     * 自述「兼容」但深度只到 L1（或根本没记深度）→ 只能叫「可装配，未验证行为」。
+     *
+     * 依据 #300：L1 = 装配通过（试装），L2 = 启动 + 冒烟通过。声明覆盖不等于行为验过
+     * ——2026-11-05 的 `installModelSelection` 签名变更就是声明覆盖、行为坏了。
+     * @param {any} plugin 插件判定项。
+     * @returns {boolean} 是否需要降级显示文案。
+     */
+    function behaviourUnverified(plugin) {
+      if (plugin?.declared?.verdict !== 'compatible') return false
+      return plugin.depth !== 'L2' && plugin.depth !== 'L3' && plugin.depth !== 'L4'
     }
 
     /**
@@ -1393,10 +1408,12 @@ window.__ModuleLoader__.load({
           key: 's',
           className: plugin.compatible === false
             ? (plugin.exempted === true ? 'dsh-au-warn' : 'dsh-au-bad')
-            : (plugin.known === false ? 'dsh-au-muted' : 'dsh-au-ok'),
+            : (plugin.known === false ? 'dsh-au-muted' : (behaviourUnverified(plugin) ? 'dsh-au-warn' : 'dsh-au-ok')),
         }, plugin.compatible === false
           ? (plugin.exempted === true ? t('settings.pluginExempt') : t('settings.pluginBad'))
-          : (plugin.known === false ? t('settings.pluginUnknown') : t('settings.pluginOk'))),
+          : (plugin.known === false
+            ? t('settings.pluginUnknown')
+            : (behaviourUnverified(plugin) ? t('settings.pluginAssembled') : t('settings.pluginOk')))),
         plugin.detail === undefined ? undefined : h('details', { key: 'd', className: 'dsh-au-details' }, [
           h('summary', { key: 's' }, t('settings.detail')),
           h('div', { key: 'b', className: 'dsh-au-detail-body' }, plugin.detail),
@@ -1590,6 +1607,7 @@ window.__ModuleLoader__.load({
     // 导出给单测（`test/client-watchdog.test.mjs`）：watchdog 的相位推进与相位 → 文案映射。
     exports.startWatchdog = startWatchdog
     exports.phaseText = phaseText
+    exports.behaviourUnverified = behaviourUnverified
     return module.exports
   },
 })
