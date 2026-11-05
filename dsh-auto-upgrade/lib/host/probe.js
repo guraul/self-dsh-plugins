@@ -40,6 +40,20 @@ export function buildProbeCommands(options) {
 }
 
 /**
+ * `--dump-config` 里是否**恰好**有这条插件（`- id: <名字>` 行）。
+ *
+ * 不用 `includes`：同一次性 profile 里插件是顺序 add 的，后装的插件 dump 里会带上前面
+ * 装过的名字；子串匹配还会被「名字是另一个名字的前缀」骗到。
+ * @param {string} text `--dump-config` 输出。
+ * @param {string} name 插件名。
+ * @returns {boolean} 命中返回 true。
+ */
+export function probeHasPlugin(text, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|\\n)\\s*-?\\s*id:\\s*["']?${escaped}["']?\\s*(\\n|$)`).test(text)
+}
+
+/**
  * 判定一次探针（纯函数，便于单测）。
  * @param {{addExit: number|null, dumpExit?: number|null, dumpText?: string, pluginName: string}} result 原始结果。
  * @returns {{ok: boolean, detail: string}} 结论。
@@ -52,7 +66,7 @@ export function judgeProbe(result) {
     return { ok: false, detail: `--dump-config 退出码 ${String(result.dumpExit)}` }
   }
   const text = typeof result.dumpText === 'string' ? result.dumpText : ''
-  if (!text.includes(result.pluginName)) {
+  if (!probeHasPlugin(text, result.pluginName)) {
     return { ok: false, detail: '--dump-config 里没有该插件（装了但没进 profile）' }
   }
   return { ok: true, detail: '装配通过' }
@@ -76,6 +90,9 @@ export function probeKey(options) {
  */
 export function cacheHit(entry, now, ttlMs = PROBE_TTL_MS) {
   if (entry === undefined || typeof entry.at !== 'number') return false
+  if (!Number.isFinite(entry.at)) return false
+  // at 在「未来」说明时钟被改过或文件被手改，不能当新鲜结论。
+  if (entry.at > now) return false
   return now - entry.at <= ttlMs
 }
 

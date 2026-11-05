@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
-import { linkTargets, runProbes } from './host/probe.js'
+import { cacheHit, linkTargets, runProbes } from './host/probe.js'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
 import { DEFAULT_GITHUB_API, fetchReleaseNotes, repositorySlug } from './host/notes.js'
@@ -39,7 +39,7 @@ import { listRunningSessions } from './host/sessions.js'
 import { checkStaleness } from './host/staleness.js'
 import { localDate, openStores, resolveStateDir } from './host/state.js'
 import { TaskRegistry } from './host/tasks.js'
-import { preflight, readInstalledVersion, resolveInstallation } from './host/toolchain.js'
+import { preflight, readInstalledVersion, resolveInstallation, run } from './host/toolchain.js'
 import {
   LOG_FILE,
   RESULT_FILE,
@@ -496,13 +496,15 @@ export function apply(ctx, config = {}) {
     // 现有 preflight 只读声明，看不出「声明覆盖但装不上」。探针在一个一次性
     // DSH_HOME 里把每个 link:/file: 插件真装一遍；结论只作警告，不进阻断判定。
     const probeCachePath = join(stateDir, 'probe-cache.json')
-    /** @type {null | {startedAt:number, target:string}} */
+    /** @type {null | {startedAt:number, target:string|null}} */
     let probeRun = null
+    /** 上一轮探针的整体异常（前端据此提示，而不是看着「没动静」）。 */
+    let probeError = null
 
     /** 把缓存文件的键拆回字段，供 UI 直接用。 */
-    const probeEntries = (cache) => Object.entries(cache ?? {}).map(([key, value]) => {
+    const probeEntries = (cache, now) => Object.entries(cache ?? {}).map(([key, value]) => {
       const [version, name] = key.split('|')
-      return { version, name, ...value }
+      return { version, name, ...value, stale: !cacheHit(value, now) }
     })
 
     route(API.probe, {
@@ -518,11 +520,16 @@ export function apply(ctx, config = {}) {
           running: probeRun !== null,
           startedAt: probeRun === null ? null : probeRun.startedAt,
           target: probeRun === null ? null : probeRun.target,
-          entries: probeEntries(cache),
+          error: probeError,
+          entries: probeEntries(cache, Date.now()),
         })
       },
       POST: async (_req, res) => {
+        // 先占位再 await：否则两个并发 POST 都能穿过守卫（issue #300 review）。
         if (probeRun !== null) throw new RequestError(409, CODE.BUSY, '试装探针正在运行')
+        probeRun = { startedAt: Date.now(), target: null }
+        probeError = null
+        try {
         if (installation === undefined || profileDir === undefined) {
           throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'profile 信息不可用')
         }
@@ -539,7 +546,7 @@ export function apply(ctx, config = {}) {
           writeJson(res, 200, { ok: true, skipped: true, detail: 'profile 里没有 link:/file: 插件，无可试装项' })
           return
         }
-        probeRun = { startedAt: Date.now(), target }
+        probeRun.target = target
         writeJson(res, 202, { ok: true, startedAt: probeRun.startedAt, target, count: targets.length })
         void (async () => {
           let home
@@ -566,12 +573,18 @@ export function apply(ctx, config = {}) {
             })
             await writeFile(probeCachePath, `${JSON.stringify(next, null, 2)}\n`)
           } catch (error) {
-            console.warn(`[dsh-auto-upgrade] 试装探针失败：${error instanceof Error ? error.message : String(error)}`)
+            probeError = error instanceof Error ? error.message : String(error)
+            console.warn(`[dsh-auto-upgrade] 试装探针失败：${probeError}`)
           } finally {
             if (home !== undefined) await rm(home, { recursive: true, force: true }).catch(() => {})
             probeRun = null
           }
         })()
+        } catch (error) {
+          // 起跑前就失败（读 profile 失败等）：释放占位，否则会一直被 409 挡住。
+          probeRun = null
+          throw error
+        }
       },
     })
 
