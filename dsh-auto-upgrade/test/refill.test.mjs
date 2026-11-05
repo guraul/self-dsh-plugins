@@ -111,3 +111,11 @@ test('patchCompatibility：深度只升不降——已有 L3 时不会被只到 
   assert.equal(upgrade.changed, true, '更深的结论要能写进去')
   assert.match(upgrade.text, /"0\.2\.1-rc\.2": "L4"/)
 })
+
+test('patchCompatibility：返回实际采用的深度（只升不降时以旧的更深者为准）', () => {
+  const withL3 = CRLF_FIXTURE.replace('"0.2.1-rc.2": "L2"', '"0.2.1-rc.2": "L3"')
+  const kept = patchCompatibility({ text: withL3, version: '0.2.1-rc.2', verdict: 'compatible', depth: 'L2' })
+  assert.equal(kept.depth, 'L3', '矩阵行必须跟补丁保持一致')
+  const raised = patchCompatibility({ text: withL3, version: '0.9.9', verdict: 'compatible', depth: 'L1' })
+  assert.equal(raised.depth, 'L1')
+})

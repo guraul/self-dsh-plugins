@@ -123,7 +123,7 @@ export function readInObject(text, objectKey, entryKey) {
  * @param {string} input.version dsh 版本。
  * @param {string} input.verdict `compatible` / `incompatible`。
  * @param {string} input.depth 深度，`L1`–`L4`。
- * @returns {{text: string, changed: boolean}} 结果。
+ * @returns {{text: string, changed: boolean, depth: string}} 结果（`depth` 是**实际采用**的深度，可能比入参更深）。
  * @throws {Error} 没找到 `dsh.compatibility` 结构，或深度非法。
  */
 export function patchCompatibility(input) {
@@ -138,7 +138,9 @@ export function patchCompatibility(input) {
   if (withVerdict === undefined) throw new Error('package.json 里没有 dsh.compatibility.dshReleases')
   const withDepth = upsertInObject(withVerdict, 'dshDepth', input.version, depth)
   if (withDepth === undefined) throw new Error('package.json 里没有 dsh.compatibility.dshDepth')
-  return { text: withDepth, changed: withDepth !== input.text }
+  // 写盘前的最后一道闸：补丁必须还能被解析，否则宁可报错也不能把文件写坏。
+  JSON.parse(withDepth)
+  return { text: withDepth, changed: withDepth !== input.text, depth }
 }
 
 /**
@@ -179,5 +181,6 @@ export function appendCompatRow(text, row) {
     last = i
   }
   lines.splice(last + 1, 0, row)
-  return lines.join('\n')
+  // 保留原文档的行尾风格（CRLF 文档别混进 LF 行）。
+  return lines.join(text.includes('\r\n') ? '\r\n' : '\n')
 }

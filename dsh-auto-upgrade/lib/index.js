@@ -752,7 +752,14 @@ export function apply(ctx, config = {}) {
           writeJson(res, 200, { ok: true, skipped: true, detail: '还没有冒烟结果；先跑一次 POST /smoke' })
           return
         }
-        const version = installation === undefined ? undefined : await readInstalledVersion(installation.manifestPath)
+        if (profileDir === undefined || installation === undefined) {
+          throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'profile 信息不可用')
+        }
+        const version = await readInstalledVersion(installation.manifestPath)
+        if (typeof version !== 'string' || version === '') {
+          // 拿不到版本就绝不能生成补丁：`String(undefined)` 会写出键名 `"undefined"` 的垃圾记录。
+          throw new RequestError(500, CODE.PRECONDITION, '读不到当前 dsh 版本，无法回填')
+        }
         const plan = buildRefillPlan({ version, results })
         const date = new Date().toISOString().slice(0, 10)
         // 复用冒烟那套「从 profile 依赖还原插件目录」的逻辑，避免再写一遍路径解析。
@@ -771,12 +778,12 @@ export function apply(ctx, config = {}) {
             continue
           }
           try {
-            const patched = patchCompatibility({ text, version: String(version), verdict: entry.verdict, depth: entry.depth })
+            const patched = patchCompatibility({ text, version, verdict: entry.verdict, depth: entry.depth })
             entries.push({
               name: entry.name,
-              depth: entry.depth,
+              depth: patched.depth,
               changed: patched.changed,
-              row: compatRow({ name: entry.name, packageVersion: `${entry.name}@${String(packageVersion)}`, version: String(version), depth: entry.depth, date }),
+              row: compatRow({ name: entry.name, packageVersion: `${entry.name}@${String(packageVersion)}`, version, depth: patched.depth, date }),
             })
           } catch (error) {
             entries.push({ name: entry.name, depth: entry.depth, changed: false, error: error instanceof Error ? error.message : String(error) })
