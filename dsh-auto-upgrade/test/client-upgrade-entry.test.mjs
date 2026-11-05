@@ -716,3 +716,105 @@ test('「当前版本」一律用实时已装版本；缓存 installed 只说明
   assert.match(settings, /发现新版本 0\.2\.2-alpha\.2（当前 0\.2\.0-rc\.2）/, '设置页同样用实时值')
   assert.match(settings, /上次检查时是 0\.2\.1-rc\.5/)
 })
+
+/** 一份「没有升级、没有阻塞」的 /status 快照：让新面板的断言不被别的区块干扰。 */
+const CALM_STATUS = statusWith(
+  { date: TODAY, decision: 'up-to-date', installed: '0.2.0-rc.2', target: '0.2.0-rc.2', channel: 'latest', tags: TAGS, incompatible: [] },
+  { dismissed: true, overlay: false },
+)
+
+test('设置页：试装 / 冒烟两个按钮常驻，无数据时给占位文案（不留空白面板）', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: CALM_STATUS,
+    [API.probe]: { ok: true, running: false, startedAt: null, target: null, error: null, entries: [] },
+    [API.smoke]: { ok: true, running: false, startedAt: null, error: null, at: null, results: [] },
+  })
+  const tree = await react.mount(Settings, {})
+  const labels = collect(tree, (node) => node.type === 'button').map((node) => textOf(node))
+  assert.ok(labels.includes('跑一次试装'), `试装按钮缺失：${JSON.stringify(labels)}`)
+  assert.ok(labels.includes('跑一次冒烟'), `冒烟按钮缺失：${JSON.stringify(labels)}`)
+  const text = textOf(tree)
+  assert.ok(text.includes('还没有试装结论'), '无数据时必须显示试装占位文案')
+  assert.ok(text.includes('还没有冒烟结论'), '无数据时必须显示冒烟占位文案')
+})
+
+test('设置页：进设置页就 GET 一次已缓存的试装 / 冒烟结论，不逼用户先点一次', async () => {
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: CALM_STATUS,
+    [API.probe]: { ok: true, running: false, error: null, entries: [{ version: '0.2.0-rc.2', name: 'dsh-awake', at: Date.now(), ok: true, detail: '装配通过', stale: false }] },
+    [API.smoke]: { ok: true, running: false, error: null, at: Date.now(), results: [{ name: 'dsh-awake', ok: true, partial: false, checks: [] }] },
+  })
+  const text = textOf(await react.mount(Settings, {}))
+  assert.equal(calls.filter((call) => call.url === API.probe && call.method === 'GET').length, 1, '进设置页要 GET 一次试装结论')
+  assert.equal(calls.filter((call) => call.url === API.smoke && call.method === 'GET').length, 1, '进设置页要 GET 一次冒烟结论')
+  assert.ok(text.includes('dsh-awake'), '已缓存的结论要直接铺出来')
+  assert.ok(text.includes('装配通过'), '要显示试装结论摘要')
+})
+
+test('设置页：试装 / 冒烟结论逐插件一行（红绿点 + 插件名 + 结论摘要），明细折叠', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: CALM_STATUS,
+    [API.probe]: {
+      ok: true,
+      running: false,
+      error: null,
+      entries: [
+        { version: '0.2.2-alpha.2', name: 'dsh-awake', at: Date.now(), ok: true, detail: '装配通过', stale: false },
+        { version: '0.2.2-alpha.2', name: 'dsh-usage-panel', at: Date.now(), ok: false, detail: 'plugin add 退出码 1', stale: true },
+      ],
+    },
+    [API.smoke]: {
+      ok: true,
+      running: false,
+      error: null,
+      at: Date.now(),
+      results: [
+        { name: 'dsh-awake', ok: true, partial: true, checks: [{ name: 'bundle', ok: true, detail: '在 dsh.profile.bundles 里启用' }] },
+        { name: 'dsh-subagents', ok: false, partial: false, detail: '插件自报 ok=false', checks: [{ name: 'bundle', ok: false, detail: '没被 profile 启用（插件不会被加载）' }] },
+      ],
+    },
+  })
+  const tree = await react.mount(Settings, {})
+  const text = textOf(tree)
+  for (const name of ['dsh-awake', 'dsh-usage-panel', 'dsh-subagents']) {
+    assert.ok(text.includes(name), `逐插件一行必须出现插件名 ${name}`)
+  }
+  assert.ok(text.includes('装配通过'), '试装行要有结论摘要')
+  assert.ok(text.includes('结论已过期'), '过期的试装结论必须标出来')
+  assert.ok(text.includes('只验了兜底三项，行为未验证'), 'partial 冒烟要说明行为未验证')
+  assert.ok(text.includes('插件自报 ok=false'), '失败冒烟要带上宿主给的摘要')
+  const dots = collect(tree, (node) => node.type === 'span'
+    && typeof node.props?.className === 'string'
+    && /^dsh-au-(ok|bad)$/.test(node.props.className)
+    && textOf(node).startsWith('●'))
+  assert.ok(dots.some((node) => node.props.className === 'dsh-au-ok'), '缺绿点（通过）')
+  assert.ok(dots.some((node) => node.props.className === 'dsh-au-bad'), '缺红点（失败）')
+  const folds = collect(tree, (node) => node.type === 'details')
+  assert.ok(folds.length >= 4, `明细必须折叠在 <details> 里：${String(folds.length)}`)
+  assert.ok(text.includes('检查明细'), '冒烟明细要有折叠入口')
+})
+
+test('设置页：点按钮走 POST 触发、随后 GET 取结论', async () => {
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: CALM_STATUS,
+    [API.probe]: { ok: true, running: false, error: null, entries: [] },
+    [API.smoke]: { ok: true, running: false, error: null, results: [] },
+  })
+  let tree = await react.mount(Settings, {})
+  const click = async (label) => {
+    const button = collect(tree, (node) => node.type === 'button' && textOf(node) === label)[0]
+    assert.ok(button !== undefined, `找不到按钮 ${label}`)
+    button.props.onClick()
+    tree = await react.flush()
+  }
+  await click('跑一次试装')
+  await click('跑一次冒烟')
+  assert.equal(calls.filter((call) => call.url === API.probe && call.method === 'POST').length, 1, '试装按钮必须 POST 触发')
+  assert.equal(calls.filter((call) => call.url === API.smoke && call.method === 'POST').length, 1, '冒烟按钮必须 POST 触发')
+  assert.ok(calls.filter((call) => call.url === API.probe && call.method === 'GET').length >= 2, 'POST 之后必须再 GET 取结论')
+  assert.ok(calls.filter((call) => call.url === API.smoke && call.method === 'GET').length >= 2, 'POST 之后必须再 GET 取结论')
+})
