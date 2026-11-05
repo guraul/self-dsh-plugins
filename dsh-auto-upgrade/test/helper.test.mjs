@@ -335,7 +335,7 @@ test('刷新循环耗尽必须留 WARNING 且 url.txt 原封不动——静默�
   assert.match(script, /if \[ "\$REFRESHED" -eq 1 \]; then/, '耗尽与成功必须分两支')
   assert.match(script, /say "url\.txt refreshed"/, '成功仍记 refreshed')
   assert.match(script, /WARNING: url\.txt was NOT refreshed \(no new token URL authenticated within 60 retries\)/, '耗尽必须写 WARNING')
-  assert.match(script, /grep 'dsh web: http' \$OUT \| tail -1/, 'WARNING 必须给 grep 最新 URL 的出路')
+  assert.match(script, /grep 'dsh web: http' \$LOG_PATH \| tail -1/, 'WARNING 必须指向 refresh 真正读的那个日志（$LOG_PATH，不是 $OUT）')
 
   // ② 端到端：日志里只有重启前的 URL、新实例一直不打印 → 60 次全部失败。
   const fixture = await makeFixture()

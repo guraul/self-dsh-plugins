@@ -26,6 +26,7 @@
     `reconnecting` 切到 `token-rotated`：文案不再说「页面会自动重新连接」，改成可执行指引——打开
     `.dsh-web/url.txt`，或 `grep 'dsh web: http' .dsh-web/web.out.log | tail -1`。相位 → 文案收敛到
     共用的 `phaseText()`，浮层渲染 / 设置页进度 / 设置页提示三处都走它，防止两处漂移。
+  - **review 轮 2 的三条修正**：① 耗尽 WARNING 的 grep 指引改用 `$LOG_PATH`（`resolve_log_path` 解析出的 launchd stdout path，可能与 `$OUT` 不同，写错会指到一个没有 token 的文件）；② `overlay.tokenRotated` 文案不再硬编码 `.dsh-web/` 目录（本插件是通用插件），改成「实例日志目录下的 `url.txt`」并注明本机路径；③ 真机证据补进 [`docs/acceptance/`](./docs/acceptance/dsh-auto-upgrade-acceptance.md) §6（两条判据 + 一条反证，只留退出码与哈希），并显式标出「helper 端到端需合并后补验」。
   - 升级 / 备份 / 校验 / 重启的既有语义一行未动；**无新依赖**（Node 内置 `fetch` + `AbortSignal.timeout`）。
 
 ### 内部

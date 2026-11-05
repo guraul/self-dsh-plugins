@@ -86,6 +86,7 @@ node --test "test/*.test.mjs"                    # 56 用例
 > 更新（2026-10-18）：**真机安装 / 停服 / 升级 / 重启交接 / 页面重连这一整链已经真的跑通过**，
 > 而且不止一次——证据见下面的 §3.1。原先记在这里的那几条已随之作废，剩下的才还成立。
 
+- **helper 端到端刷新（issue #293）**：`kickstart` 后由 helper 自动把新 URL 写进 `url.txt`——需要新代码被宿主加载后才能验，见 §6 的 2026-11-05 条（含补验步骤）。
 | 项 | 为什么没做 | 谁能做 |
 |---|---|---|
 | `POST /plugins/action`（豁免/禁用插件） | 本轮未接线，如实返回 501（写豁免按仓库约定需先拿到用户对具体版本组合的同意） | 下一轮或用户点单 |
@@ -171,6 +172,26 @@ launchctl kickstart -k gui/$(id -u)/com.deepseek.dsh-web.self-dsh-plugins
 ---
 
 ## 6. 更新记录
+
+### 2026-11-05 — 修 `url.txt` 旧 token 竞态 + watchdog 不再假承诺（issue #293）
+
+**真机验证（非破坏性：写入临时副本；下表只留退出码与哈希前缀，不含 token）**
+
+| 检查 | 操作 | 结果 |
+|---|---|---|
+| 读真机日志最后一条 token URL | `refresh-url.mjs --print-latest .dsh-web/web.out.log` | exit 0；sha256[:12] = `26030b19f768` |
+| 判据一：baseline 未变不写 | `refresh-url.mjs --previous <baseline> <log> <tmp/url.txt>` | **exit 1**，临时 `url.txt` 的 sha 未变（`e151901be5d8`） |
+| 判据二：新且能认证才写 | 同上，`--previous` 换成一条不同的假基线 | **exit 0**，写回内容的 sha 与真 URL 一致（`26030b19f768`） |
+| 反证：401 候选不许写 | 构造指向 `?token=DEAD_TOKEN…` 的假日志 | **exit 1**，哨兵文件未被覆盖 |
+
+**明确没有验证（需合并后才可能）**：helper 的端到端——`kickstart` 后由 helper 自动刷新 `url.txt`。
+新代码要等宿主重新加载插件才生效，所以这条只能合并后补验，步骤：
+
+1. 合并 + 重启（`.dsh-web/restart-once.sh`）；
+2. 用插件的「重启服务」或 `POST /restart` 触发一次真重启；
+3. 断言 `url.txt` 的 sha 与日志最后一条 URL 的 sha 一致，且直接打开它是 200/303；
+4. 断言 `~/.dsh-auto-upgrade/restart.log` 出现 `baseline: …` 与 `url.txt refreshed`（或耗尽时的 `WARNING: …`）。
+
 
 ### 2026-10-18 — 升级入口补进设置页 + 降级护栏给出路（issue #13）
 

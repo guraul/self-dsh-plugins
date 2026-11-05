@@ -95,7 +95,7 @@ test('「令牌已更换」文案给可执行指引且不再承诺自动重连�
 
   const zh = exported.phaseText(makeT(dicts.zh), 'token-rotated')
   assert.match(zh, /\.dsh-web\/url\.txt/, '必须给出 url.txt 这条出路')
-  assert.match(zh, /grep 'dsh web: http' \.dsh-web\/web\.out\.log \| tail -1/, '必须给出日志 grep 这条出路')
+  assert.match(zh, /grep 'dsh web: http' \| tail -1/, '必须给出日志 grep 这条出路')
   assert.equal(zh.includes('自动重新连接'), false, '终态文案不许再承诺「会自动重新连接」')
 
   const en = exported.phaseText(makeT(dicts.en), 'token-rotated')
