@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
@@ -22,6 +22,7 @@ import { evaluatePlugins, readInventory } from './host/compat.js'
 import { cacheHit, linkTargets, runProbes } from './host/probe.js'
 import { runSmokes } from './host/smoke.js'
 import { buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
+import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
@@ -794,6 +795,57 @@ export function apply(ctx, config = {}) {
           }
         }
         writeJson(res, 200, { ok: true, version: version ?? null, entries })
+      },
+    })
+
+    // —— 真的回填并开 PR（issue #300 P4 下半）——
+    // 只在临时 worktree 里改（从 origin/main 切），**绝不碰用户当前工作区**；跑完即清场。
+    route(API.refillRun, {
+      POST: async (_req, res) => {
+        if (probeRun !== null || smokeRun !== null) {
+          throw new RequestError(409, CODE.BUSY, '试装/冒烟正在运行，等它结束再回填')
+        }
+        if (profileDir === undefined || installation === undefined) {
+          throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'profile 信息不可用')
+        }
+        const version = await readInstalledVersion(installation.manifestPath)
+        if (typeof version !== 'string' || version === '') {
+          throw new RequestError(500, CODE.PRECONDITION, '读不到当前 dsh 版本，无法回填')
+        }
+        // 回填要改仓库文件并开 PR：只在 link: 装进本仓时可用。
+        const repoRoot = dirname(dirname(fileURLToPath(new URL('../package.json', import.meta.url))))
+        if (!existsSync(join(repoRoot, '.git'))) {
+          throw new RequestError(501, CODE.NOT_IMPLEMENTED, `插件不是 link: 装进仓库的（${repoRoot} 里没有 .git），无法自动回填`)
+        }
+        let cached = {}
+        try {
+          cached = JSON.parse(await readFile(smokePath, 'utf8'))
+        } catch {
+          cached = {}
+        }
+        const results = Array.isArray(cached.results) ? cached.results : []
+        const plan = buildRefillPlan({ version, results })
+        const { plugins: installed } = await collectSmokePlugins()
+        const byName = new Map(installed.map((plugin) => [plugin.name, plugin]))
+        const entries = []
+        for (const entry of plan.entries) {
+          const plugin = byName.get(entry.name)
+          if (plugin === undefined) continue
+          entries.push({ name: entry.name, relDir: basename(plugin.dir), depth: entry.depth, changed: true })
+        }
+        const outcome = await openRefillPullRequest({
+          repoRoot,
+          worktreePath: join(repoRoot, '.worktrees'),
+          version,
+          entries,
+          git: async (args, cwd) => {
+            const result = await run('git', args, { cwd, timeoutMs: 120000 })
+            return { ok: result.code === 0, stdout: result.stdout, error: result.stderr || result.error }
+          },
+          gh: (args) => runGhSeam(args),
+          patch: patchCompatibility,
+        })
+        writeJson(res, outcome.ok ? 200 : 500, { ok: outcome.ok, version, ...outcome })
       },
     })
 

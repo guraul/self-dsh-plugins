@@ -22,6 +22,8 @@ export const API = {
   smoke: `${API_PREFIX}/smoke`,
   /** 实测结论回填计划（issue #300 P4）：只读，返回补丁不写盘。 */
   refillPlan: `${API_PREFIX}/refill`,
+  /** 真的写盘并开 PR（issue #300 P4 下半）：POST 才动手。 */
+  refillRun: `${API_PREFIX}/refill/pr`,
   plugins: `${API_PREFIX}/plugins`,
   pluginAction: `${API_PREFIX}/plugins/action`,
   policy: `${API_PREFIX}/policy`,

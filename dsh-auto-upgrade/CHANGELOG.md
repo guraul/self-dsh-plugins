@@ -3,6 +3,18 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.8.0] — 2026-11-05
+
+### 新增
+
+- **实测结论回填：真的写盘并开 PR（#300 P4 下半）**。`POST /api/dsh-auto-upgrade/refill/pr`
+  把上一次冒烟的结论写进各插件的 `dsh.compatibility.dshReleases` / `dshDepth`，提交并开 PR：
+  - 所有改动都在**临时 git worktree**（从 `origin/main` 切）里做，**绝不碰用户当前工作区**；
+  - 提交 → 推分支 `chore/compat-refill-<版本>` → `gh pr create`；
+  - **任何一步失败都在 `finally` 里清场**（worktree 留着会卡住后续的 `ff` 合并）；
+  - 没有改动时直接早退（一条 git 命令都不跑）；不是 `link:` 装进本仓时返回 501 而不是乱改文件。
+- 单测 5 条：PR 元数据、无改动早退、成功路径（含清场）、push 失败也清场、补丁真的写进文件且保留 CRLF。
+
 ## [0.7.0] — 2026-11-05
 
 ### 新增
