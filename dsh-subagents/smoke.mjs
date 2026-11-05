@@ -7,67 +7,48 @@
 import { readFile } from 'node:fs/promises'
 
 /**
- * 跑一遍断言。
+ * 跑一遍断言。只验 5 秒内能确定的事（角色文件 / 任务卡契约 / 导出面）；真跑委派属人工实测。
  * @returns {Promise<{ok: boolean, checks: {name: string, ok: boolean, detail?: string}[]}>} 结果。
  */
 export async function run() {
+  /** @type {{name: string, ok: boolean, detail?: string}[]} */
   const checks = []
-
-  for (const role of ['executor', 'reviewer']) {
+  /**
+   * 跑一条断言：抛错也算失败（不把「断言本身崩了」当成通过）。
+   * @param {string} name 断言名。
+   * @param {() => Promise<{ok: boolean, detail?: string}>} fn 断言体。
+   * @returns {Promise<void>} 无。
+   */
+  const check = async (name, fn) => {
     try {
-      const raw = await readFile(new URL(`./roles/${role}.json`, import.meta.url), 'utf8')
-      const parsed = JSON.parse(raw)
-      checks.push({
-        name: `角色文件 ${role}.json 可解析`,
-        ok: typeof parsed.description === 'string' && parsed.description !== '',
-        detail: typeof parsed.description === 'string' ? '含 description' : '缺 description',
-      })
+      const { ok, detail } = await fn()
+      checks.push({ name, ok, ...(detail === undefined ? {} : { detail }) })
     } catch (error) {
-      checks.push({
-        name: `角色文件 ${role}.json 可解析`,
-        ok: false,
-        detail: error instanceof Error ? error.message : String(error),
-      })
+      checks.push({ name, ok: false, detail: error instanceof Error ? error.message : String(error) })
     }
   }
 
-  try {
+  for (const role of ['executor', 'reviewer']) {
+    await check(`角色文件 ${role}.json 可解析`, async () => {
+      const parsed = JSON.parse(await readFile(new URL(`./roles/${role}.json`, import.meta.url), 'utf8'))
+      return { ok: typeof parsed.description === 'string' && parsed.description !== '', detail: '含 description' }
+    })
+  }
+
+  await check('任务卡能渲染并解析回来（契约没漂）', async () => {
     const card = await import('./lib/card.js')
     const rendered = card.renderCard({
-      role: 'executor',
-      goal: '冒烟：渲染一张任务卡',
-      round: 1,
-      boundaries: ['只改 smoke.mjs'],
-      acceptance: ['run() 返回 ok'],
-      pointers: ['docs/plugins/dsh-auto-upgrade.md'],
+      role: 'executor', goal: '冒烟：渲染一张任务卡', round: 1,
+      boundaries: ['只改 smoke.mjs'], acceptance: ['run() 返回 ok'], pointers: ['docs/plugins/dsh-auto-upgrade.md'],
     })
     const parsed = card.parseCard(rendered)
-    checks.push({
-      name: '任务卡能渲染并解析回来（契约没漂）',
-      ok: typeof rendered === 'string' && parsed?.role === 'executor',
-      detail: `role=${String(parsed?.role)}`,
-    })
-  } catch (error) {
-    checks.push({
-      name: '任务卡能渲染并解析回来（契约没漂）',
-      ok: false,
-      detail: error instanceof Error ? error.message : String(error),
-    })
-  }
+    return { ok: typeof rendered === 'string' && parsed?.role === 'executor', detail: `role=${String(parsed?.role)}` }
+  })
 
-  try {
+  await check('插件导出面完整（apply / inject / name）', async () => {
     const host = await import('./lib/index.js')
-    checks.push({
-      name: '插件导出面完整（apply / inject / name）',
-      ok: ['apply', 'inject', 'name'].every((key) => key in host),
-    })
-  } catch (error) {
-    checks.push({
-      name: '插件导出面完整（apply / inject / name）',
-      ok: false,
-      detail: error instanceof Error ? error.message : String(error),
-    })
-  }
+    return { ok: ['apply', 'inject', 'name'].every((key) => key in host) }
+  })
 
-  return { ok: checks.every((check) => check.ok), checks }
+  return { ok: checks.every((item) => item.ok), checks }
 }
