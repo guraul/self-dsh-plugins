@@ -44,9 +44,10 @@ export function planRefillPr(input) {
  * @param {string} options.repoRoot 仓库根（`<repo>`，其下必须有 `.git`）。
  * @param {string} options.worktreePath worktree 容器（一般 `<repo>/.worktrees`）。
  * @param {string} options.version 当前 dsh 版本。
- * @param {{name: string, relDir: string, depth: string, changed?: boolean}[]} options.entries 要回填的插件（`relDir` 是仓库内相对路径）。
+ * @param {{name: string, relDir: string, depth: string, changed?: boolean, row?: string}[]} options.entries 要回填的插件（`relDir` 是仓库内相对路径，`row` 是矩阵行）。
  * @param {(args: string[], cwd: string) => Promise<{ok: boolean, stdout?: string, error?: string}>} options.git git 执行器。
- * @param {(args: string[]) => Promise<{ok: boolean, stdout?: string, error?: string}>} options.gh gh 执行器。
+ * @param {(args: string[], cwd: string) => Promise<{ok: boolean, stdout?: string, error?: string}>} options.gh gh 执行器（**要带 cwd**，在 worktree 里跑）。
+ * @param {(text: string, row: string) => string|undefined} options.appendRow 往矩阵表插一行（`refill.js` 的 `appendCompatRow`）。
  * @param {(input: {text: string, version: string, verdict: string, depth: string}) => {text: string, changed: boolean, depth: string}} options.patch 补丁函数（即 `refill.js` 的 `patchCompatibility`）。
  * @param {number} [options.now] 时间戳（测试可注入）。
  * @returns {Promise<{ok: boolean, skipped?: boolean, branch?: string, prUrl?: string, detail?: string}>} 结果。
@@ -60,12 +61,15 @@ export async function openRefillPullRequest(options) {
   let created = false
   try {
     await mkdir(options.worktreePath, { recursive: true })
+    // origin/main 可能陈旧：先 fetch，否则会基于过期的 main 开 PR 或 push 失败。
+    await options.git(['fetch', 'origin', 'main'], options.repoRoot)
     // 从 origin/main 切，保证不带上用户工作区的任何未提交改动。
     const added = await options.git(['worktree', 'add', '-b', branch, path, 'origin/main'], options.repoRoot)
     if (!added.ok) return { ok: false, detail: `创建 worktree 失败：${String(added.error)}` }
     created = true
 
     const applied = []
+    const rows = []
     for (const entry of changed) {
       // `relDir` 是**仓库内相对路径**（worktree 里插件在 `<path>/<relDir>`，不是宿主上的绝对路径）。
       const file = join(path, entry.relDir, 'package.json')
@@ -77,15 +81,36 @@ export async function openRefillPullRequest(options) {
       })
       await writeFile(file, patched.text)
       applied.push({ name: entry.name, depth: patched.depth })
+      if (typeof entry.row === 'string') rows.push(entry.row)
+    }
+
+    // 本仓纪律：verdict 要**同时**落 package.json 与 docs/COMPATIBILITY.md。
+    const docsFile = join(path, 'docs', 'COMPATIBILITY.md')
+    try {
+      let doc = await readFile(docsFile, 'utf8')
+      for (const row of rows) {
+        const next = options.appendRow(doc, row)
+        if (next !== undefined) doc = next
+      }
+      await writeFile(docsFile, doc)
+    } catch {
+      // 文档不在这个 worktree 里就只回填 package.json，PR 正文会如实说明。
     }
 
     const staged = await options.git(['add', '-A'], path)
     if (!staged.ok) return { ok: false, detail: `git add 失败：${String(staged.error)}` }
     const committed = await options.git(['commit', '-m', `chore(compat): 回填 ${options.version} 的实测结论`], path)
-    if (!committed.ok) return { ok: false, detail: `git commit 失败：${String(committed.error)}` }
+    if (!committed.ok) {
+      // 记录已经是最新的：不是错误，干净地当成「无需回填」。
+      const detail = String(committed.error ?? '')
+      if (/nothing to commit|no changes added/i.test(detail)) return { ok: true, skipped: true, detail: '记录已是最新，无需回填' }
+      return { ok: false, detail: `git commit 失败：${detail}` }
+    }
     const pushed = await options.git(['push', 'origin', `${branch}:${branch}`], path)
     if (!pushed.ok) return { ok: false, detail: `git push 失败：${String(pushed.error)}` }
-    const pr = await options.gh(['pr', 'create', '--title', title, '--body', body])
+    // **必须带 `--head` 且在 worktree 里跑**：否则 gh 会按宿主 cwd 的当前分支开 PR
+    // ——主工作区在 main 时必失败，在你的开发分支上则会把未审核的 WIP 开成 PR。
+    const pr = await options.gh(['pr', 'create', '--base', 'main', '--head', branch, '--title', title, '--body', body], path)
     if (!pr.ok) return { ok: false, branch, detail: `gh pr create 失败：${String(pr.error)}` }
 
     const matched = /https:\/\/\S+/.exec(String(pr.stdout ?? ''))

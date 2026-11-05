@@ -14,14 +14,14 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, basename, dirname } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
 import { cacheHit, linkTargets, runProbes } from './host/probe.js'
 import { runSmokes } from './host/smoke.js'
-import { buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
+import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
@@ -636,6 +636,8 @@ export function apply(ctx, config = {}) {
     const smokePath = join(stateDir, 'smoke.json')
     /** @type {null | {startedAt:number}} */
     let smokeRun = null
+    /** 回填正在跑（防止两个 POST 并发抢同一个分支）。 */
+    let refillRun = false
     let smokeError = null
 
     /** 从 profile 的依赖与插件 package.json 里拼出冒烟所需的插件事实。 */
@@ -802,9 +804,11 @@ export function apply(ctx, config = {}) {
     // 只在临时 worktree 里改（从 origin/main 切），**绝不碰用户当前工作区**；跑完即清场。
     route(API.refillRun, {
       POST: async (_req, res) => {
+        if (refillRun) throw new RequestError(409, CODE.BUSY, '回填正在运行')
         if (probeRun !== null || smokeRun !== null) {
           throw new RequestError(409, CODE.BUSY, '试装/冒烟正在运行，等它结束再回填')
         }
+        refillRun = true
         if (profileDir === undefined || installation === undefined) {
           throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'profile 信息不可用')
         }
@@ -827,11 +831,31 @@ export function apply(ctx, config = {}) {
         const plan = buildRefillPlan({ version, results })
         const { plugins: installed } = await collectSmokePlugins()
         const byName = new Map(installed.map((plugin) => [plugin.name, plugin]))
+        const date = new Date().toISOString().slice(0, 10)
         const entries = []
         for (const entry of plan.entries) {
           const plugin = byName.get(entry.name)
           if (plugin === undefined) continue
-          entries.push({ name: entry.name, relDir: basename(plugin.dir), depth: entry.depth, changed: true })
+          // 用**仓库内相对路径**，落在仓库外的一律跳过（那是别人的仓，不该被这个 PR 改）。
+          const relDir = relative(repoRoot, plugin.dir)
+          if (relDir === '' || relDir.startsWith('..')) continue
+          let dry
+          try {
+            dry = patchCompatibility({
+              text: await readFile(join(plugin.dir, 'package.json'), 'utf8'),
+              version, verdict: 'compatible', depth: entry.depth,
+            })
+          } catch {
+            continue
+          }
+          if (!dry.changed) continue
+          entries.push({
+            name: entry.name,
+            relDir,
+            depth: dry.depth,
+            changed: true,
+            row: compatRow({ name: entry.name, packageVersion: `${entry.name}@?`, version, depth: dry.depth, date }),
+          })
         }
         const outcome = await openRefillPullRequest({
           repoRoot,
@@ -840,11 +864,18 @@ export function apply(ctx, config = {}) {
           entries,
           git: async (args, cwd) => {
             const result = await run('git', args, { cwd, timeoutMs: 120000 })
-            return { ok: result.code === 0, stdout: result.stdout, error: result.stderr || result.error }
+            return {
+              ok: result.code === 0,
+              stdout: result.stdout,
+              error: String(result.stderr || result.error || `退出码 ${String(result.code)}`),
+            }
           },
-          gh: (args) => runGhSeam(args),
+          // gh 必须带 cwd（worktree 里跑）+ `--head`：否则会按宿主 cwd 的当前分支开 PR。
+          gh: (args, cwd) => runGhSeam(args, { cwd }),
           patch: patchCompatibility,
+          appendRow: appendCompatRow,
         })
+        refillRun = false
         writeJson(res, outcome.ok ? 200 : 500, { ok: outcome.ok, version, ...outcome })
       },
     })

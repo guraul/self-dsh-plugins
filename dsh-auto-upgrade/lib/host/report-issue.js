@@ -31,6 +31,8 @@ export function defaultRunGh(args, options = {}) {
       timeout: options.timeoutMs ?? GH_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
       encoding: 'utf8',
+      // 回填要在临时 worktree 里开 PR：不带 cwd 会按宿主 cwd 的当前分支去猜。
+      ...(typeof options.cwd === 'string' && options.cwd !== '' ? { cwd: options.cwd } : {}),
     }, (error, stdout, stderr) => {
       if (error === null || error === undefined) {
         resolve({ ok: true, stdout: String(stdout ?? '') })

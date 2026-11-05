@@ -156,3 +156,21 @@ export function compatRow(input) {
   }[input.depth] ?? `本次回填：${String(input.depth)}`)
   return `| \`${input.name}\` | \`${input.packageVersion}\` | \`${input.version}\` | **${input.depth}** | ✅ 通过 | ${input.date ?? ''} | ${how} |`
 }
+
+/**
+ * 把一行插进矩阵表末尾（表头与其余行不动）。
+ * @param {string} text COMPATIBILITY.md 原文。
+ * @param {string} row 要插的行。
+ * @returns {string|undefined} 新文本；找不到矩阵表时 undefined。
+ */
+export function appendCompatRow(text, row) {
+  // 必须用 `\r?\n` 切：`split('\n')` 会把 `\r` 留在行尾，再按 CRLF 拼回去就成了 `\r\r\n`。
+  const newline = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const header = lines.findIndex((line) => line.startsWith('| 插件 |'))
+  if (header === -1) return undefined
+  let last = header
+  for (let i = header + 1; i < lines.length && lines[i].startsWith('|'); i += 1) last = i
+  lines.splice(last + 1, 0, row)
+  return lines.join(newline)
+}

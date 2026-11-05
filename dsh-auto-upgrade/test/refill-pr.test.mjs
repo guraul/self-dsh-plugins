@@ -40,6 +40,8 @@ async function fakeRepo() {
       const path = args[4]  // [worktree, add, -b, <branch>, <path>, origin/main]
       await mkdir(join(path, 'plugin-a'), { recursive: true })
       await writeFile(join(path, 'plugin-a', 'package.json'), MANIFEST)
+      await mkdir(join(path, 'docs'), { recursive: true })
+      await writeFile(join(path, 'docs', 'COMPATIBILITY.md'), '| 插件 | 包版本 |\n|---|---|\n')
     }
     return { ok: true, stdout: '' }
   }
@@ -148,6 +150,30 @@ test('openRefillPullRequest：真的把补丁写进 worktree 的 package.json（
     assert.match(captured[0], /"0\.2\.2-rc\.1": "compatible"/)
     assert.match(captured[0], /"0\.2\.2-rc\.1": "L2"/)
     assert.ok(captured[0].includes('\r\n'), 'CRLF 必须保留')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('openRefillPullRequest：gh 必须带 --head 且在 worktree 里跑，正文与矩阵行一起落', async () => {
+  const { root, git } = await fakeRepo()
+  const ghCalls = []
+  const rows = []
+  try {
+    await openRefillPullRequest({
+      repoRoot: root, worktreePath: join(root, '.worktrees'), version: '0.2.2-rc.1',
+      entries: [{ name: 'a', relDir: 'plugin-a', depth: 'L2', changed: true, row: '| `a` | `a@1` |' }],
+      git,
+      gh: async (args, cwd) => { ghCalls.push({ args, cwd }); return { ok: true, stdout: 'https://x/pull/1' } },
+      patch: (input) => ({ ...patchCompatibility(input), row: '| `a` | `a@1` |' }),
+      appendRow: (doc, row) => { rows.push(row); return `${doc}\n${row}` },
+    })
+    const call = ghCalls[0]
+    assert.ok(call.args.includes('--head'), '不带 --head 会按宿主 cwd 的当前分支开 PR')
+    assert.equal(call.args[call.args.indexOf('--head') + 1], 'chore/compat-refill-0.2.2-rc.1')
+    assert.ok(call.args.includes('--base'), '要指明 base')
+    assert.match(call.cwd, /\.worktrees\/refill-/, 'gh 要在 worktree 里跑')
+    assert.equal(rows.length, 1, '矩阵行要写进 COMPATIBILITY.md')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
