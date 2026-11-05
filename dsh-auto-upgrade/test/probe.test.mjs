@@ -36,37 +36,18 @@ test('buildProbeCommands 用 argv 形态，不拼 shell 字符串', () => {
   assert.deepEqual(commands.dump, ['/opt/dsh/bin/dsh', '--profile', 'probe', '--dump-config'])
 })
 
-test('judgeProbe：add 失败即失败，不必再看 dump', () => {
-  const verdict = judgeProbe({ addExit: 1, dumpExit: 0, dumpText: 'whatever', pluginName: 'p' })
-  assert.equal(verdict.ok, false)
-  assert.match(verdict.detail, /plugin add 退出码 1/)
-})
-
-test('judgeProbe：装上了但 dump-config 里没有 → 失败（装了没进 profile）', () => {
-  const verdict = judgeProbe({
-    addExit: 0,
-    dumpExit: 0,
-    dumpText: 'plugins: [other-plugin]',
-    pluginName: 'dsh-awake',
-  })
-  assert.equal(verdict.ok, false)
-  assert.match(verdict.detail, /没有该插件/)
-})
-
-test('judgeProbe：dump-config 退出码非零 → 失败', () => {
-  const verdict = judgeProbe({ addExit: 0, dumpExit: 2, dumpText: '', pluginName: 'dsh-awake' })
-  assert.equal(verdict.ok, false)
-  assert.match(verdict.detail, /--dump-config 退出码 2/)
-})
-
-test('judgeProbe：两条判据都过才算装配通过', () => {
-  const verdict = judgeProbe({
-    addExit: 0,
-    dumpExit: 0,
-    dumpText: '  - name: dsh-awake\n',
-    pluginName: 'dsh-awake',
-  })
-  assert.deepEqual(verdict, { ok: true, detail: '装配通过' })
+test('judgeProbe：两条判据都过才算装配通过（表驱动）', () => {
+  const cases = [
+    [{ addExit: 1, dumpExit: 0, dumpText: 'x', pluginName: 'dsh-awake' }, false, /plugin add 退出码 1/],
+    [{ addExit: 0, dumpExit: 2, dumpText: '', pluginName: 'dsh-awake' }, false, /--dump-config 退出码 2/],
+    [{ addExit: 0, dumpExit: 0, dumpText: 'plugins: [other]', pluginName: 'dsh-awake' }, false, /没有该插件/],
+    [{ addExit: 0, dumpExit: 0, dumpText: '  - name: dsh-awake\n', pluginName: 'dsh-awake' }, true, /装配通过/],
+  ]
+  for (const [input, ok, detail] of cases) {
+    const verdict = judgeProbe(input)
+    assert.equal(verdict.ok, ok, JSON.stringify(input))
+    assert.match(verdict.detail, detail)
+  }
 })
 
 test('cacheHit 按 TTL 判定，过期就重试', () => {
