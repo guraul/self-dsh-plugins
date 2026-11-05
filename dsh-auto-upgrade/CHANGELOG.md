@@ -3,6 +3,16 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] — 2026-11-05
+
+### 新增
+
+- **升级前「试装」探针（#300 P1）**：声明覆盖 ≠ 装得上。`GET /probe` 读缓存/进度，`POST` 后台开跑
+  （不阻断，并发 `409`）。做法是一次性 `DSH_HOME` 里对每个 `link:` / `file:` 插件跑
+  `plugin add` + `--dump-config`，**恰好**出现 `- id: <插件名>` 才算装配通过；结论按
+  `(dsh 版本, 插件名, 目录 mtime)` 缓存 24h。**只作警告，不进阻断判定。**
+  单测 8 条 + 一条路由回归（早退不泄漏占位）+ 一条漏导入回归。
+
 ## [0.2.6] — 2026-11-05
 
 ### 修复

@@ -215,6 +215,11 @@ pnpm run check                                # node --check
   单测见 `test/token-url.test.mjs` 与 `test/refresh-url.test.mjs`（含端到端 helper 用例）。
   **别在 shell 里重新实现一份**。
 
+## 升级前「试装」探针（#300 P1）
+
+`GET /probe` 读缓存/进度，`POST` 后台开跑（不阻断、并发 `409`）。一次性 `DSH_HOME` 里把每个
+`link:` / `file:` 插件真装一遍，判据见 `lib/host/probe.js`；**只作警告，不阻断升级**。
+
 ## 另需注意的两条设计约束
 
 - **本包故意不声明 `@deepseek-ai/dsh*` peerDependencies**（只声明 `react`）：否则升级之后，平台闸门会把
