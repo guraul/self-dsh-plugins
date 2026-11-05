@@ -18,7 +18,7 @@
 | 请求组装、diff 围栏、预算 | `lib/request.js` | diff 走 git，元数据走 gh；`--diff-file` / `--meta-file` 留给测试 |
 | 记录落盘、traceId、熔断 | `lib/record.js` | 记录目录 `.dsh-web/reviews/` 已在 `.gitignore` 里忽略；**落在主工作区**（`mainWorktreeRoot`），不要改回 `cwd` |
 | 分片切分 / 合成规则 | `lib/shard.js` | 按 diff 的 `diff --git` 段落切（段落是文件的真源）；缺片、越界片号、轮次不一致、各片 base 不一致一律报错，**不许放宽判定**；分片不计熔断，合成时按最终判定计一次 |
-| 角色字段与加载 | `lib/roles.js` + `roles/*.json` | 非法值降级到最保守值，坏文件跳过 |
+| 角色字段与加载 | `lib/roles.js` + `roles/*.json` | 非法值降级到最保守值，坏文件跳过；`provider` / `model` 两个可选字段由 `resolveRoleProvider()` / `resolveRoleModel()` 解析，**冲突直接报错，不静默降级** |
 | 形态 B 的 CLI 调用 | `lib/bridge-cli.js` | 一期只有 `opencode` / `codebuddy`；ACP 在 PR4 |
 | 子命令 | `lib/cli.js` | 退出码契约：0 通过 / 1 拒绝 / 2 参数或环境错误 |
 | 宿主侧注册 | `lib/index.js` | 注册 `product-subagents:*` provider 与 `product_delegate`；见「已知坑」第一条 |
@@ -28,6 +28,12 @@
 ## 形态 B 的默认配置与权限映射
 
 reviewer 默认走**形态 B**（`codebuddy/glm-5.3-flash`）：独立模型家族，能读仓库但改不了文件。
+
+**角色字段钉死 provider / model**（issue #314）：`roles/reviewer.json` 声明 `"provider": "codebuddy"` 与
+`"model": "codebuddy/glm-5.3-flash"`，`executor` 不钉（按调用方指定）。`product_delegate` / `product_continue`
+取值走 `lib/roles.js` 的 `resolveRoleProvider()` / `resolveRoleModel()`：没传用角色钉的；传了等价值
+（比对忽略 `codebuddy/` 前缀）放行并下发角色钉的带前缀形式；**传了不一致的值在发起调用之前直接抛错**，
+错误信息写明「角色 `<id>` 钉的模型是 …，本次请求 …」。不静默覆盖、不静默回落到 CLI 默认模型。
 
 | 角色权限 | opencode | codebuddy |
 |---|---|---|

@@ -6,6 +6,7 @@
  * 不失效——改名的代价远大于收益，正名留到续接补齐之后。
  */
 import { lastSession, providerName } from '../provider.js'
+import { resolveRoleModel, resolveRoleProvider } from '../roles.js'
 
 let defineToolImpl
 
@@ -121,7 +122,11 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
           type: 'string',
           description: '产品 CLI，缺省用角色声明的 provider；两者都没有则报错。',
         },
-        model: { type: 'string', description: '产品侧模型标识；缺省用 CLIZ 自身默认值。' },
+        model: {
+          type: 'string',
+          description:
+            '产品侧模型标识；缺省用角色钉的模型，角色没钉才用 CLIZ 自身默认值；与角色钉的不一致直接报错。',
+        },
         cwd: { type: 'string', description: '子进程工作目录（跨仓任务必填，否则沙箱只看得到当前仓）。' },
         task: { type: 'string', required: true, description: '交给产品 CLI 的任务正文。' },
       },
@@ -132,8 +137,10 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
       async execute(args, exec) {
         const role = roles.get(args.role || 'executor')
         if (!role) throw new Error(`product_delegate: 未知角色 "${args.role}"`)
-        const provider = args.provider || role.provider
+        const provider = resolveRoleProvider(role, args.provider)
         if (!provider) throw new Error(`product_delegate: 未指定 provider，角色 "${role.id}" 也没钉 provider`)
+        // 钉了模型而请求不一致时在这里就抛，startActivation 之前——不会发起调用
+        const model = resolveRoleModel(role, args.model)
 
         const handle = await ctx.subagents.startActivation(
           activationSpec({
@@ -142,7 +149,7 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
             task: args.task,
             agent: exec.agent,
             signal: exec.signal,
-            model: args.model,
+            model,
             cwd: args.cwd,
             maxDepth,
           }),
@@ -173,7 +180,7 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
         session: { type: 'string', description: '会话 id；缺省用该产品最近一次委派。' },
         role: { type: 'string', enum: roleIds.length > 0 ? roleIds : ['executor'], description: '角色 id。' },
         provider: { type: 'string', description: '产品 CLI，缺省用角色声明的 provider。' },
-        model: { type: 'string', description: '产品侧模型标识。' },
+        model: { type: 'string', description: '产品侧模型标识；缺省用角色钉的模型，与角色钉的不一致直接报错。' },
         cwd: { type: 'string', description: '子进程工作目录（跨仓续接时必填）。' },
       },
       output: {
@@ -183,8 +190,10 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
       async execute(args, exec) {
         const role = roles.get(args.role || 'executor')
         if (!role) throw new Error(`product_continue: 未知角色 "${args.role}"`)
-        const provider = args.provider || role.provider
+        const provider = resolveRoleProvider(role, args.provider)
         if (!provider) throw new Error(`product_continue: 未指定 provider，角色 "${role.id}" 也没钉 provider`)
+        // 续接同样吃角色钉的模型：否则复审这一轮可能与上一轮跑在不同模型上
+        const model = resolveRoleModel(role, args.model)
 
         const sessionId = args.session || lastSession(provider)
         if (!sessionId) {
@@ -200,7 +209,7 @@ export async function registerDelegateTool(ctx, { roles, maxDepth = 3 }) {
             task: args.task,
             agent: exec.agent,
             signal: exec.signal,
-            model: args.model,
+            model,
             sessionId,
             cwd: args.cwd,
             maxDepth,

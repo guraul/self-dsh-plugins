@@ -139,6 +139,26 @@ product_delegate({ role: 'executor', provider: 'codebuddy', model: 'deepseek-v4.
 
 `executor` 角色的权限是 `full`（能改能跑）；`reviewer` 是 `readonly`（只能读）。
 
+## 角色钉 `provider` / `model`
+
+`roles/*.json` 除 `description` / `permissionMode` / `allowDelegation` / `outputContract` / `instructions`
+外，还可声明两个可选字段（`lib/roles.js` 的 `normalizeRole()` 归一化，非字符串一律降级成不钉）：
+
+| 字段 | 含义 | 内置取值 |
+|---|---|---|
+| `provider` | 角色固定用哪个产品 CLI | `reviewer` 钉 `codebuddy`；`executor` 不钉（按调用方） |
+| `model` | 角色固定用哪个模型，空串表示不钉 | `reviewer` 钉 `codebuddy/glm-5.3-flash`；`executor` 不钉 |
+
+`product_delegate` 与 `product_continue` 都先过 `resolveRoleProvider()` / `resolveRoleModel()` 再组装请求：
+
+- 角色钉了、调用方没传 → 用角色钉的值；
+- 角色钉了、调用方传了**等价**的值 → 放行，下发角色钉的带前缀形式（比对忽略 `codebuddy/` 前缀，与 `normalizeModelName()` 同口径）；
+- 角色钉了、调用方传了**不一致**的值 → **在发起调用之前直接抛错**，错误信息写明角色钉的是哪个、本次请求的是哪个；
+- 角色没钉 → 原样透传调用方给的值。
+
+**冲突直接报错，不静默降级**：既不静默覆盖调用方的请求，也不静默回落到 CLI 默认模型——
+issue #314 就是因为 reviewer 没钉模型、委派时又没传 `model`，两次审核跑在不同模型上且毫无提示。
+
 ## 续接（路线 a：复用 CLI 自己的会话）
 
 `product_delegate` 结束时如果拿到了会话 id，会在输出末尾附一行：
