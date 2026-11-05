@@ -9093,6 +9093,47 @@ function unwrapConfig(value) {
 	return value;
 }
 /**
+* 插件 fiber 是否已失活：`uid` 被清空（DISPOSED）或正在卸载（UNLOADING）。
+*
+* `apply` 的启动续段是一个游离的 async 块，不受 cordis 生命周期约束：启动失败
+* （端口被占等）或热重载把 fiber 失活后，它仍会继续往下跑，此时 `ctx.on` /
+* `ctx.effect` 会抛 `CordisError('INACTIVE_EFFECT')`——在游离续段里它变成
+* unhandled rejection → dsh `fatal load failure`，一个插件没起来把整个进程带崩
+* （issue #294）。
+* @param ctx - 插件上下文。
+* @returns 已失活返回 true。
+*/
+function isFiberInactive(ctx) {
+	const fiber = ctx.fiber;
+	if (fiber === void 0) return false;
+	if (fiber.uid === null) return true;
+	return fiber.state === 5;
+}
+/**
+* 在插件上下文上执行一次 effect 注册（`ctx.on` / `ctx.effect`），fiber 已失活时
+* 跳过而不是抛出。
+*
+* 只吞 `INACTIVE_EFFECT`：注册动作自身的其它错误必须原样上抛，不能被这里遮住。
+* @param ctx - 插件上下文。
+* @param label - 被跳过时写进日志的注册标签。
+* @param run - 实际的注册动作。
+* @returns 注册动作的返回值；因失活被跳过时为 undefined。
+* @throws 注册动作抛出的、非 `INACTIVE_EFFECT` 的错误。
+*/
+function guardInactiveEffect(ctx, label, run) {
+	if (isFiberInactive(ctx)) {
+		console.warn(`[im-bridge] 插件上下文已失活，跳过注册: ${label}`);
+		return;
+	}
+	try {
+		return run();
+	} catch (error) {
+		if (error?.code !== "INACTIVE_EFFECT") throw error;
+		console.warn(`[im-bridge] 插件上下文已失活，跳过注册: ${label}`);
+		return;
+	}
+}
+/**
 * Mount the WeCom bridge: settings namespace, then a deferred WebSocket after Loader settle.
 * @param ctx - host plugin context.
 * @param config - composition entry used as the settings `base` layer.
@@ -9114,6 +9155,17 @@ function apply(ctx, config) {
 		}, "im-bridge: settings reader");
 	});
 	const cfg = () => unwrapConfig(config);
+	/**
+	* 启动续段在一个 `await` 之后发现插件 fiber 已失活：记一条 warn 并中止整个
+	* 续段。只跳过注册不够——后面还会建企微 WebSocket，失活的插件不该再起连接。
+	* @param where - 检查点位置，写进日志。
+	* @returns 已失活返回 true，调用方应立即 `return`。
+	*/
+	function abortIfInactive(where) {
+		if (!isFiberInactive(ctx)) return false;
+		console.warn(`[im-bridge] 插件上下文已失活，中止启动（${where}）`);
+		return true;
+	}
 	const chats = /* @__PURE__ */ new Map();
 	/** 每个企微窗口当前绑定的工作区，重启后从磁盘恢复。 */
 	const windowWorkspaces = /* @__PURE__ */ new Map();
@@ -9451,6 +9503,7 @@ function apply(ctx, config) {
 			}, 5e3).unref();
 		});
 		await Promise.race([workspaceInit, workspaceInitTimeout]);
+		if (abortIfInactive("工作区初始化后")) return;
 		const { botId, secret } = cfg();
 		if (!botId || !secret) {
 			console.warn("[im-bridge] 跳过启动: 缺少 botId/secret。请在 profile cordis.patch.yml 或 Settings → 插件配置中填写后重启。");
@@ -9734,6 +9787,7 @@ function apply(ctx, config) {
 				throw error;
 			}
 		}
+		if (abortIfInactive("session/event 注册前")) return;
 		ctx.on("session/event", (session, event) => {
 			const thinking = cfg().thinking;
 			const prefix = thinking?.activityPrefix ?? DEFAULT_THINKING.activityPrefix;
@@ -9775,6 +9829,7 @@ function apply(ctx, config) {
 			}
 		});
 		const { default: AiBot, generateReqId } = await import("@wecom/aibot-node-sdk");
+		if (abortIfInactive("WebSocket 创建前")) return;
 		/**
 		* Gate image input on the configured model's declared input modalities.
 		* Absent metadata means "unknown", which stays allowed; an explicit list
@@ -10419,6 +10474,10 @@ function apply(ctx, config) {
 		*/
 		function installRootApprovalRelay() {
 			if (rootApprovalRelayInstalled) return;
+			if (isFiberInactive(ctx)) {
+				console.warn("[im-bridge] 插件上下文已失活，跳过 root 审批应答方注册");
+				return;
+			}
 			rootApprovalRelayInstalled = true;
 			const dispose = ctx.on("approval/request", (request, next) => relayApproval("root", request, next, chatBySessionId(approvalSessionId(request))), {
 				global: true,
@@ -10525,11 +10584,11 @@ function apply(ctx, config) {
 		}));
 		installRootApprovalRelay();
 		ws.connect();
-		ctx.effect(() => () => {
+		guardInactiveEffect(ctx, "im-bridge: wecom websocket", () => ctx.effect(() => () => {
 			try {
 				ws.close?.();
 			} catch {}
-		}, "im-bridge: wecom websocket");
+		}, "im-bridge: wecom websocket"));
 	})();
 }
-export { Config, IM_BRIDGE_NS, apply, inject, name };
+export { Config, IM_BRIDGE_NS, apply, guardInactiveEffect, inject, isFiberInactive, name };
