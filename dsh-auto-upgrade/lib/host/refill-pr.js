@@ -109,7 +109,6 @@ export async function openRefillPullRequest(options) {
         return { ok: true, skipped: true, detail: '记录已是最新，无需回填' }
       }
       return { ok: false, detail: `git commit 失败：${detail.trim()}` }
-      return { ok: false, detail: `git commit 失败：${detail}` }
     }
     const pushed = await options.git(['push', 'origin', `${branch}:${branch}`], path)
     if (!pushed.ok) return { ok: false, detail: `git push 失败：${String(pushed.error)}` }
