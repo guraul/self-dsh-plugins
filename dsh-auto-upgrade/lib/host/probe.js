@@ -91,17 +91,9 @@ export function cacheHit(entry, now, ttlMs = PROBE_TTL_MS) {
 }
 
 /**
- * 跑一批探针：命中缓存就直接用，否则真装一遍。`run` 由调用方注入（生产是
- * `toolchain.run`），单测因此不必 spawn。
- * @param {object} options 输入。
- * @param {{name: string, path: string, mtimeMs?: number}[]} options.targets 待试装插件。
- * @param {string} options.targetVersion 目标 dsh 版本（只用于缓存键与展示）。
- * @param {string} options.dshBin dsh 可执行文件。
- * @param {string} options.profileName 一次性 profile 名。
- * @param {string} options.dshHome 一次性 DSH_HOME。
- * @param {Record<string, {at: number, ok: boolean, detail: string}>} options.cache 现有缓存（会被就地更新）。
- * @param {number} options.now 当前时间。
- * @param {(command: string, args: string[], options?: object) => Promise<{status?: number|null, code?: number|null, stdout?: string}>} options.run 执行器（`toolchain.run` 的 `code` 也接受）。
+ * 跑一批探针：命中缓存就直接用，否则真装一遍。
+ * @param {object} options 输入：`targets` / `targetVersion` / `dshBin` / `profileName` /
+ *   `dshHome`（一次性）/ `cache`（就地更新）/ `now` / `run`（执行器，生产是 `toolchain.run`）。
  * @returns {Promise<{results: object[], cache: object}>} 每个插件的结论与更新后的缓存。
  */
 export async function runProbes(options) {
