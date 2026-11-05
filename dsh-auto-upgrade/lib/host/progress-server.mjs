@@ -131,46 +131,30 @@ async function snapshot() {
 
 /** 进度页（内联，不引外网资源）。 */
 const PAGE = `<!doctype html><meta charset="utf-8"><title>dsh web 正在重启</title>
-<style>
-:root{color-scheme:dark}
-body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+<style>:root{color-scheme:dark}body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
 background:#0f1115;color:#e6e6e6;font:15px/1.6 -apple-system,"PingFang SC",system-ui,sans-serif}
 .card{width:420px;padding:28px 32px;border-radius:14px;background:#171a21;box-shadow:0 8px 40px #0006}
-h1{margin:0 0 6px;font-size:17px;font-weight:600}
-.muted{color:#8b93a1;font-size:13px;margin-bottom:18px}
+h1{margin:0 0 6px;font-size:17px;font-weight:600}.muted{color:#8b93a1;font-size:13px;margin-bottom:18px}
 .bar{height:6px;border-radius:3px;background:#242a35;overflow:hidden;margin-bottom:10px}
 .fill{height:100%;width:8%;background:linear-gradient(90deg,#4f7cff,#7aa2ff);transition:width .5s ease}
 .steps{margin:14px 0 0;padding:0;list-style:none;font-size:13px;color:#8b93a1}
-.steps li{padding:2px 0}
-.steps li.on{color:#e6e6e6}
-.steps li.bad{color:#ff7a7a}
-.sec{color:#5f6775;font-size:12px;margin-top:10px}
-</style>
-<div class=card>
-  <h1>dsh web 正在重启</h1>
-  <div class=muted id=detail>正在准备…</div>
-  <div class=bar><div class=fill id=fill></div></div>
-  <ul class=steps id=steps>
-    <li data-p=stopping>停止旧进程</li><li data-p=installing>安装新版本</li>
-    <li data-p=starting>拉起新进程</li><li data-p=done>打开界面</li>
-  </ul>
-  <div class=sec id=sec>0 秒</div>
-</div>
+.steps li{padding:2px 0}.steps li.on{color:#e6e6e6}.steps li.bad{color:#ff7a7a}
+.sec{color:#5f6775;font-size:12px;margin-top:10px}</style>
+<div class=card><h1>dsh web 正在重启</h1><div class=muted id=detail>正在准备…</div>
+<div class=bar><div class=fill id=fill></div></div>
+<ul class=steps id=steps><li data-p=stopping>停止旧进程</li><li data-p=installing>安装新版本</li>
+<li data-p=starting>拉起新进程</li><li data-p=done>打开界面</li></ul><div class=sec id=sec>0 秒</div></div>
 <script>
 const order=['waiting','stopping','installing','starting','done'];
 const fill=document.getElementById('fill'),detail=document.getElementById('detail'),
-      steps=[...document.querySelectorAll('#steps li')],sec=document.getElementById('sec');
-const t0=Date.now();
+  steps=[...document.querySelectorAll('#steps li')],sec=document.getElementById('sec'),t0=Date.now();
 async function tick(){
-  let s;
-  try{ s=await (await fetch('/state',{cache:'no-store'})).json() }catch{ return }
+  let s; try{ s=await (await fetch('/state',{cache:'no-store'})).json() }catch{ return }
   detail.textContent=s.detail||''; sec.textContent=Math.round((Date.now()-t0)/1000)+' 秒';
   const at=order.indexOf(s.phase);
   fill.style.width=Math.max(8,((at+1)/order.length)*100)+'%';
-  steps.forEach(li=>{
-    const i=order.indexOf(li.dataset.p);
-    li.className = s.phase==='failed'&&li.dataset.p==='stopping' ? 'bad' : (i<=at?'on':'');
-  });
+  steps.forEach(li=>{const i=order.indexOf(li.dataset.p);
+    li.className=s.phase==='failed'&&li.dataset.p==='stopping'?'bad':(i<=at?'on':'')});
   if(s.phase==='done'&&s.url){ location.replace(s.url); return }
   if(s.phase==='failed'){ detail.textContent=s.detail; return }
   setTimeout(tick,700);
