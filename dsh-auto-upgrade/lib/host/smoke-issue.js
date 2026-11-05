@@ -6,7 +6,8 @@
  * 用户过了几小时才发现「插件好像没生效」。
  *
  * 边界：
- * - **只有失败才开**；`partial`（插件没写 `dsh.smoke`，只跑了兜底三项）不算失败，绝不开 issue；
+ * - **只有失败才开**；`partial`（插件没写 `dsh.smoke`）在兜底三项全过时不算失败，
+ *   但兜底本身失败（插件没加载 / 目录没了 / 注入包缺）照样开单；
  * - 标题带版本与插件名，复用 `reportIssue` 的同名 open issue 去重（同版本重复跑不会刷屏）；
  * - 开 issue 失败只记日志，**不影响冒烟本身的结果**。
  */
@@ -41,7 +42,10 @@ export function smokeIssueTitle(input) {
  * @returns {string} 处理后的细节。
  */
 export function safeDetail(detail) {
-  return String(detail ?? '').replace(/\/Users\/[^/\s]+/g, '~').slice(0, 200)
+  return String(detail ?? '')
+    .replace(/\/Users\/[^/\s]+/g, '~')
+    .replace(/[|\n\r]+/g, ' ')
+    .slice(0, 200)
 }
 
 /**
@@ -61,7 +65,7 @@ export function smokeIssueBody(input) {
     const bad = (item.checks ?? []).filter((check) => check.ok !== true)
     const names = bad.map((check) => `\`${check.name}\``).join('<br>')
     const details = bad.map((check) => safeDetail(check.detail)).filter((text) => text !== '').join('<br>')
-    lines.push(`| \`${item.name}\` | ${names || '（整体失败）'} | ${details || item.detail || '—'} |`)
+    lines.push(`| \`${item.name}\` | ${names || '（整体失败）'} | ${details || safeDetail(item.detail) || '—'} |`)
   }
   lines.push(
     '',

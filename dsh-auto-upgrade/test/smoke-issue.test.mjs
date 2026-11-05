@@ -122,3 +122,7 @@ test('maybeReportSmokeFailures：version 缺失时用 unknown，不丢开单', a
   assert.equal(result.opened, true)
   assert.match(seen[0].title, /unknown/)
 })
+
+test('safeDetail：表格分隔符与换行也要清掉，否则正文表格会被打散', () => {
+  assert.equal(safeDetail('a|b' + String.fromCharCode(10) + 'c'), 'a b c')
+})
