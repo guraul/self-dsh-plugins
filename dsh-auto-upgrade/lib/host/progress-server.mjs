@@ -60,20 +60,9 @@ const urlFile = resolveUrlFile()
  * 启动瞬间 `url.txt` 里的地址 = **旧进程的**地址（点击时它还是有效的）。
  * done 判据必须排除它，否则会立刻把用户送回一个即将死掉的页面（与 issue #293 同源）。
  */
-const baseline = (await readOrSafe(urlFile)).trim()
+const baseline = (await readOr(urlFile)).trim()
 
-/**
- * 读文件，失败返回空串（启动阶段用）。
- * @param {string} path 路径。
- * @returns {Promise<string>} 内容或空串。
- */
-async function readOrSafe(path) {
-  try {
-    return await readFile(path, 'utf8')
-  } catch {
-    return ''
-  }
-}
+
 const startedAt = Date.now()
 
 /**
@@ -127,6 +116,8 @@ async function snapshot() {
   const tail = log.split('\n').slice(-40).join('\n')
   const candidate = (await readOr(urlFile)).trim()
   const live = candidate === '' ? false : await authenticates(candidate)
+  // 前提：dsh 的令牌每次启动必换（`lib/host/token-url.js`），所以「新地址恰好等于 baseline」
+  // 不会发生；真发生了宁可等超时，也不把用户送回即将死掉的页面。
   if (live && candidate !== baseline) {
     return { phase: 'done', detail: '新进程已就绪', url: candidate, elapsedMs }
   }

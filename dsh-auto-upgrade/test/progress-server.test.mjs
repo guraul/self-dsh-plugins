@@ -92,3 +92,40 @@ test('#300 重启进度服务：result.json 报失败时 /state 报 failed，不
     await rm(stateDir, { recursive: true, force: true })
   }
 })
+
+test('#300 进度服务：点击时 url.txt 里的旧令牌不算就绪（#293 同源的坑）', async () => {
+  const host = await fakeHost()
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  const urlFile = join(stateDir, 'url.txt')
+  const oldUrl = `${host.origin}/?token=OLD_TOKEN_STILL_VALID_01`
+  // 点击那一刻：url.txt 是旧进程的有效令牌（还能 303），修复前会立刻判 done。
+  await writeFile(urlFile, `${oldUrl}\n`)
+  const progress = await startProgress(stateDir, urlFile)
+  try {
+    const early = await (await fetch(`${progress.base}/state`)).json()
+    assert.notEqual(early.phase, 'done', '旧令牌仍有效，但它不是本轮的新地址')
+    assert.equal(early.url, undefined, '没到 done 就不许给地址')
+    await writeFile(urlFile, `${host.origin}/?token=NEW_TOKEN_AFTER_RESTART_2\n`)
+    const later = await (await fetch(`${progress.base}/state`)).json()
+    assert.equal(later.phase, 'done', '换成新令牌后才算完成')
+  } finally {
+    progress.kill()
+    await host.close()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('#300 进度服务：上一轮的 result.json 不算本轮失败', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  await writeFile(join(stateDir, 'url.txt'), '')
+  // 上一轮留下的失败记录：写在服务启动之前 → 必须被忽略。
+  await writeFile(join(stateDir, 'result.json'), JSON.stringify({ ok: false, failedStep: 'install' }))
+  const progress = await startProgress(stateDir, join(stateDir, 'url.txt'))
+  try {
+    const state = await (await fetch(`${progress.base}/state`)).json()
+    assert.notEqual(state.phase, 'failed', '陈旧 result.json 不该让重试立刻误报失败')
+  } finally {
+    progress.kill()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})

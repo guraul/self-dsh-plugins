@@ -228,12 +228,9 @@ pnpm run check                                # node --check
 
 ## 重启/升级期间的进度页（#300）
 
-交接前宿主会 detached 拉起 `lib/host/progress-server.mjs`（随机端口，写 `progress-port.json`），
-前端拿到 `progressUrl` 直接跳过去；完成后自动跳到新令牌地址。只监听 `127.0.0.1`、只读本机状态、
-完成 15s / 最多 20 分钟后自行退出。起不来就退回 watchdog（不是替换）。
-
-⚠️ 它在 `done` 阶段会把新令牌地址返回给页面——**仅本机回环**，与磁盘上的 `url.txt` 同级敏感度；
-不要把这个端口转发到外网。
+交接前宿主 detached 拉起 `lib/host/progress-server.mjs`（随机端口，写 `progress-port.json`），
+前端跳过去、完成后自动跳新令牌地址。只监听 `127.0.0.1`、只读本机、完成 15s / 最多 20 分钟后自退；
+起不来退回 watchdog。**它在 done 阶段返回带令牌的地址（仅本机回环），别把这个端口转发到外网。**
 
 ## 另需注意的两条设计约束
 
