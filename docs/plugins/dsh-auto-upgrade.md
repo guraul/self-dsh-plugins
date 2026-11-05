@@ -220,6 +220,12 @@ pnpm run check                                # node --check
 `GET /probe` 读缓存/进度，`POST` 后台开跑（不阻断、并发 `409`）。一次性 `DSH_HOME` 里把每个
 `link:` / `file:` 插件真装一遍，判据见 `lib/host/probe.js`；**只作警告，不阻断升级**。
 
+## 升级后「逐插件冒烟」（#300 P2）
+
+`GET /smoke` 读结论，`POST` 后台开跑。宿主兜底三项（bundle 启用 / 插件目录 / `dsh.client.inject`
+可解析）+ 插件自报断言（`dsh.smoke = { module, timeoutMs }`，模块导出 `run()`）。没写 `dsh.smoke`
+的插件只跑兜底三项并标 `partial`——不假装验过行为。
+
 ## 另需注意的两条设计约束
 
 - **本包故意不声明 `@deepseek-ai/dsh*` peerDependencies**（只声明 `react`）：否则升级之后，平台闸门会把

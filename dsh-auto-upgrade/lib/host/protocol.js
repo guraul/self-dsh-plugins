@@ -18,6 +18,8 @@ export const API = {
   preflight: `${API_PREFIX}/preflight`,
   /** 升级前「试装」探针（issue #300）：GET 读缓存/进度，POST 开跑。 */
   probe: `${API_PREFIX}/probe`,
+  /** 升级后「逐插件冒烟」（issue #300 P2）：GET 读结论，POST 开跑。 */
+  smoke: `${API_PREFIX}/smoke`,
   plugins: `${API_PREFIX}/plugins`,
   pluginAction: `${API_PREFIX}/plugins/action`,
   policy: `${API_PREFIX}/policy`,

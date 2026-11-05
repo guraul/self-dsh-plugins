@@ -857,3 +857,18 @@ test('POST /probe：没有可试装项时早退，且不泄漏占位（否则后
     await env.close()
   }
 })
+
+test('POST /smoke：没有可冒烟插件时早退，且不泄漏占位', async (t) => {
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const first = await fetch(`${env.host.base}${API.smoke}`, { method: 'POST', body: '{}' })
+    assert.equal(first.status, 200)
+    assert.equal((await first.json()).skipped, true)
+    const again = await fetch(`${env.host.base}${API.smoke}`, { method: 'POST', body: '{}' })
+    assert.equal(again.status, 200, '早退必须释放占位')
+    assert.equal((await (await fetch(`${env.host.base}${API.smoke}`)).json()).running, false)
+  } finally {
+    await env.close()
+  }
+})

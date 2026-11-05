@@ -10,15 +10,16 @@
  *   （见 `lib/host/upgrade.js` 的说明）。
  * @module dsh-plugin-auto-upgrade
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
 import { cacheHit, linkTargets, runProbes } from './host/probe.js'
+import { runSmokes } from './host/smoke.js'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
 import { DEFAULT_GITHUB_API, fetchReleaseNotes, repositorySlug } from './host/notes.js'
@@ -585,6 +586,91 @@ export function apply(ctx, config = {}) {
         } catch (error) {
           // 起跑前就失败（读 profile 失败等）：释放占位，否则会一直被 409 挡住。
           probeRun = null
+          throw error
+        }
+      },
+    })
+
+    // —— 升级后「逐插件冒烟」（issue #300 P2）——
+    // 试装只证明「装得上」；装得上但行为坏了要靠这里：宿主兜底三项 + 插件自报断言。
+    const smokePath = join(stateDir, 'smoke.json')
+    /** @type {null | {startedAt:number}} */
+    let smokeRun = null
+    let smokeError = null
+
+    /** 从 profile 的依赖与插件 package.json 里拼出冒烟所需的插件事实。 */
+    const collectSmokePlugins = async () => {
+      const profile = JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+      const plugins = []
+      for (const [name, spec] of Object.entries(profile.dependencies ?? {})) {
+        const matched = /^(?:link|file):(.+)$/.exec(String(spec))
+        if (matched === null) continue
+        const dir = matched[1]
+        let manifest = {}
+        try {
+          manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
+        } catch {
+          manifest = {}
+        }
+        plugins.push({
+          name,
+          dirExists: existsSync(dir),
+          inject: Array.isArray(manifest.dsh?.client?.inject) ? manifest.dsh.client.inject : [],
+          ...(manifest.dsh?.smoke === undefined ? {} : { smoke: manifest.dsh.smoke }),
+          dir,
+        })
+      }
+      return { plugins, bundles: profile.dsh?.profile?.bundles ?? [] }
+    }
+
+    route(API.smoke, {
+      GET: async (_req, res) => {
+        let cached = {}
+        try {
+          cached = JSON.parse(await readFile(smokePath, 'utf8'))
+        } catch {
+          cached = {}
+        }
+        writeJson(res, 200, {
+          ok: true,
+          running: smokeRun !== null,
+          startedAt: smokeRun === null ? null : smokeRun.startedAt,
+          error: smokeError,
+          ...cached,
+        })
+      },
+      POST: async (_req, res) => {
+        // 占位先落，再 await（与 /probe 同一条规矩）。
+        if (smokeRun !== null) throw new RequestError(409, CODE.BUSY, '冒烟正在运行')
+        smokeRun = { startedAt: Date.now() }
+        smokeError = null
+        try {
+          if (profileDir === undefined) throw new RequestError(500, CODE.PRECONDITION, 'profile 信息不可用')
+          const { plugins, bundles } = await collectSmokePlugins()
+          if (plugins.length === 0) {
+            smokeRun = null
+            writeJson(res, 200, { ok: true, skipped: true, detail: '没有 link:/file: 插件可冒烟' })
+            return
+          }
+          writeJson(res, 202, { ok: true, startedAt: smokeRun.startedAt, count: plugins.length })
+          void (async () => {
+            try {
+              const { results } = await runSmokes({
+                plugins,
+                bundles,
+                resolvable: (pkg) => existsSync(join(profileDir, 'node_modules', pkg)),
+                importModule: (plugin, modulePath) => import(pathToFileURL(join(plugin.dir, modulePath)).href),
+              })
+              await writeFile(smokePath, `${JSON.stringify({ at: Date.now(), results }, null, 2)}\n`)
+            } catch (error) {
+              smokeError = error instanceof Error ? error.message : String(error)
+              console.warn(`[dsh-auto-upgrade] 冒烟失败：${smokeError}`)
+            } finally {
+              smokeRun = null
+            }
+          })()
+        } catch (error) {
+          smokeRun = null
           throw error
         }
       },

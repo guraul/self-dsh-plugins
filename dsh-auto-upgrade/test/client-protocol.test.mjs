@@ -8,7 +8,7 @@ const client = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8'
 
 test('浏览器半边与本文件的路由表一致（无构建 = 靠测试保证）', () => {
   // 只在宿主侧用、浏览器半边还没接入的路由（#300 的 probe 属 P1 后端，P1b 接 UI 后删掉）。
-  const HOST_ONLY = new Set([API.probe])
+  const HOST_ONLY = new Set([API.probe, API.smoke])
   const expected = Object.values(API).filter((path) => !HOST_ONLY.has(path))
   const found = new Set(client.match(/\/api\/dsh-auto-upgrade[\w/-]*/g) ?? [])
   assert.deepEqual([...found].sort(), expected.sort())
