@@ -24,11 +24,7 @@ const DONE_GRACE_MS = 15_000
 /** 总存活上限（毫秒）：升级装包可能几分钟，给足余量。 */
 const MAX_LIFETIME_MS = 20 * 60_000
 
-/**
- * 解析 `--key value` 形式的参数。
- * @param {string[]} argv 命令行参数。
- * @returns {Record<string, string>} 键值表。
- */
+/** 解析 `--key value` 形式的参数。 */
 function parseArgs(argv) {
   const out = {}
   for (let i = 0; i < argv.length; i += 2) {
@@ -94,7 +90,7 @@ async function readOr(path) {
 }
 
 /**
- * 候选地址是否真的能认证（令牌是进程级的，旧令牌会 401）。
+ * 候选地址是否真能认证（令牌是进程级的，旧令牌会 401）。
  * @param {string} url 候选地址。
  * @returns {Promise<boolean>} 200/302/303 视为有效。
  */
@@ -107,10 +103,7 @@ async function authenticates(url) {
   }
 }
 
-/**
- * 推出当前阶段。判据全部来自本机现有产物，不做任何写操作。
- * @returns {Promise<{phase: string, detail: string, url?: string, elapsedMs: number}>} 阶段。
- */
+/** 推出当前阶段（判据全部来自本机现有产物）。 */
 async function snapshot() {
   const elapsedMs = Date.now() - startedAt
   // 只认本轮写的 result.json：上一轮失败的 ok:false 会一直留在磁盘上，

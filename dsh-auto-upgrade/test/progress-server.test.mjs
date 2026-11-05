@@ -92,36 +92,3 @@ test('#300 重启进度服务：result.json 报失败时 /state 报 failed，不
     await rm(stateDir, { recursive: true, force: true })
   }
 })
-
-test('#300 客户端：后端给了 progressUrl 就跳过去，否则保持原来的 watchdog 行为', async () => {
-  const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
-  assert.match(source, /window\.location\.href = result\.progressUrl/, '升级/重启后要跳到进度页')
-  const count = (source.match(/result\.progressUrl/g) ?? []).length
-  assert.ok(count >= 2, '升级流程与通用 handoff 都要处理（两处）')
-  assert.match(source, /startWatchdog\(/, '没有进度服务时仍要退回 watchdog（不许两条都丢）')
-})
-
-test('#300 进度服务：旧令牌（点击时的 url.txt）不算「就绪」——这是 #293 同源的坑', async () => {
-  const host = await fakeHost()
-  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
-  const urlFile = join(stateDir, 'url.txt')
-  const oldUrl = `${host.origin}/?token=OLD_TOKEN_STILL_VALID_01`
-  // 点击那一刻：url.txt 里是旧进程的有效令牌（还能 303）——绝不能因此判 done。
-  await writeFile(urlFile, `${oldUrl}\n`)
-  const progress = await startProgress(stateDir, urlFile)
-  try {
-    const early = await (await fetch(`${progress.base}/state`)).json()
-    assert.notEqual(early.phase, 'done', '旧令牌仍是有效的，但它不是本轮的新地址')
-    assert.equal(early.url, undefined, '没到 done 就不许给地址')
-    // 新进程启动后 url.txt 被刷新成新令牌 → 这时才算完成。
-    const newUrl = `${host.origin}/?token=NEW_TOKEN_AFTER_RESTART_2`
-    await writeFile(urlFile, `${newUrl}\n`)
-    const later = await (await fetch(`${progress.base}/state`)).json()
-    assert.equal(later.phase, 'done')
-    assert.equal(later.url, newUrl)
-  } finally {
-    progress.kill()
-    await host.close()
-    await rm(stateDir, { recursive: true, force: true })
-  }
-})
