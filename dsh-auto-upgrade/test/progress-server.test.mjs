@@ -8,10 +8,7 @@ import { join } from 'node:path'
 
 const SERVER = new URL('../lib/host/progress-server.mjs', import.meta.url).pathname
 
-/**
- * 起一个假宿主：任何请求都回 303（模拟「新令牌可用」）。
- * @returns {Promise<{origin: string, close: () => Promise<void>}>} 假宿主。
- */
+/** 假宿主：任何请求都回 303（模拟「新令牌可用」）。 */
 async function fakeHost() {
   const server = createServer((_req, res) => {
     res.writeHead(303, { location: '/' })
@@ -20,19 +17,11 @@ async function fakeHost() {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   return {
     origin: `http://127.0.0.1:${String(server.address().port)}`,
-    close: () => new Promise((resolve) => {
-      server.closeAllConnections?.()
-      server.close(resolve)
-    }),
+    close: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve) }),
   }
 }
 
-/**
- * 起进度服务并等它把端口写出来。
- * @param {string} stateDir 状态目录。
- * @param {string} urlFile url.txt 路径。
- * @returns {Promise<{base: string, kill: () => void}>} 进度服务。
- */
+/** 起进度服务并等它写出端口。 */
 async function startProgress(stateDir, urlFile) {
   const child = spawn(process.execPath, [SERVER, '--state', stateDir, '--url-file', urlFile, '--port', '0'], {
     stdio: 'ignore',
