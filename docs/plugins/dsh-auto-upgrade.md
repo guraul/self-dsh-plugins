@@ -215,20 +215,11 @@ pnpm run check                                # node --check
   单测见 `test/token-url.test.mjs` 与 `test/refresh-url.test.mjs`（含端到端 helper 用例）。
   **别在 shell 里重新实现一份**。
 
-## 升级前「试装」探针（issue #300 P1）
+## 升级前「试装」探针（#300 P1）
 
-`GET /api/dsh-auto-upgrade/probe` 返回 `{running, startedAt, target, entries[]}`；
-`POST` 在后台开跑（`202`），重复 POST 返回 `409 E_BUSY`。
-
-判据只有两条，彼此独立：① `dsh plugin --profile probe add <路径>` 退出码 0；
-② `dsh --profile probe --dump-config` 的输出里出现插件名。两条都过才算「装配通过」。
-
-- **只验本机路径型插件**（profile 依赖里 `link:` / `file:` 的那批）；npm 装的不重复验。
-- **一次性现场**：每次跑都 `mkdtemp` 一个 `DSH_HOME`，跑完删掉，绝不碰真实 profile。
-- **缓存 24 小时**，键是 `(dsh 版本, 插件名, 插件目录 mtime)`——插件目录动过就自动重跑。
-- **只作警告，不阻断升级**：门禁仍然只看声明（`lib/host/compat.js`）。
-
-抓得到：bundle 缺失、依赖指向未发布的包、`cordis.patch.yml` 写坏；抓不到「装得上但行为坏了」（P2 冒烟）。
+`GET /probe` 读结论缓存/进度，`POST` 后台开跑（不阻断、并发 `409`）。做法是一次性 `DSH_HOME` 里
+把每个 `link:`/`file:` 插件真装一遍：`plugin add` 退出码 0 **且** `--dump-config` 里恰好出现
+`- id: <插件名>` 才算装配通过；结论缓存 24h（键含插件目录 mtime）。**只作警告，不阻断升级。**
 
 ## 另需注意的两条设计约束
 

@@ -41,7 +41,6 @@ export function buildProbeCommands(options) {
 
 /**
  * `--dump-config` 里是否**恰好**有这条插件（`- id: <名字>` 行）。
- *
  * 不用 `includes`：同一次性 profile 里插件是顺序 add 的，后装的插件 dump 里会带上前面
  * 装过的名字；子串匹配还会被「名字是另一个名字的前缀」骗到。
  * @param {string} text `--dump-config` 输出。
@@ -73,8 +72,7 @@ export function judgeProbe(result) {
 }
 
 /**
- * 缓存键：目标版本 + 插件名 + 插件目录 mtime。
- * @param {{targetVersion: string, name: string, mtimeMs?: number}} options 输入。
+ * 缓存键：目标版本 + 插件名 + 插件目录 mtime。@param {{targetVersion: string, name: string, mtimeMs?: number}} options 输入。
  * @returns {string} 键。
  */
 export function probeKey(options) {
