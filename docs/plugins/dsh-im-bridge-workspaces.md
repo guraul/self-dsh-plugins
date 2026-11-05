@@ -76,10 +76,10 @@
 ——**两个锚点都是先跑一次性 `DSH_HOME` 验过才加的**。
 
 - 门禁口径、逐版本 verdict、验证命令、失败时怎么记：见 [`../COMPATIBILITY.md`](../COMPATIBILITY.md)。
-- ⚠️ `0.2.2-alpha.2` **没有放宽**：装配/加载能过，但 `dsh-agent` 的 `installModelSelection` 删了第二个参数，
-  `tsc` 报 `TS2554: Expected 1 arguments, but got 2`（`src/index.ts:1285`），且 `reasoningEffort` 会静默失效。
-  已如实记为 `incompatible`。注意门禁用 `includePrerelease`，`^0.2.1-rc.2` 在运行期仍会放行 alpha.2
-  ——那不等于我们宣称支持它。
+- ✅ `0.2.2-alpha.2` / `0.2.2-rc.1` 已放宽（`0.5.0-ws.2`，issue #299）：`installModelSelection` 的签名在
+  0.2.2 线从两参数变一参数（后者只发「切换提示」，路由改由 `agentOptions` 承担）。现在按
+  `installModelSelection.length` 分流，两条线共用一份源码；`reasoningEffort` 在新线上随
+  `agentOptions` 下发。两种类型各跑一次 `tsc` 均通过，见 [`../COMPATIBILITY.md`](../COMPATIBILITY.md)。
 - 放宽前请重跑上面的装配验证（原 `install-check.sh` 已于 2026-11-05 删除，能力移交 `dsh-auto-upgrade` 的升级前试装）；**不要**用 `dsh plugin allow-version` 的版本豁免代替验证。
 
 ### 本机开发命令（依赖已装好时）

@@ -669,6 +669,68 @@ function resolvePersona(config: Config, settings: SettingsReader | undefined): s
  * Resolve the model for a new WeCom chat session. Both provider and model must be
  * non-empty to override; otherwise fall back to agent-default-model.
  */
+/** `agents.create/resume` 的 agentOptions 形状（跟着当前安装的 dsh 类型走）。 */
+type AgentOptionsForCreate = Parameters<AgentRegistry['create']>[0]['agentOptions']
+
+/**
+ * 按 dsh 版本线分流 `installModelSelection` 的调用方式（issue #299）。
+ *
+ * - **0.2.1-rc.x**：`installModelSelection(ctx, selection)` 的第二参数是「真的在路由」——
+ *   它 hook `system-prompt/assemble` 与 `agent/request`，把 provider/model/reasoningEffort
+ *   下发给每次请求；少传就会退回默认模型。
+ * - **0.2.2-rc.1+**：签名变成 `installModelSelection(ctx)`，只负责「模型切换提示」，
+ *   路由改由 `agentOptions` 承担；多传的实参被静默忽略（这正是 `reasoningEffort`
+ *   曾静默失效的原因）。
+ *
+ * 两条线的差别只在 arity，所以按 `install.length` 分流即可，一次源码同时支持。
+ * @param ctx agent 上下文。
+ * @param install 官方 `installModelSelection`（两种签名都接受）。
+ * @param selection 当前选择（仅在两参数线上使用）。
+ */
+export function needsSelectionArg(install: { length: number }): boolean {
+  return install.length >= 2
+}
+
+/**
+ * 同上，但返回走的是哪条线——调用方不必再判一次 arity（单一真源，issue #299 review）。
+ * @param ctx agent 上下文。
+ * @param install 官方 `installModelSelection`。
+ * @param selection 当前选择。
+ * @returns `'legacy'`（两参数线）或 `'modern'`（一参数线）。
+ */
+export function installSelectionCompat(
+  ctx: Context,
+  install: (ctx: Context, selection?: { current: ModelSelection; assembled?: ModelSelection }) => void,
+  selection: ModelSelection,
+): 'legacy' | 'modern' {
+  if (needsSelectionArg(install)) {
+    install(ctx, { current: selection, assembled: undefined })
+    return 'legacy'
+  }
+  install(ctx)
+  return 'modern'
+}
+
+/**
+ * 组装 `agents.create/resume` 的 agentOptions。
+ *
+ * `reasoningEffort` 只在「一参数线」展开：老版本（≤0.2.1-rc.x）的 `AgentOptions` 没有这个字段，
+ * 而那条线的路由本来就走 `installModelSelection` 的第二个参数（issue #299）。
+ * @param selection 当前选择。
+ * @param withEffort 是否下发 `reasoningEffort`（即一参数线）。
+ * @returns 可直接交给 `agents.create/resume` 的 agentOptions。
+ */
+export function buildAgentOptions(
+  selection: ModelSelection,
+  withEffort: boolean,
+): AgentOptionsForCreate {
+  return {
+    provider: selection.provider,
+    model: selection.model,
+    ...(withEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+  } as AgentOptionsForCreate
+}
+
 function resolveSelection(
   config: Config,
   defaultModel: DefaultModel,
@@ -1462,6 +1524,14 @@ export function apply(ctx: Context, config: Config): void {
       }
 
       const selection = resolveSelection(cfg(), defaultModel)
+      // 两个 dsh 版本线的签名不同（0.2.1-rc.x 两参数、0.2.2-rc.1+ 一参数），
+      // 且语义也变了：前者负责路由，后者只发「模型切换提示」。用 arity 分流，
+      // 一次源码同时支持两条线（#299）。
+      const selectionArgRequired = needsSelectionArg(installModelSelection)
+      const installLegacy = installModelSelection as unknown as (
+        ctx: Context,
+        selection?: { current: ModelSelection; assembled?: ModelSelection },
+      ) => void
       const presets = ctx.get('agentPresets') as AgentPresets | undefined
       const presetId = (plan.bind === 'resume' && stored?.agentPreset) ? stored.agentPreset : cfg().agentPreset
       let resolvedId = presetId
@@ -1469,12 +1539,12 @@ export function apply(ctx: Context, config: Config): void {
         resolvedId = (await presets.resolve(presetId)).id
       }
       const setup = async (agentCtx: Context): Promise<void> => {
-        const selected = { current: selection, assembled: undefined }
-        installModelSelection(agentCtx, selected)
+        installSelectionCompat(agentCtx, installLegacy, selection)
         if (presets !== undefined) await presets.mount(agentCtx, resolvedId)
         installWecomChannel(agentCtx, st, () => binding.path)
       }
-      const agentOptions = { provider: selection.provider, model: selection.model }
+      // rc 线把 selection 从 installModelSelection 移到了 AgentOptions（#299）。
+      const agentOptions = buildAgentOptions(selection, !selectionArgRequired)
 
       try {
         if (plan.bind === 'resume') {
