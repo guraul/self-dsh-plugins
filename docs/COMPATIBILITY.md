@@ -57,6 +57,8 @@
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.1` | `0.2.1-rc.2` | **L2** | ✅ 通过 | 2026-10-29 | 一次性 `DSH_HOME`：`plugin --profile headless add` + `--dump-config` grep + headless 启动看到插件自身日志 |
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.1` | `0.2.1-rc.4` | **L2** | ✅ 通过 | 2026-10-29 | 同上（headless 启动输出 `[im-bridge] workspaceRegistry 不可用…` / `[im-bridge] 跳过启动: 缺少 botId/secret…`） |
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.1` | `0.2.2-alpha.2` | **L3** | ❌ **不兼容（未放宽）**<br>装配/加载可过，但 `tsc` 报 `TS2554`，且 `reasoningEffort` 静默失效 | 2026-10-29 | 一次性 `DSH_HOME` 装配 + headless 启动均通过；**CI 解析到 alpha.2 类型后 `pnpm run typecheck` 失败** → 见文末「已知差异」 |
+| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.2` | `0.2.2-rc.1` | **L3** | ✅ 通过（**已放宽**） | 2026-11-05 | 按 rc.1 类型跑 `tsc` 通过（临时 `paths` 指向已装的 rc.1）；`pnpm test` 54/54；`build:host` 产物 `node --check` 通过；按 arity 分流 `installModelSelection`（issue #299） |
+| `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.2` | `0.2.2-alpha.2` | **L3** | ✅ 通过（**已放宽**） | 2026-11-05 | 同上，按 alpha.2 类型跑 `tsc` 通过（arity 同为 1，走同一条适配路径） |
 
 **未验证的版本不要写进表**。验不过的版本按下面"失败时怎么记"处理；写进表的每条都要有深度（缺了就写「未记录」）。
 
@@ -98,7 +100,7 @@ DSH_HOME="$H" pnpm dlx @deepseek-ai/dsh@<V> --profile headless 2>&1 | head -20
   "❌ 不兼容（未放宽）"，并在文末"已知差异"写清证据与影响面。
 - **任何情况下都不许用版本豁免把失败版本"变绿"**；也不许为了让门禁过而加 `engines.dsh`。
 
-## 已知差异（`@mhfire/dsh-im-bridge` vs `0.2.2-alpha.2`，因此未放宽）
+## 已解决：`installModelSelection` 签名差异（issue #299，2026-11-05）
 
 `@deepseek-ai/dsh-agent` 的 `installModelSelection` 在 `0.2.2-alpha.2` 改了签名：
 
@@ -122,7 +124,20 @@ DSH_HOME="$H" pnpm dlx @deepseek-ai/dsh@<V> --profile headless 2>&1 | head -20
 3. **语义**：`reasoningEffort` 配置项在 alpha.2 上会静默失效（它只在那个被忽略的 selection 里传递）。
    只在用户显式填了非空 `reasoningEffort` 时才有影响。
 
-所以 `0.2.2-alpha.2` 记为 `incompatible`、**不加锚点**。要支持它需要真正改编排逻辑——
-`0.2.2-alpha.2` 的 `AgentOptions` 已支持 `reasoningEffort`，方向是把它随 `agentOptions` 传下去，
-并只调用单参数的 `installModelSelection(agentCtx)`；但这要按版本分支、且无法在当前环境做 GUI 端到端验证，
-属独立任务。
+**修法（`0.5.0-ws.2`）**：两条线的差别只在 **arity**，所以按 `installModelSelection.length` 分流，
+一次源码同时支持（`src/index.ts` 的 `installSelectionCompat`）：
+
+| 运行时的 arity | 分支 | 依据 |
+|---|---|---|
+| `2`（≤ `0.2.1-rc.x`） | 传 `{ current, assembled }` | 该版本第二参数负责路由，少传会退回默认模型 |
+| `1`（`0.2.2-alpha.2` / `0.2.2-rc.1`+） | 只传 `ctx` | 该版本只发「切换提示」，路由改由 `agentOptions` 承担 |
+
+同时把 `reasoningEffort` 放进 `agentOptions`（官方 `AgentOptions` 自 `0.2.2-alpha.2` 起支持该字段；
+老版本没有这个字段，所以在两参数线上**不展开**）。
+
+**验证（2026-11-05）**：按 `0.2.2-rc.1` 与 `0.2.2-alpha.2` 两种类型各跑一次 `tsc` 均通过；
+`pnpm test` 54/54（新增 3 条：两参数线交接 selection、一参数线只传 1 个实参、`reasoningEffort` 随
+`agentOptions` 下发）；`build:host` 产物 `node --check` 通过。因此两个版本都改为 `compatible` / **L3**。
+
+**仍未验证**：GUI 端的端到端（模型切换提示是否按预期出现、`reasoningEffort` 在真实请求头里是否生效）——
+这需要重启宿主并观察实际请求，属合并后补验项。
