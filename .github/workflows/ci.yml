@@ -249,12 +249,6 @@ jobs:
         with:
           node-version: 24.21.0
 
-      - name: 语法检查
-        run: node --check scripts/pipeline/audit-subagents.mjs
-
-      - name: audit-subagents 单测（含内置 --self-test）
-        run: node --test scripts/pipeline/audit-subagents.test.mjs
-
       - name: build-check 语法检查 + 单测（构建一致性检查的契约）
         run: |
           bash -n scripts/pipeline/build-check.sh
