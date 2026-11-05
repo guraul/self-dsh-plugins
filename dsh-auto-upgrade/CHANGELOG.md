@@ -3,6 +3,19 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] — 2026-11-05
+
+### 新增
+
+- **升级后「逐插件冒烟」（#300 P2）**：试装只能证明「装得上」，装得上但行为坏了是另一类故障
+  （2026-11-05 的 `installModelSelection` 签名变更就是）。`GET /smoke` 读结论，`POST` 后台开跑。
+  两层判据：① **宿主兜底三项**（在 `dsh.profile.bundles` 里启用、插件目录存在、`dsh.client.inject`
+  的包能解析）；② **插件自报断言**：`package.json` 的 `dsh.smoke = { module, timeoutMs }`，
+  模块导出 `run(ctx)` → `{ ok, checks[] }`。
+  - 没写 `dsh.smoke` 的插件只跑兜底三项，结果标 `partial: true`——**不假装验过行为**。
+  - 单插件默认超时 5 秒，超时/抛错/脏返回值一律按失败记，不带崩整批；串行跑，避免互相干扰。
+  - 单测 7 条（`test/smoke.test.mjs`）。
+
 ## [0.3.0] — 2026-11-05
 
 ### 新增
