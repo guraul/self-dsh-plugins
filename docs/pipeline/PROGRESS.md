@@ -110,6 +110,24 @@ GitHub Issue（任务入口）
 
 同日上午三仓共享包刷新到构建 `0a7ea83 2026-11-04T08:10:47Z`，`doctor` 三行一致（同日晚些时候四仓统一到 `cc13260`，见上）。
 
+### ✅ 阶段 8 · 兼容验证改造（2026-11-05）
+
+- [x] **`url.txt` 旧令牌竞态 + watchdog 假承诺**（issue #293 / PR #297，0.2.6）：刷新前抓 baseline、候选必须真能认证才写 `url.txt`，60 次耗尽留 WARNING；watchdog 耗尽不再承诺「自动重连」，改给可执行指引
+- [x] **im-bridge `INACTIVE_EFFECT` 不再拖垮宿主**（issue #296 / PR #298，im-bridge 未改版本号）：`apply` 异步续段失活即中止，不再变成 fatal load failure
+- [x] **im-bridge 适配 `installModelSelection` 单参数签名**（issue #299 / PR #306，im-bridge 0.5.0-ws.1 → 0.5.0-ws.2）：修 dsh 0.2.2-rc.1 后 `reasoningEffort` 静默失效
+- [x] **升级前试装探针（`GET` / `POST /probe`）**（issue #300 / PR #307，0.3.0）：一次性 `DSH_HOME` 里对每个 `link:` / `file:` 插件真装一遍，按 `(dsh 版本, 插件名, 目录 mtime)` 缓存 24h，只警告不阻断
+- [x] **升级后逐插件冒烟（`GET` / `POST /smoke`）**（issue #300 / PR #308，0.4.0）：宿主兜底三项 + 插件自报 `dsh.smoke` 断言，没写的标 `partial`、不假装验过行为
+- [x] **两个插件补 `dsh.smoke` 断言 + 宿主事实透传**（issue #300 / PR #310，0.5.1）：`run(context)` 带 `dshVersion` / `dshDir`，避免对着插件自己 `node_modules` 里的旧副本自证清白
+- [x] **冒烟失败自动开 issue**（issue #300 / PR #313，0.6.0）：按「版本 + 失败插件」去重开单，`partial` 且兜底全过不算失败，`detail` 脱敏后写正文
+- [x] **兼容深度口径**（issue #300 / PR #315，0.6.1）：只有 L2+ 才显示「兼容」
+- [x] **回填补丁生成 + 只读预览（`GET /refill`）**（issue #300 / PR #316，0.7.0）
+- [x] **回填写盘 + 开 PR（`POST /refill/pr`）**（issue #300 / PR #318，0.8.0）：在临时 worktree 里执行，`gh pr create` 显式 `--base main --head`
+- [x] **进度页阶段判定修复**（issue #320 / PR #321，0.8.1）：按端口探测阶段、补 `waiting` / `verifying` 两步，修用户实测「只滑一次」
+- [x] **进度页改莱茵生命风格**（issue #320 / PR #322，0.8.2）：Pioneer 终端面板配色，动效保持克制
+- [x] **清四条 review 欠账**（issue #323 / PR #324，0.8.3）：commit 检测 / `starting` 死代码 / 文案倒退 / 私有化
+
+`#300` P1–P4 全绿后关闭（外部状态，仓库内不可验证）。补记：同日合并的 PR #309（0.5.0，进度页 `progress-server.mjs` 首次落地）不在交接 §3 表内，此处一并记上，免得版本号从 0.4.0 跳到 0.5.1 看不出来历。
+
 ## 四、未完成（欠账）
 
 | # | 欠账 | 现状 | 影响 |
@@ -117,6 +135,9 @@ GitHub Issue（任务入口）
 | 1 | 形态 C（清言网页桥） | 未启动 | 依赖 REQ-002（需求未写） |
 | 2 | memx 迁到共享包 | **已完成**（memx PR #56）：`tools/` + `.dsh/pipeline.json` + 五个转发壳 + `test-forwarding.sh`（13 组）；`new-task.sh` 固定 `--worktrees-dir /Users/gubin/workspace/memx-worktrees`（包 PR #23 补的参数；memx 被 opencode 加载源码，worktree 必须建在仓外） | 无。memx 无 CI，按 `ci: []` 如实声明 |
 | 3 | 本仓 `review.sh` 未统一到共享包 | **已完成**（本仓 PR #278，`70eaa3d`）：`prepare` / `prompt` 已转发到包的 `review` 子命令（`--facts` / `--include` / 提示词生成都由包提供）；四仓（agent-mobile / homebase / memx / 本仓）一致 | 剩余已知边界：`publish`（把判定发到 GitHub 当 review）仍留本仓自己实现，包侧 `review publish` 只落盘记录 |
+| 4 | 2026-11-05 交接的两条欠账（`progress-server.mjs` 不可达 `return`、本台账补阶段 8） | **已完成**（本 issue #330）；交接 §4 的另一条「设置页 UI」已由 `dsh-auto-upgrade` 0.9.0（PR #331）完成 | 无 |
+| 5 | 设置页 UI 的两个未决问题：要不要放「一键回填开 PR」按钮、要不要做深色模式 | 待用户拍板（交接 §8，**别自己定**） | 危险动作是否进 UI、浅色进度页与宿主设置页主题是否统一 |
+| 6 | 真实升级没跑过 | 未执行（交接 §10；跑一次会终止当前会话，需用户授权） | 试装 / 冒烟 / 回填的结论目前只来自探针、冒烟与单测 |
 
 > **`#117` 不是欠账**：它是 `compat-matrix.yml` 每周把结果写进去的**滚动 issue**，按设计长期 open（最近一次成功：2026-11-02）。此前台账把它列为「未完成」是误判。（2026-11-05 补记：该工作流与其脚本已删除，能力移交 #300，#117 已关闭。）
 
@@ -156,3 +177,4 @@ GitHub Issue（任务入口）
 | 2026-11-04 | 四仓 `doctor` 一致 | 四仓（self-dsh-plugins / agent-mobile / homebase / memx）同一构建 `cc13260 2026-11-04T12:18:01Z` |
 | 2026-11-04 | 台账收口（#279） | §三 阶段 7 补五行（包四个入口 / 本仓 #278 / memx #56 / 四仓 `doctor`），§四 欠账 #2 / #3 改「已完成」；`README.md` 脚本清单与 §review.sh 的跨仓状态、刷新共享包的构建标识、memx 仓外 worktree 容器说明同步更新 |
 | 2026-11-05 | 删除 `install-check` / `compat-matrix` / `audit-subagents`（#301 / PR #302） | 能力移交 `dsh-auto-upgrade` #300（升级前试装 + 升级后逐插件冒烟）；文档同步清引用，脚本与 CI 文件删除由另一单负责 |
+| 2026-11-06 | 清两条交接欠账（#330） | §三 新增阶段 8（2026-11-05 的 13 个 PR 逐条台账，`dsh-auto-upgrade` 0.2.6 → 0.8.3）；删 `progress-server.mjs` 里 `if (live) return …` 之后不可达的注释与第二个 `return`（行为零变化）；§四 补 #330 与交接遗留的两条欠账；`dsh-auto-upgrade` 0.9.0 → 0.9.1 |

@@ -149,8 +149,6 @@ async function snapshot() {
   // 端口活着但**旧令牌还能认证**：这是宿主还没退干净的窗口，别报「校验新地址」（会倒退一步）。
   if (live) return { phase: 'stopping', detail: '旧进程正在退出…', elapsedMs }
   return { phase: 'verifying', detail: '新进程已启动，正在校验新地址…', elapsedMs }
-  // 端口活着、旧令牌也失效了，但 url.txt 还不能认证——还没到就绪，继续等。
-  return { phase: 'verifying', detail: '正在等待新地址…', elapsedMs }
 }
 
 /** 进度页（内联，不引外网资源）。 */
