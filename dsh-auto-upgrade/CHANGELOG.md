@@ -3,6 +3,24 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.2] — 2026-11-06
+
+### 修复
+
+- **试装探针对每个插件都误报失败**（真机首次运行发现）。探针拿 `package.json` 的**包名**去比对
+  `--dump-config` 里的 id，但 DSH 的插件 id 来自**模块导出的 `name`**：
+  `dsh-plugin-auto-upgrade` → `dsh-auto-upgrade`、`@mhfire/dsh-im-bridge` → `im-bridge`，
+  一个都对不上，于是「装成功了」被一律判成「没进 profile」。
+  现在新增 `pluginIdFromSource()` / `entryCandidates()`：按 `exports["."]` → `main` → 约定路径找入口，
+  正则取 `export const name = '…'` 作为比对 id；解析不到才回落到包名（行为与修复前一致）。
+  结果条目里同时带包名（显示）与 id（比对）。
+- **探针缓存 key 加 schema 版本**（review 抓到的 blocker）：key 原来只有「目标版本|包名|mtime」，
+  判定逻辑改了也不会失效，旧版本写下的 `ok:false` 会被原样回放，修复在 TTL 内等于没生效。
+  现在 key 以 `PROBE_CACHE_SCHEMA` 开头，改判定就 +1，旧结论整体报废。
+- **id 提取不再静默回落**：解析不到时结果带 `idFallback`，失败文案里点明「未能从入口解析插件 id，仅供参考」；
+  覆盖 `module.exports = { name }`、`export default { name }`、`definePlugin({ name })`、
+  `exports["name"]` 等写法，并先剥注释（注释里的旧写法不能抢先命中）。
+
 ## [0.9.1] — 2026-11-06
 
 ### 内部

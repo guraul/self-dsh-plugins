@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
-import { cacheHit, linkTargets, runProbes } from './host/probe.js'
+import { cacheHit, entryCandidates, linkTargets, pluginIdFromSource, runProbes } from './host/probe.js'
 import { runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
@@ -582,6 +582,28 @@ export function apply(ctx, config = {}) {
           targets = linkTargets(manifest.dependencies)
         } catch (error) {
           throw new RequestError(500, CODE.PRECONDITION, `读 profile 依赖失败：${error instanceof Error ? error.message : String(error)}`)
+        }
+        // 补上每个插件**真正的 id**：dump-config 里是模块导出的 name，不是包名（见 issue #346）。
+        for (const item of targets) {
+          try {
+            const manifestText = await readFile(join(item.path, 'package.json'), 'utf8')
+            const pluginManifest = JSON.parse(manifestText)
+            for (const candidate of entryCandidates(pluginManifest)) {
+              let source
+              try {
+                source = await readFile(join(item.path, candidate), 'utf8')
+              } catch {
+                continue
+              }
+              const id = pluginIdFromSource(source)
+              if (id !== undefined) {
+                item.id = id
+                break
+              }
+            }
+          } catch {
+            // 读不到就不设 id，runProbes 会回落到包名（行为与修复前一致）。
+          }
         }
         if (targets.length === 0) {
           // 早退必须先释放占位，否则后续 POST 永远 409、GET 永远 running（#300 review 轮 2）。

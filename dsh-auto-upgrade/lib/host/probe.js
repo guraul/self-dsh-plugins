@@ -7,6 +7,12 @@
 export const PROBE_TTL_MS = 24 * 60 * 60 * 1000
 
 /**
+ * 判定逻辑的版本：改了「怎么判」就把这个数 +1。
+ * 它进了缓存 key，所以旧版本写下的结论会整体失效，不会被原样回放（#346 review 的 blocker）。
+ */
+export const PROBE_CACHE_SCHEMA = 2
+
+/**
  * 从 profile 的 `dependencies` 里挑出「本机路径型」插件（只有 `link:` / `file:` 能用路径装回去）。
  * @param {Record<string, unknown>} dependencies profile 的 `dependencies`。
  * @returns {{name: string, path: string}[]} 可试装的插件（含绝对路径）。
@@ -33,6 +39,60 @@ export function buildProbeCommands(options) {
     add: [options.dshBin, 'plugin', '--profile', options.profileName, 'add', options.pluginPath],
     dump: [options.dshBin, '--profile', options.profileName, '--dump-config'],
   }
+}
+
+/**
+ * 从插件入口源码里取它**真正的 id**（`export const name = '…'`）。
+ *
+ * DSH 的插件 id 来自模块导出的 `name`，**不是** `package.json` 的包名：
+ * `dsh-plugin-auto-upgrade` 的 id 是 `dsh-auto-upgrade`、`@mhfire/dsh-im-bridge` 是 `im-bridge`。
+ * 拿包名去比对 dump 里的 id，会一个都对不上（2026-11-06 真机全量误报就是这么来的）。
+ * @param {string} text 入口文件源码。
+ * @returns {string|undefined} id；没写 `name` 导出时 undefined。
+ */
+export function pluginIdFromSource(text) {
+  // 先剥注释：入口里注释掉的旧写法（`// module.exports.name = 'old'`）不能抢先命中。
+  const source = String(text ?? '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+  const patterns = [
+    /export\s+const\s+name\s*=\s*(['"])([^'"]+)\1/,                                     // export const name = 'x'
+    /(?:module\.)?exports(?:\.name|\[\s*(['"])name\1\s*\])\s*=\s*(['"])([^'"]+)\2/,       // module.exports.name = 'x'
+    /(?:module\.)?exports\s*=\s*\{[^}]*?\bname\s*:\s*(['"])([^'"]+)\1/s,                    // module.exports = { name: 'x' }
+    /export\s+default\s+(?:definePlugin\s*\(\s*)?\{[^}]*?\bname\s*:\s*(['"])([^'"]+)\1/s,    // export default { name: 'x' }
+    /definePlugin\s*\(\s*\{[^}]*?\bname\s*:\s*(['"])([^'"]+)\1/s,                          // definePlugin({ name: 'x' })
+  ]
+  for (const pattern of patterns) {
+    const matched = pattern.exec(source)
+    if (matched !== null) {
+      // 各写法的捕获组位置不同：取最后一个捕获组就是 id。
+      return matched[matched.length - 1]
+    }
+  }
+  return undefined
+}
+
+/**
+ * 猜入口文件（按 `exports["."]` → `main` → `lib/index.js` → `index.js` 试）。
+ * @param {object|undefined} manifest 插件 package.json。
+ * @returns {string[]} 相对路径候选，按优先级排列。
+ */
+export function entryCandidates(manifest) {
+  const out = []
+  const exported = manifest?.exports
+  if (typeof exported === 'string') out.push(exported)
+  else if (exported !== null && typeof exported === 'object') {
+    const dot = exported['.']
+    if (typeof dot === 'string') out.push(dot)
+    else if (dot !== null && typeof dot === 'object') {
+      for (const key of ['default', 'import', 'require', 'node']) {
+        if (typeof dot[key] === 'string') out.push(dot[key])
+      }
+    }
+  }
+  if (typeof manifest?.main === 'string') out.push(manifest.main)
+  out.push('lib/index.js', 'index.js', 'dist/index.js')
+  return [...new Set(out)]
 }
 
 /**
@@ -72,7 +132,9 @@ export function judgeProbe(result) {
  * @returns {string} 键。
  */
 export function probeKey(options) {
-  return `${options.targetVersion}|${options.name}|${options.mtimeMs ?? 0}`
+  // 第三个字段是**缓存 schema 版本**：改了探针的判定逻辑就 +1，
+  // 否则旧版本写进去的结论会被原样回放，修复在 TTL 内表现为「不生效」（#346 review 的 blocker）。
+  return `${PROBE_CACHE_SCHEMA}|${options.targetVersion}|${options.name}|${options.mtimeMs ?? 0}`
 }
 
 /**
@@ -101,10 +163,13 @@ export async function runProbes(options) {
   /** @type {object[]} */
   const results = []
   for (const target of options.targets) {
+    // 比对用**插件 id**（模块导出的 name），显示仍用包名。
+    const id = target.id ?? target.name
+    const idFallback = target.id === undefined
     const key = probeKey({ targetVersion: options.targetVersion, name: target.name, mtimeMs: target.mtimeMs })
     const cached = cache[key]
     if (cacheHit(cached, options.now)) {
-      results.push({ name: target.name, ok: cached.ok === true, detail: cached.detail, cached: true })
+      results.push({ name: target.name, id, idFallback, ok: cached.ok === true, detail: cached.detail, cached: true })
       continue
     }
     const commands = buildProbeCommands({
@@ -122,10 +187,13 @@ export async function runProbes(options) {
       addExit,
       dumpExit: dumped.status ?? dumped.code ?? null,
       dumpText: dumped.stdout,
-      pluginName: target.name,
+      pluginName: id,
     })
     cache[key] = { at: options.now, ok: verdict.ok, detail: verdict.detail }
-    results.push({ name: target.name, ok: verdict.ok, detail: verdict.detail, cached: false })
+    const detail = idFallback && verdict.ok === false
+      ? `${verdict.detail}（未能从入口解析插件 id，退回按包名比对，结论仅供参考）`
+      : verdict.detail
+    results.push({ name: target.name, id, idFallback, ok: verdict.ok, detail, cached: false })
   }
   return { results, cache }
 }
