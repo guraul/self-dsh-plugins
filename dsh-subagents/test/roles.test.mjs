@@ -35,17 +35,17 @@ test('normalizeRole 保留 model（与 provider）', () => {
 test('内置角色：reviewer 钉 provider + model，executor 不钉', () => {
   const { roles } = loadRoles()
   assert.equal(roles.get('reviewer').provider, 'codebuddy')
-  assert.equal(roles.get('reviewer').model, 'codebuddy/mimo-v2.6-pro')
+  assert.equal(roles.get('reviewer').model, 'codebuddy/hy4std')
   assert.equal(roles.get('executor').provider, '')
   assert.equal(roles.get('executor').model, '')
 })
 
-test('不传 model 调 reviewer → 下发角色钉的 codebuddy/mimo-v2.6-pro', async () => {
+test('不传 model 调 reviewer → 下发角色钉的 codebuddy/hy4std', async () => {
   const { tools, specs, exec } = await fakeHost()
   const out = await tools.get('product_delegate').execute({ role: 'reviewer', task: '审一下' }, exec)
   assert.equal(specs.length, 1)
   assert.equal(specs[0].provider, 'product-subagents:codebuddy')
-  assert.equal(specs[0].request.model, 'codebuddy/mimo-v2.6-pro')
+  assert.equal(specs[0].request.model, 'codebuddy/hy4std')
   assert.equal(out.role, 'reviewer')
   assert.equal(out.provider, 'codebuddy')
 })
@@ -54,11 +54,11 @@ test('传角色钉的 model（等价）→ 放行，下发角色钉的带前缀�
   const { tools, specs, exec } = await fakeHost()
   await tools
     .get('product_delegate')
-    .execute({ role: 'reviewer', model: 'codebuddy/mimo-v2.6-pro', task: 't' }, exec)
-  assert.equal(specs[0].request.model, 'codebuddy/mimo-v2.6-pro')
+    .execute({ role: 'reviewer', model: 'codebuddy/hy4std', task: 't' }, exec)
+  assert.equal(specs[0].request.model, 'codebuddy/hy4std')
 
-  await tools.get('product_delegate').execute({ role: 'reviewer', model: 'mimo-v2.6-pro', task: 't' }, exec)
-  assert.equal(specs[1].request.model, 'codebuddy/mimo-v2.6-pro', '去掉 codebuddy/ 前缀视为同一个模型')
+  await tools.get('product_delegate').execute({ role: 'reviewer', model: 'hy4std', task: 't' }, exec)
+  assert.equal(specs[1].request.model, 'codebuddy/hy4std', '去掉 codebuddy/ 前缀视为同一个模型')
 })
 
 test('传冲突模型直接报错，且不发起调用', async () => {
@@ -66,7 +66,7 @@ test('传冲突模型直接报错，且不发起调用', async () => {
   await assert.rejects(
     () => tools.get('product_delegate').execute({ role: 'reviewer', model: '别的模型', task: 't' }, exec),
     (error) => {
-      assert.ok(error.message.includes('角色 reviewer 钉的模型是 codebuddy/mimo-v2.6-pro'))
+      assert.ok(error.message.includes('角色 reviewer 钉的模型是 codebuddy/hy4std'))
       assert.ok(error.message.includes('本次请求 别的模型'))
       return true
     },
@@ -111,7 +111,7 @@ test('product_continue 续接同样吃角色钉的模型，冲突也报错', asy
     .get('product_continue')
     .execute({ role: 'reviewer', session: 's-abc', task: '补一条 finding' }, exec)
   assert.equal(specs.length, 1)
-  assert.equal(specs[0].request.model, 'codebuddy/mimo-v2.6-pro')
+  assert.equal(specs[0].request.model, 'codebuddy/hy4std')
   assert.equal(specs[0].request.sessionId, 's-abc')
 
   await assert.rejects(
@@ -119,7 +119,7 @@ test('product_continue 续接同样吃角色钉的模型，冲突也报错', asy
       tools
         .get('product_continue')
         .execute({ role: 'reviewer', session: 's-abc', model: '别的模型', task: 't' }, exec),
-    (error) => error.message.includes('角色 reviewer 钉的模型是 codebuddy/mimo-v2.6-pro'),
+    (error) => error.message.includes('角色 reviewer 钉的模型是 codebuddy/hy4std'),
   )
   assert.equal(specs.length, 1, '冲突那次不发起调用')
 })
@@ -174,13 +174,13 @@ test('resolveRoute：reviewer 传不一致模型仍然抛错（硬钉回归）',
   const { roles } = loadRoles()
   assert.throws(
     () => resolveRoute(roles.get('reviewer'), { model: '别的模型' }),
-    /角色 reviewer 钉的模型是 codebuddy\/mimo-v2\.6-pro，本次请求 别的模型/,
+    /角色 reviewer 钉的模型是 codebuddy\/hy4std，本次请求 别的模型/,
   )
 
   const { tools, specs, exec } = await fakeHost()
   await assert.rejects(
     () => tools.get('product_delegate').execute({ role: 'reviewer', model: '别的模型', task: 't' }, exec),
-    /钉的模型是 codebuddy\/mimo-v2\.6-pro/,
+    /钉的模型是 codebuddy\/hy4std/,
   )
   assert.equal(specs.length, 0, '硬钉冲突必须在发起调用之前抛出')
 })
@@ -215,7 +215,7 @@ test('reviewer-tools：带工具审核，permissionMode=full 且非硬只读（�
   const role = roles.get('reviewer-tools')
   assert.ok(role, 'reviewer-tools 角色必须存在')
   assert.equal(role.provider, 'codebuddy')
-  assert.equal(role.model, 'codebuddy/mimo-v2.6-pro')
+  assert.equal(role.model, 'codebuddy/hy4std')
   assert.equal(
     role.permissionMode,
     'full',

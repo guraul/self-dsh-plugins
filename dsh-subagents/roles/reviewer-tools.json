@@ -1,7 +1,7 @@
 {
   "description": "带工具的审核：可读仓库、跑只读命令核验 PR 里的断言。codebuddy 下本档非硬只读（无只读且带工具的档位），禁止写文件。",
   "provider": "codebuddy",
-  "model": "codebuddy/mimo-v2.6-pro",
+  "model": "codebuddy/hy4std",
   "permissionMode": "full",
   "allowDelegation": false,
   "outputContract": "review-result",
