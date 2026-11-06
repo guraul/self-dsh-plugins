@@ -22,7 +22,10 @@
                 → 写 PR comment（第 N 次/共 3 次）+ 提交 review 状态
                 → 写审核记录 .dsh-web/reviews/<pr>-<sha>.json
                 → 有问题则委派 executor 修复后重审（上限 3 轮）
-8. 合并         scripts/pipeline/merge-pr.sh --pr <PR号> --record <记录>   # 闸门 → squash merge → 清理 → 快进 main
+8. 合并         scripts/pipeline/merge-pr.sh --pr <PR号> --root <仓根> --record <记录>
+                # 闸门 → squash merge → 清理 → 快进 main；--root 必填，且指主工作区、不是当前 worktree
+                # （在 worktree 里写 --root . 不报错，但会走「没有持有该分支的 worktree → 跳过移除」分支，
+                #   结果 worktree 不清理、main 不快进）；缺了退 2，报错原文见 §二「实测报错原文（2026-11-06，issue #356）」
 9. 收尾         合并后**没有部署**；只有 CI 测试通过这一件事
 ```
 
@@ -73,9 +76,23 @@
 | `status.sh` | `status` | 审核记录概况（只读） |
 | `README.md` | — | 本目录唯一手写文件：生成物说明与禁改提示 |
 
+> **`review.sh` 三条常用写法**（生成入口不收位置参数、不改名，完整参数以包契约为准；都带 `scripts/pipeline/` 前缀，直接粘贴可跑）：
+> `scripts/pipeline/review.sh prepare --pr <号>` **只产出 `.tmp/review/<pr>/request.json`**，提示词要另跑 `scripts/pipeline/review.sh prompt --request <文件> --out <文件>`；
+> 判定落盘用 `scripts/pipeline/review.sh publish --pr <号> --response <判定文件>`（`--round` 与请求里的 round 不一致会退 2）。
+
 > **已删除（2026-11-06，issue #333）**：`lib.sh`、`check-all.sh`、`build-check.sh`、`build-check.test.mjs`、`install-hooks.sh`、`pre-push-main-guard.sh`、`review-loop-check.sh`，以及 `new-task.sh` / `open-pr.sh` / `merge-pr.sh` / `review.sh` / `status.sh` 的**手写版本**——能力全部收进共享包，入口改由 `shim install` 生成，钩子改由 `hooks install` 安装。
 >
 > **已删除（2026-11-05）**：`install-check.sh`（无自动调用且与 `compat-matrix.sh` 重复）、`compat-matrix.sh` 与其定期验证工作流 `.github/workflows/compat-matrix.yml`（周报与升级事件脱钩、只测 L1 装得上）、`audit-subagents.mjs` 及其单测与 LaunchAgent 模板 `.dsh-web/com.deepseek.dsh-audit.plist`（从未运行、只覆盖形态 B、会误判 reviewer）。能力移交 `dsh-auto-upgrade`（issue #300：升级前试装 + 升级后冒烟）。
+
+**实测报错原文（2026-11-06，issue #356）**——照旧写法（位置参数 / 缺 `--root`）必失败，两条都退 2：
+
+```text
+review prepare: 无法识别的参数: 349
+merge: 缺少必填参数 --root
+```
+
+- 第一条来自把 PR 号写成**位置参数**——`review.sh prepare 349` 是**旧写法（会退 2，不可用）** → 正确写法：`scripts/pipeline/review.sh prepare --pr 349`；
+- 第二条来自合并时漏了 `--root` → 必须显式给 `--root <仓根>`（或写 `-C <目录>`，生成入口会把它翻成 `--root`），如 `scripts/pipeline/merge-pr.sh --pr <PR号> --root <仓根> --record <记录>`。
 
 ### 三条新命令（在包里，没有独立脚本）
 
