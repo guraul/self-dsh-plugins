@@ -3,6 +3,6 @@
   "private": true,
   "description": "本仓只装工具依赖（目前只有共享 pipeline 包），不参与插件发布",
   "dependencies": {
-    "dsh-pipeline": "file:/Users/gubin/workspace/dsh-pipeline/dist/latest.tgz"
+    "dsh-pipeline": "link:/Users/gubin/workspace/dsh-pipeline/dist/pkg"
   }
 }
