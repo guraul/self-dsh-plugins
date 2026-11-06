@@ -112,12 +112,14 @@
 
 ## dsh-im-bridge-workspaces
 
-**来源：fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`（本地 fork 版本 `0.4.4-ws.3`），
+**来源：fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`（本地 fork 版本 `0.5.0-ws.4`），
 上游原版说明见 [README.upstream.md](./dsh-im-bridge-workspaces/README.upstream.md)。
 
 **改了什么：** 新增**工作区列表与 `/ws` 切换**（`/ws`、`/ws <序号|title|路径|id>`、`/ws reset`、
 `/ws add <路径>`、`/ws help`，以及 `workspaceSwitch` / `workspaceAllowFrom` / `workspaceAdd` 三个配置项
-与 `$DSH_HOME/dsh-im-bridge/workspace-bindings.json` 持久化）；**其余行为与上游一致**——按企微窗口建 Agent、
+与 `$DSH_HOME/dsh-im-bridge/workspace-bindings.json` 持久化）；另新增 **`/s` 切会话**——
+`/s <完整会话 id>` 把当前企微窗口钉到一条已有会话，`/s reset` 解除绑定；
+**其余行为与上游一致**——按企微窗口建 Agent、
 单聊一人一条、群聊共用一条、Settings 配置卡片、wecom-cli 办公层均未改。
 
 包名与目录名不同（目录 `dsh-im-bridge-workspaces/` → 包名 `@mhfire/dsh-im-bridge`），fork 保持同名，
