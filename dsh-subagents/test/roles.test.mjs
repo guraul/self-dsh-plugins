@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { loadRoles, normalizeRole, resolveRoleModel, resolveRoleProvider } from '../lib/roles.js'
+import { loadRoles, normalizeRole, resolveRoleModel, resolveRoleProvider, resolveRoute } from '../lib/roles.js'
 import { registerDelegateTool } from '../lib/tools/delegate.js'
 
 /**
@@ -99,8 +99,10 @@ test('executor 不钉 provider/model → 调用方给什么就用什么', async 
   assert.equal(specs[0].provider, 'product-subagents:opencode')
   assert.equal(specs[0].request.model, 'opencode/deepseek-v4.1-flash')
 
-  await tools.get('product_delegate').execute({ role: 'executor', provider: 'codebuddy', task: 't' }, exec)
-  assert.equal('model' in specs[1].request, false, '没钉也没传就不带 model')
+  await tools
+    .get('product_delegate')
+    .execute({ role: 'executor', provider: 'codebuddy', model: 'codebuddy/glm-5.3-flash', task: 't' }, exec)
+  assert.equal(specs[1].request.model, 'codebuddy/glm-5.3-flash', '没有硬钉时调用方给什么就用什么')
 })
 
 test('product_continue 续接同样吃角色钉的模型，冲突也报错', async () => {
@@ -120,6 +122,67 @@ test('product_continue 续接同样吃角色钉的模型，冲突也报错', asy
     (error) => error.message.includes('角色 reviewer 钉的模型是 codebuddy/glm-5.3-flash'),
   )
   assert.equal(specs.length, 1, '冲突那次不发起调用')
+})
+
+test('resolveRoute：executor 没钉，调用方不传就吃软默认', async () => {
+  const { roles } = loadRoles()
+  const executor = roles.get('executor')
+  assert.equal(executor.defaultProvider, 'codebuddy')
+  assert.equal(executor.defaultModel, 'codebuddy/deepseek-v4.1-flash')
+  assert.deepEqual(resolveRoute(executor, {}), {
+    provider: 'codebuddy',
+    model: 'codebuddy/deepseek-v4.1-flash',
+  })
+
+  // 走到工具层：软默认必须真的进到下发给 CLI 的 spec 里，而不是只停在解析函数
+  const { tools, specs, exec } = await fakeHost()
+  const out = await tools.get('product_delegate').execute({ role: 'executor', task: 't' }, exec)
+  assert.equal(specs[0].provider, 'product-subagents:codebuddy')
+  assert.equal(specs[0].request.model, 'codebuddy/deepseek-v4.1-flash')
+  assert.equal(out.provider, 'codebuddy')
+})
+
+test('resolveRoute：软默认不覆盖调用方传的 model', () => {
+  const role = normalizeRole('executor', {
+    defaultProvider: 'opencode',
+    defaultModel: 'opencode/default-model',
+  })
+  assert.deepEqual(resolveRoute(role, { model: 'opencode/调用方模型' }), {
+    provider: 'opencode',
+    model: 'opencode/调用方模型',
+  })
+  assert.equal(resolveRoute(role, { provider: 'codebuddy' }).provider, 'codebuddy', '调用方传的 provider 优先于软默认')
+})
+
+test('resolveRoute：调用方指定别的 provider 时，软默认 model 不跨产品补位', async () => {
+  const { roles } = loadRoles()
+  const executor = roles.get('executor')
+  // 显式点名另一个产品、又没给 model → 不把 codebuddy 的默认模型塞给它
+  assert.deepEqual(resolveRoute(executor, { provider: 'opencode' }), { provider: 'opencode', model: '' })
+  // 传的就是 defaultProvider → 仍然可以补软默认 model
+  assert.deepEqual(resolveRoute(executor, { provider: 'codebuddy' }), {
+    provider: 'codebuddy',
+    model: 'codebuddy/deepseek-v4.1-flash',
+  })
+
+  const { tools, specs, exec } = await fakeHost()
+  await tools.get('product_delegate').execute({ role: 'executor', provider: 'opencode', task: 't' }, exec)
+  assert.equal('model' in specs[0].request, false, '跨产品时不带 model，交给那个 CLI 自己决定')
+})
+
+test('resolveRoute：reviewer 传不一致模型仍然抛错（硬钉回归）', async () => {
+  const { roles } = loadRoles()
+  assert.throws(
+    () => resolveRoute(roles.get('reviewer'), { model: '别的模型' }),
+    /角色 reviewer 钉的模型是 codebuddy\/glm-5\.3-flash，本次请求 别的模型/,
+  )
+
+  const { tools, specs, exec } = await fakeHost()
+  await assert.rejects(
+    () => tools.get('product_delegate').execute({ role: 'reviewer', model: '别的模型', task: 't' }, exec),
+    /钉的模型是 codebuddy\/glm-5\.3-flash/,
+  )
+  assert.equal(specs.length, 0, '硬钉冲突必须在发起调用之前抛出')
 })
 
 test('resolveRoleModel：没钉就透传，钉了没传就用钉的', () => {
