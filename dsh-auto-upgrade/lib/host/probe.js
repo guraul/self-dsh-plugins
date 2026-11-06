@@ -36,6 +36,39 @@ export function buildProbeCommands(options) {
 }
 
 /**
+ * 从插件入口源码里取它**真正的 id**（`export const name = '…'`）。
+ *
+ * DSH 的插件 id 来自模块导出的 `name`，**不是** `package.json` 的包名：
+ * `dsh-plugin-auto-upgrade` 的 id 是 `dsh-auto-upgrade`、`@mhfire/dsh-im-bridge` 是 `im-bridge`。
+ * 拿包名去比对 dump 里的 id，会一个都对不上（2026-11-06 真机全量误报就是这么来的）。
+ * @param {string} text 入口文件源码。
+ * @returns {string|undefined} id；没写 `name` 导出时 undefined。
+ */
+export function pluginIdFromSource(text) {
+  const matched = /(?:export\s+const\s+name\s*=|module\.exports\.name\s*=|exports\.name\s*=)\s*['"]([^'"]+)['"]/.exec(String(text ?? ''))
+  return matched === null ? undefined : matched[1]
+}
+
+/**
+ * 猜入口文件（按 `exports["."]` → `main` → `lib/index.js` → `index.js` 试）。
+ * @param {object|undefined} manifest 插件 package.json。
+ * @returns {string[]} 相对路径候选，按优先级排列。
+ */
+export function entryCandidates(manifest) {
+  const out = []
+  const exported = manifest?.exports
+  if (typeof exported === 'string') out.push(exported)
+  else if (exported !== null && typeof exported === 'object') {
+    const dot = exported['.']
+    if (typeof dot === 'string') out.push(dot)
+    else if (dot !== null && typeof dot === 'object' && typeof dot.default === 'string') out.push(dot.default)
+  }
+  if (typeof manifest?.main === 'string') out.push(manifest.main)
+  out.push('lib/index.js', 'index.js', 'dist/index.js')
+  return [...new Set(out)]
+}
+
+/**
  * `--dump-config` 里是否**恰好**有这条插件（`- id: <名字>` 行）。
  * 不用 `includes`：同一次性 profile 里插件是顺序 add 的，后装的插件 dump 里会带上前面
  * 装过的名字；子串匹配还会被「名字是另一个名字的前缀」骗到。
@@ -101,10 +134,12 @@ export async function runProbes(options) {
   /** @type {object[]} */
   const results = []
   for (const target of options.targets) {
+    // 比对用**插件 id**（模块导出的 name），显示仍用包名。
+    const id = target.id ?? target.name
     const key = probeKey({ targetVersion: options.targetVersion, name: target.name, mtimeMs: target.mtimeMs })
     const cached = cache[key]
     if (cacheHit(cached, options.now)) {
-      results.push({ name: target.name, ok: cached.ok === true, detail: cached.detail, cached: true })
+      results.push({ name: target.name, id: target.id ?? target.name, ok: cached.ok === true, detail: cached.detail, cached: true })
       continue
     }
     const commands = buildProbeCommands({
@@ -122,10 +157,10 @@ export async function runProbes(options) {
       addExit,
       dumpExit: dumped.status ?? dumped.code ?? null,
       dumpText: dumped.stdout,
-      pluginName: target.name,
+      pluginName: id,
     })
     cache[key] = { at: options.now, ok: verdict.ok, detail: verdict.detail }
-    results.push({ name: target.name, ok: verdict.ok, detail: verdict.detail, cached: false })
+    results.push({ name: target.name, id, ok: verdict.ok, detail: verdict.detail, cached: false })
   }
   return { results, cache }
 }

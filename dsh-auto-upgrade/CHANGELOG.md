@@ -3,6 +3,18 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.2] — 2026-11-06
+
+### 修复
+
+- **试装探针对每个插件都误报失败**（真机首次运行发现）。探针拿 `package.json` 的**包名**去比对
+  `--dump-config` 里的 id，但 DSH 的插件 id 来自**模块导出的 `name`**：
+  `dsh-plugin-auto-upgrade` → `dsh-auto-upgrade`、`@mhfire/dsh-im-bridge` → `im-bridge`，
+  一个都对不上，于是「装成功了」被一律判成「没进 profile」。
+  现在新增 `pluginIdFromSource()` / `entryCandidates()`：按 `exports["."]` → `main` → 约定路径找入口，
+  正则取 `export const name = '…'` 作为比对 id；解析不到才回落到包名（行为与修复前一致）。
+  结果条目里同时带包名（显示）与 id（比对）。
+
 ## [0.9.1] — 2026-11-06
 
 ### 内部

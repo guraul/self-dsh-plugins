@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises'
 import {
   PROBE_TTL_MS,
   buildProbeCommands,
+  entryCandidates,
+  pluginIdFromSource,
   cacheHit,
   judgeProbe,
   linkTargets,
@@ -81,7 +83,7 @@ test('runProbes：命中缓存不重新试装（mtime 变了才重跑）', async
     now, run,
   })
   assert.equal(calls.length, 0, '缓存命中时不许再 spawn')
-  assert.deepEqual(hit.results, [{ name: 'p', ok: true, detail: '装配通过', cached: true }])
+  assert.deepEqual(hit.results, [{ name: 'p', id: 'p', ok: true, detail: '装配通过', cached: true }])
 
   const miss = await runProbes({
     targets: [{ name: 'p', path: '/x/p', mtimeMs: 42 }], targetVersion: 'v', dshBin: '/dsh',
@@ -113,4 +115,38 @@ test('探针路由用到的助手都已导入（漏了 `run` 会静默失效—�
   for (const name of ['run', 'cacheHit', 'runProbes', 'linkTargets']) {
     assert.match(source, new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./host/`), `缺少 ${name} 的导入`)
   }
+})
+
+test('#346 插件 id 从模块导出的 name 解析，不是包名', () => {
+  assert.equal(pluginIdFromSource("export const name = 'dsh-auto-upgrade'"), 'dsh-auto-upgrade')
+  assert.equal(pluginIdFromSource('export const name = "im-bridge"'), 'im-bridge')
+  assert.equal(pluginIdFromSource("module.exports.name = 'x'"), 'x')
+  assert.equal(pluginIdFromSource("export const name='minified'"), 'minified')
+  assert.equal(pluginIdFromSource('export const other = 1'), undefined, '没写 name 就是没写')
+  assert.equal(pluginIdFromSource(undefined), undefined)
+})
+
+test('#346 入口候选按 exports → main → 约定路径', () => {
+  assert.deepEqual(entryCandidates({ exports: './dist/index.js' })[0], './dist/index.js')
+  assert.deepEqual(entryCandidates({ exports: { '.': './lib/main.mjs' } })[0], './lib/main.mjs')
+  assert.deepEqual(entryCandidates({ exports: { '.': { default: './dist/x.js' } } })[0], './dist/x.js')
+  assert.deepEqual(entryCandidates({ main: 'lib/index.js' })[0], 'lib/index.js')
+  assert.ok(entryCandidates({}).includes('lib/index.js'), '没有声明也要有约定路径兜底')
+})
+
+test('#346 runProbes 用 id 比对 dump，返回结果同时带包名与 id', async () => {
+  const dump = '- id: dsh-auto-upgrade\n'
+  const calls = []
+  const result = await runProbes({
+    targetVersion: '0.2.2-rc.1',
+    dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
+    targets: [{ name: 'dsh-plugin-auto-upgrade', id: 'dsh-auto-upgrade', path: '/p', mtimeMs: 1 }],
+    run: async (bin, args) => {
+      calls.push(args[args.length - 1])
+      return args.includes('--dump-config') ? { status: 0, stdout: dump } : { status: 0, stdout: '' }
+    },
+  })
+  assert.equal(result.results[0].ok, true, '用包名比对会误报失败，用 id 才对')
+  assert.equal(result.results[0].id, 'dsh-auto-upgrade')
+  assert.equal(result.results[0].name, 'dsh-plugin-auto-upgrade', '显示仍用包名')
 })
