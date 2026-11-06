@@ -34,32 +34,32 @@ pnpm install
 机械步骤已固化，**reviewer 的模型调用不在脚本内**（必须由会话内 agent 发起）：
 
 ```bash
-# 1) 准备材料：产物落在 .tmp/review/<pr>/（项目内，不会被 /tmp 的定期清理带走）
-scripts/pipeline/review.sh prepare 173 --model codebuddy/glm-5.3-flash
+# 1) 准备材料：产物落在 .tmp/review/<pr>/（在哪个目录跑就落在哪个仓根；要落主工作区就加 -C <主工作区>）
+scripts/pipeline/review.sh prepare --pr 173 --model codebuddy/glm-5.3-flash
 
 # 2) 会话内 agent 读 .tmp/review/173/prompt.md 完成审核，把响应存成文件
 
-# 3) 落记录（插件 CLI）
-node dsh-subagents/lib/cli.js record --request .tmp/review/173/request.json --response <响应文件>
+# 3) 落记录 + 把判定发成 GitHub review（机器账号身份；--dry-run 可零网络预演）
+GH_CONFIG_DIR=$HOME/.config/gh-reviewer scripts/pipeline/review.sh publish \
+  --pr 173 --response <响应文件> --round 1 --post-review
+#    不加 --post-review 就只落盘、不发 review
 
-# 4) 发布：评论 + review 状态，用机器账号
-scripts/pipeline/review.sh publish 173 --record .dsh-web/reviews/173-<sha>.json --round 1
-#    --dry-run 可零网络预演
-
-# 5) 合并（闸门）
-scripts/pipeline/merge-pr.sh 173 --review-record=.dsh-web/reviews/173-<sha>.json
+# 4) 合并（闸门）
+scripts/pipeline/merge-pr.sh --pr 173 --record .dsh-web/reviews/173-<sha>.json
 #    确需跳过时（须用户当场同意）：--no-review --reason="<为什么跳过>"
 ```
 
-**合并脚本已改为转发共享包**（issue #187）：`merge-pr.sh` 只是薄壳，真正的闸门 / CI / squash 合并 /
-清理都在 `@guraul/dsh-pipeline`（`lib.sh` 的 `resolve_pipeline_cli` 依次找：`$DSH_PIPELINE_HOME` →
-**主工作区** `tools/node_modules/dsh-pipeline` → 当前仓 `tools/node_modules/dsh-pipeline`；装的是 `dist/latest.tgz` 产物，
-因此在 worktree 里也能用）。
-因此有三点与旧脚本不同，写命令时别用旧写法：
+**参数不再本地改名**（issue #333 起入口是生成物）：旧的 `prepare 173` / `publish 173 --record …` /
+`merge-pr.sh 173 --review-record=…` 三种写法都会被当场拒绝——包侧只认 `--pr <号>`、`--response <判定文件>`、`--record <记录>`。
+
+**合并入口是共享包生成的**（issue #333 起）：`merge-pr.sh` 是 `shim install` 的生成物，闸门 / CI / squash 合并 /
+清理都在 `@guraul/dsh-pipeline`（入口自带包定位：`$DSH_PIPELINE_HOME` →
+**主工作区** `tools/node_modules/dsh-pipeline` → 脚本所在仓 `tools/node_modules/dsh-pipeline`；装的是 `dist/latest.tgz` 产物，
+因此在 worktree 里也能用）。写命令时注意三点：
 
 | 差异 | 新语义 |
 |---|---|
-| 参数映射 | `--review-record=<f>` → 包侧 `--record <f>`；其余参数（`--no-review` / `--reason` / `--checks-file` / `--check-only` / `--force`）原样透传 |
+| 参数 | **不再本地改名**：审核记录是 `--record <f>`（不是 `--review-record=`），PR 号是 `--pr <号>`（不收位置参数、不认分支名）；`--no-review` / `--reason` / `--checks-file` / `--check-only` / `--force` 原样透传 |
 | 跳过审核 | `--no-review` **必须**配 `--reason=<文本>`，裸 `--no-review` 被拒绝；`DSH_REVIEWER=off` **已不再生效** |
 | `--checks-file` | 读的是 JSON `{"state":"success"｜"failure"}`，不再是 `gh pr checks` 原文；非 JSON / 不可读按 CI 未过拒绝 |
 
@@ -71,15 +71,18 @@ scripts/pipeline/merge-pr.sh 173 --review-record=.dsh-web/reviews/173-<sha>.json
 
 ```bash
 cd /Users/gubin/workspace/self-dsh-plugins
-scripts/pipeline/review-loop-check.sh      # 只读检查，见下
+node tools/node_modules/dsh-pipeline/bin/cli.mjs doctor --repo . --profile ~/.dsh/profiles/web   # 只读体检，见下
 ```
 
-脚本检查四件事（不启动会话、不调模型）：
+体检七件事（不启动会话、不调模型；首行先打印共享包的构建标识）：
 
-1. profile 里**没有** `dsh-plugin-product-subagents`，**有** `dsh-plugin-subagents`；
-2. `node_modules/dsh-plugin-subagents` 软链存在且指向仓库目录；
-3. `dsh plugin --profile web --dump-config` 输出里出现 `dsh-plugin-subagents`；
-4. `.dsh-web/reviews/` 目录可写。
+1. profile 里**没有** `dsh-plugin-product-subagents`；
+2. profile 里**有** `dsh-plugin-subagents`；
+3. `node_modules/dsh-plugin-subagents` 软链有效（解析后目录存在）；
+4. `dsh plugin --profile web --dump-config` 输出里出现 `dsh-plugin-subagents`；
+5. `cordis.patch.yml` 存在且非空；
+6. `.dsh-web/reviews/` 目录可写；
+7. profile 目录与 `DSH_HOME` 路径报告。
 
 **人工再验一条**：在新会话里让 agent 调一次 `product_delegate`（任务随便写「回复 ok」），
 能拿到回答就说明 provider 注册成功、CLI 链路通。

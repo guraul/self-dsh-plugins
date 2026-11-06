@@ -10,5 +10,21 @@
     "docs/pipeline/**",
     "docs/adr/**",
     ".gitignore"
-  ]
+  ],
+  "checks": {
+    "packages": [
+      "dsh-auto-upgrade",
+      "dsh-external-discuss",
+      "dsh-im-bridge-workspaces",
+      "dsh-plugin-product-subagents",
+      "dsh-prompt-optimizer",
+      "dsh-subagents",
+      "dsh-subagent-policy-fallback",
+      "dsh-zhihu-sidebar",
+      "dsh-plugin-memx",
+      "dsh-awake",
+      "dsh-usage-panel"
+    ],
+    "exclude": ["tools"]
+  }
 }

@@ -178,3 +178,4 @@ GitHub Issue（任务入口）
 | 2026-11-04 | 台账收口（#279） | §三 阶段 7 补五行（包四个入口 / 本仓 #278 / memx #56 / 四仓 `doctor`），§四 欠账 #2 / #3 改「已完成」；`README.md` 脚本清单与 §review.sh 的跨仓状态、刷新共享包的构建标识、memx 仓外 worktree 容器说明同步更新 |
 | 2026-11-05 | 删除 `install-check` / `compat-matrix` / `audit-subagents`（#301 / PR #302） | 能力移交 `dsh-auto-upgrade` #300（升级前试装 + 升级后逐插件冒烟）；文档同步清引用，脚本与 CI 文件删除由另一单负责 |
 | 2026-11-06 | 清两条交接欠账（#330） | §三 新增阶段 8（2026-11-05 的 13 个 PR 逐条台账，`dsh-auto-upgrade` 0.2.6 → 0.8.3）；删 `progress-server.mjs` 里 `if (live) return …` 之后不可达的注释与第二个 `return`（行为零变化）；§四 补 #330 与交接遗留的两条欠账；`dsh-auto-upgrade` 0.9.0 → 0.9.1 |
+| 2026-11-06 | 手写脚本全换成生成入口（#333 / PR #334） | 删 12 个手写脚本；`.dsh/pipeline.json` 加 `checks.packages`（11 个插件，顺序不变）与 `exclude: ["tools"]`；`shim install` 生成 6 个入口、`hooks install` 替换手写 pre-push 钩子；新增 `scripts/pipeline/README.md`；`AGENTS.md`、手册、`review-loop.md`、`README.md`、CI 同步改写 |

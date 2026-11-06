@@ -72,7 +72,7 @@ reviewer 默认走**形态 B**（`codebuddy/glm-5.3-flash`）：独立模型家�
 
 ```bash
 # 单插件门禁（测试 + 语法检查）
-scripts/pipeline/check-all.sh dsh-subagents
+scripts/pipeline/pipeline.sh check-all --packages dsh-subagents
 
 # 一次性 DSH_HOME 装配验证（绝不碰真实 ~/.dsh）
 # scripts/pipeline/install-check.sh dsh-subagents   # 已于 2026-11-05 删除，能力移交 dsh-auto-upgrade 的升级前试装

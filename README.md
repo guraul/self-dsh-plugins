@@ -182,9 +182,9 @@ dsh plugin --profile web remove <包名>
 ## 验证
 
 ```sh
-# 跑各插件的测试 / check / typecheck（清单见 scripts/pipeline/lib.sh 的 PLUGIN_DIRS；缺 node_modules 的插件会明确跳过，不算失败）
-scripts/pipeline/check-all.sh
-scripts/pipeline/check-all.sh dsh-auto-upgrade dsh-plugin-product-subagents   # 只跑指定插件
+# 跑各插件的测试 / check / typecheck（清单见 .dsh/pipeline.json 的 checks.packages；缺 node_modules 的插件会明确跳过，不算失败）
+scripts/pipeline/pipeline.sh check-all
+scripts/pipeline/pipeline.sh check-all --packages dsh-auto-upgrade,dsh-plugin-product-subagents   # 只跑指定插件
 
 # 在一次性 $DSH_HOME 里验证插件能被 profile 正确安装 + 组合（绝不触碰真实 ~/.dsh）
 # scripts/pipeline/install-check.sh [插件目录]   # 已于 2026-11-05 删除，能力移交 dsh-auto-upgrade 的升级前试装（issue #300）
@@ -209,10 +209,10 @@ scripts/pipeline/check-all.sh dsh-auto-upgrade dsh-plugin-product-subagents   # 
 ```sh
 scripts/pipeline/new-task.sh <issue号>          # 建分支 task/<号>-<slug> + worktree
 cd .worktrees/<号>-<slug>                       # 在 worktree 里开发
-scripts/pipeline/check-all.sh                   # 本地自测
+scripts/pipeline/pipeline.sh check-all          # 本地自测
 scripts/pipeline/open-pr.sh                     # 自动推送 + 开 PR
 # 审核判 APPROVE 且未命中高风险 → 直接合并；命中高风险 / ESCALATE / 轮次超限才需用户点头：
-scripts/pipeline/merge-pr.sh
+scripts/pipeline/merge-pr.sh --pr <PR号> --record <审核记录>
 ```
 
 完整手册见 [`docs/pipeline/README.md`](./docs/pipeline/README.md)（进度台账：

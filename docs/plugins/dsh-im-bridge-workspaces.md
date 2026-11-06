@@ -100,7 +100,7 @@ node --check lib/index.js       # 产物语法检查
 - `node_modules/@deepseek-ai` 是指向本机 DSH 安装的**软链，只服务于 `typecheck`**
   （peer 依赖运行时由 profile 解析层接管）。**换 node 版本后该软链要重建**，否则 typecheck 报找不到模块，
   但**不影响运行**。
-- `check-all.sh` 会跑 `test` / `typecheck`，但**不会**替你先 build；改了 `src/` 记得手动重建 `lib/`。
+- `pipeline.sh check-all` 会跑 `test` / `typecheck`，但**不会**替你先 build；改了 `src/` 记得手动重建 `lib/`。
 
 ## 接入与回滚（本机已完成，仅供复核）
 
