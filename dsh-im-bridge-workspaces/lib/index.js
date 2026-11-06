@@ -615,7 +615,7 @@ function registerPromptVariable(prompt, name, provider) {
 * (`/wss`, `/workspacex`) must not match, hence the argument group requires
 * whitespace.
 */
-const COMMAND_PATTERN = /^\/(ws|workspace|workspaces|工作区)(?:\s+([\s\S]*))?$/i;
+const COMMAND_PATTERN$1 = /^\/(ws|workspace|workspaces|工作区)(?:\s+([\s\S]*))?$/i;
 /** Arguments that map onto a dedicated command kind. */
 const ADD_PATTERN = /^add(?:\s+([\s\S]*))?$/i;
 /**
@@ -624,7 +624,7 @@ const ADD_PATTERN = /^add(?:\s+([\s\S]*))?$/i;
 * @returns the parsed command, or `undefined` when the text is ordinary chat.
 */
 function parseWorkspaceCommand(text) {
-	const match = COMMAND_PATTERN.exec(text.trim());
+	const match = COMMAND_PATTERN$1.exec(text.trim());
 	if (match === null) return void 0;
 	const args = (match[2] ?? "").trim();
 	if (args === "") return { kind: "list" };
@@ -736,6 +736,61 @@ function resolveWorkspaceSelector(entries, selector) {
 		ok: false,
 		reason: `未找到匹配的工作区：${key}。发 /ws 查看列表`
 	};
+}
+// src/session-router.ts
+/**
+* Command heads the bridge handles itself: `/s`, `/session` and `/会话`,
+* followed by optional arguments. A head glued to more letters (`/sx`,
+* `/sessionx`) must not match, hence the argument group requires whitespace.
+*/
+const COMMAND_PATTERN = /^\/(s|session|会话)(?:\s+([\s\S]*))?$/i;
+/**
+* Session ids are DSH-shaped identifiers: letters and digits first, then
+* letters, digits and `._:-`. Anything else (spaces, CJK, leading `-`) means
+* the message was ordinary chat that merely started with `/s`.
+*/
+const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+/**
+* Parse one inbound text message as a session command.
+* @param text - trimmed message text after the bot mention is stripped.
+* @returns the parsed command, or `undefined` when the text is ordinary chat.
+*/
+function parseSessionCommand(text) {
+	const match = COMMAND_PATTERN.exec(text.trim());
+	if (match === null) return void 0;
+	const args = (match[2] ?? "").trim();
+	if (args === "") return { kind: "list" };
+	const lower = args.toLowerCase();
+	if (lower === "list") return { kind: "list" };
+	if (lower === "help" || lower === "?" || args === "帮助") return { kind: "help" };
+	if (lower === "reset" || lower === "default") return { kind: "reset" };
+	if (!SESSION_ID_PATTERN.test(args)) return void 0;
+	return {
+		kind: "bind",
+		sessionId: args
+	};
+}
+/**
+* Session key backing one window's Agent for a pinned session.
+*
+* Appends the pinned session id to the bare window key so every pinned session
+* gets its own state slot while unpinned windows keep their legacy ids.
+* @param windowKey - {@link WecomSessionRef.key}-style `single:<userid>` / `group:<chatid>`.
+* @param sessionId - the pinned DSH session id.
+* @returns the session key to look the chat state up under.
+*/
+function sessionKeyForPinnedSession(windowKey, sessionId) {
+	return `${windowKey}#sid=${sessionId}`;
+}
+/**
+* Short form of a session id for list display: drops the `session-` prefix
+* and keeps the first 8 characters (shorter ids are shown as-is).
+* @param sessionId - full DSH session id.
+* @returns the display short id.
+*/
+function shortSessionId(sessionId) {
+	const bare = sessionId.startsWith("session-") ? sessionId.slice(8) : sessionId;
+	return bare.length > 8 ? bare.slice(0, 8) : bare;
 }
 // node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/esm/index.mjs
 var require$1 = createRequire$1("/");
@@ -9218,8 +9273,12 @@ function apply(ctx, config) {
 		return true;
 	}
 	const chats = /* @__PURE__ */ new Map();
+	/** 钉住会话的串行队列：按会话 id 归并，多个窗口钉同一会话时共用一条。 */
+	const sessionQueues = /* @__PURE__ */ new Map();
 	/** 每个企微窗口当前绑定的工作区，重启后从磁盘恢复。 */
 	const windowWorkspaces = /* @__PURE__ */ new Map();
+	/** 每个企微窗口 `/s` 钉住的会话，重启后从磁盘恢复。 */
+	const windowSessions = /* @__PURE__ */ new Map();
 	/** 配置默认工作区在 registry 中的记录；初始化期间解析。 */
 	let defaultBinding;
 	/** 兜底绑定的重试时刻：registry 曾失败时按节流继续升级。 */
@@ -9345,7 +9404,28 @@ function apply(ctx, config) {
 					title
 				});
 			}
+			const sessionPins = parsed.sessions;
+			if (sessionPins !== void 0) {
+				if (sessionPins === null || typeof sessionPins !== "object") console.warn(`[im-bridge] ${file} 的 sessions 字段结构不对，本次忽略该段`);
+				else for (const [key, value] of Object.entries(sessionPins)) {
+					if (value === null || typeof value !== "object") {
+						console.warn(`[im-bridge] ${file} sessions.${key} 结构不对，已跳过`);
+						continue;
+					}
+					const { sessionId, title, path } = value;
+					if (typeof sessionId !== "string" || sessionId === "" || typeof title !== "string" || typeof path !== "string") {
+						console.warn(`[im-bridge] ${file} sessions.${key} 结构不对，已跳过`);
+						continue;
+					}
+					windowSessions.set(key, {
+						sessionId,
+						title,
+						path
+					});
+				}
+			}
 			if (windowWorkspaces.size > 0) console.log(`[im-bridge] 已恢复 ${String(windowWorkspaces.size)} 个工作区绑定`);
+			if (windowSessions.size > 0) console.log(`[im-bridge] 已恢复 ${String(windowSessions.size)} 个会话绑定`);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.warn(`[im-bridge] 读取 workspace-bindings.json 失败: ${message}`);
@@ -9356,7 +9436,8 @@ function apply(ctx, config) {
 		const file = workspaceBindingsFile();
 		const payload = {
 			version: 1,
-			windows: Object.fromEntries([...windowWorkspaces.entries()])
+			windows: Object.fromEntries([...windowWorkspaces.entries()]),
+			sessions: Object.fromEntries([...windowSessions.entries()])
 		};
 		try {
 			mkdirSync(dirname(file), { recursive: true });
@@ -9404,6 +9485,10 @@ function apply(ctx, config) {
 			return saved;
 		}
 		return currentDefaultBinding();
+	}
+	/** 窗口当前 `/s` 钉住的会话；没有绑定返回 undefined。 */
+	function activePinFor(windowKey) {
+		return windowSessions.get(windowKey);
 	}
 	/** `workspaceAllowFrom` 为空表示允许所有已授权发送者切换。 */
 	function canManageWorkspace(sender) {
@@ -9476,6 +9561,7 @@ function apply(ctx, config) {
 	* inbound message because skills can arrive from the Settings button later.
 	*/
 	function installOfficeLayer(agentCtx, st) {
+		if (st.pinned) return;
 		if (!wecomCliReady) return;
 		if (!shouldInjectWecomOfficeSkills(st.kind, st.office)) return;
 		if (!st.officeSkillsRegistered) {
@@ -9612,6 +9698,7 @@ function apply(ctx, config) {
 		* stops the chain.
 		*/
 		function prefixWecomTitle(session, st) {
+			if (st.pinned) return;
 			const kind = st.kind;
 			if (kind === void 0) return;
 			queueMicrotask(() => {
@@ -9726,14 +9813,17 @@ function apply(ctx, config) {
 		* `sessionKey` already carries the workspace suffix for non-default
 		* bindings, so each workspace keeps its own independent session and
 		* switching back resumes the old one.
+		* `pin`（`/s` 钉住的会话）优先于一切：不走 `planWecomBind` 的 epoch 推演，
+		* 只按字面 id adopt / resume，并跳过会改到 GUI 那个会话的副作用。
 		*/
-		async function ensureAgent(ref, binding, sessionKey) {
+		async function ensureAgent(ref, binding, sessionKey, pin) {
 			let st = chats.get(sessionKey);
 			if (st === void 0) {
 				st = emptyChatState();
 				chats.set(sessionKey, st);
 			}
 			st.kind = ref.kind;
+			st.pinned = pin !== void 0;
 			if (st.agent !== void 0) {
 				if (st.sessionId === void 0 || !archivedSessions().has(st.sessionId)) {
 					installOfficeLayer(st.agent.ctx, st);
@@ -9748,27 +9838,43 @@ function apply(ctx, config) {
 			}
 			const persistence = ctx.get("sessionPersistence");
 			const headers = persistence === void 0 ? [] : await persistence.list();
-			const ownedHeaders = sameWorkspacePath(binding.path, currentDefaultBinding().path) ? headers : headers.filter((header) => header.cwd !== void 0 && sameWorkspacePath(header.cwd, binding.path));
-			const plan = planWecomBind(sessionKey, {
-				live: (id) => agents.get(SessionId(id)) !== void 0,
-				stored: new Set(ownedHeaders.map((header) => header.id)),
-				archived: archivedSessions()
-			});
+			let plan;
+			let stored;
+			if (pin !== void 0) {
+				const pinnedLive = agents.get(SessionId(pin.sessionId)) !== void 0;
+				const pinnedStored = headers.some((header) => header.id === pin.sessionId);
+				if (!pinnedLive && !pinnedStored) throw new Error(`会话不存在: ${pin.sessionId}`);
+				plan = {
+					sessionId: pin.sessionId,
+					bind: pinnedLive ? "adopt" : "resume",
+					epoch: 1
+				};
+				stored = headers.find((header) => header.id === pin.sessionId);
+			} else {
+				const ownedHeaders = sameWorkspacePath(binding.path, currentDefaultBinding().path) ? headers : headers.filter((header) => header.cwd !== void 0 && sameWorkspacePath(header.cwd, binding.path));
+				plan = planWecomBind(sessionKey, {
+					live: (id) => agents.get(SessionId(id)) !== void 0,
+					stored: new Set(ownedHeaders.map((header) => header.id)),
+					archived: archivedSessions()
+				});
+				stored = ownedHeaders.find((header) => header.id === plan.sessionId);
+			}
 			const sessionId = SessionId(plan.sessionId);
-			const stored = ownedHeaders.find((header) => header.id === sessionId);
 			const attach = (agent, how) => {
 				st.agent = agent;
 				st.sessionId = sessionId;
 				st.kind = ref.kind;
 				if (agent.ctx === void 0) console.warn("[im-bridge] Agent 没有 ctx，无法注入企微提示词");
 				else {
-					installWecomChannel(agent.ctx, st, () => agent.session.header?.cwd ?? stored?.cwd ?? binding.path);
-					installOfficeLayer(agent.ctx, st);
+					if (!st.pinned) {
+						installWecomChannel(agent.ctx, st, () => agent.session.header?.cwd ?? stored?.cwd ?? binding.path);
+						installOfficeLayer(agent.ctx, st);
+					}
 					installApprovalRelay(agent.ctx, st);
 				}
 				unpinLegacyWecomTitle(agent);
 				const cwd = agent.session.header?.cwd ?? stored?.cwd;
-				if (cwd !== void 0 && !sameWorkspacePath(cwd, binding.path)) console.warn(`[im-bridge] 会话 ${sessionId} 仍使用存档目录 ${cwd}，当前 workspace=${binding.path}`);
+				if (pin === void 0 && cwd !== void 0 && !sameWorkspacePath(cwd, binding.path)) console.warn(`[im-bridge] 会话 ${sessionId} 仍使用存档目录 ${cwd}，当前 workspace=${binding.path}`);
 				const epoch = plan.epoch > 1 ? ` 第${String(plan.epoch)}段` : "";
 				console.log(`[im-bridge] 为 ${ref.key} @${binding.title} ${how}会话 ${sessionId}${epoch} userid=${ref.sender} chattype=${ref.kind} chatid=${ref.chatid ?? ""}`);
 				attachToWorkspace(sessionId, binding);
@@ -9788,7 +9894,7 @@ function apply(ctx, config) {
 			const setup = async (agentCtx) => {
 				installSelectionCompat(agentCtx, installLegacy, selection);
 				if (presets !== void 0) await presets.mount(agentCtx, resolvedId);
-				installWecomChannel(agentCtx, st, () => binding.path);
+				if (!st.pinned) installWecomChannel(agentCtx, st, () => binding.path);
 			};
 			const agentOptions = buildAgentOptions(selection, !selectionArgRequired);
 			try {
@@ -9958,7 +10064,7 @@ function apply(ctx, config) {
 				};
 			}
 		}
-		async function handle(frame, ref, content, binding, sessionKey, image) {
+		async function handle(frame, ref, content, binding, sessionKey, image, pin) {
 			let st = chats.get(sessionKey);
 			if (st === void 0) {
 				st = emptyChatState();
@@ -9976,7 +10082,7 @@ function apply(ctx, config) {
 				}
 				imageRef = prepared.ref;
 			}
-			st = await ensureAgent(ref, binding, sessionKey);
+			st = await ensureAgent(ref, binding, sessionKey, pin);
 			const startedAt = Date.now();
 			const streamId = generateReqId("stream");
 			let stopThinking = null;
@@ -10146,6 +10252,7 @@ function apply(ctx, config) {
 				try {
 					const entity = await registry.create(target);
 					windowWorkspaces.set(ref.key, bindingFromEntity(entity));
+					windowSessions.delete(ref.key);
 					saveWorkspaceBindings();
 					await replyCommand(frame, `✅ 已登记并切换到工作区「${entity.title}」\n路径：${entity.path}\n下一条消息将在此工作区执行`);
 				} catch (error) {
@@ -10155,6 +10262,7 @@ function apply(ctx, config) {
 			}
 			if (command.kind === "reset") {
 				windowWorkspaces.delete(ref.key);
+				windowSessions.delete(ref.key);
 				saveWorkspaceBindings();
 				const fallback = await ensureDefaultBinding();
 				await replyCommand(frame, `↩️ 已恢复默认工作区「${fallback.title}」\n路径：${fallback.path}\n下一条消息将在此工作区执行`);
@@ -10194,9 +10302,109 @@ function apply(ctx, config) {
 				}
 			} catch {}
 			windowWorkspaces.set(ref.key, binding);
+			windowSessions.delete(ref.key);
 			saveWorkspaceBindings();
 			console.log(`[im-bridge] 窗口 ${ref.key} 切换工作区 ${current.path} -> ${binding.path}`);
 			await replyCommand(frame, `✅ 已切换到工作区「${binding.title}」\n路径：${binding.path}\n下一条消息将在此工作区执行（与默认工作区的会话相互独立）`);
+		}
+		/** `/s` 帮助文本：命令一律由插件直接回复，不进入模型。 */
+		const sessionHelpText = [
+			"📖 企微会话命令",
+			"/s（/session、/会话）— 列出活跃会话并标出当前绑定",
+			"/s <会话id> — 把本窗口绑定到指定会话",
+			"/s reset — 解除绑定，回到按窗口的默认会话",
+			"/s help — 显示本帮助",
+			"普通文本仍交给 Agent；以上命令不会发给模型。"
+		].join("\n");
+		/** 活跃会话列表；`sessions` 服务缺失时按空列表处理。 */
+		function activeSessions() {
+			return ctx.get("sessions")?.list() ?? [];
+		}
+		/** `/s` 列表：序号、当前标记、短 id、标题与 cwd。 */
+		function sessionListText(windowKey) {
+			const active = activeSessions();
+			if (active.length === 0) return "当前没有活跃会话，先发起一轮对话再用 /s 绑定。";
+			const titles = ctx.get("sessionTitle");
+			const pinned = activePinFor(windowKey)?.sessionId;
+			const footer = "绑定：/s <会话id>　解绑：/s reset　帮助：/s help";
+			const lines = [`📋 活跃会话（共 ${String(active.length)} 个）`];
+			for (let index = 0; index < active.length; index += 1) {
+				const session = active[index];
+				if (session === void 0) continue;
+				const marker = session.id === pinned ? "[← 当前] " : "";
+				const title = titles?.get(session)?.title || "(无标题)";
+				const cwd = session.header?.cwd ?? "(未知目录)";
+				lines.push(`${String(index + 1)}. ${marker}${shortSessionId(session.id)} · ${title} · ${cwd}`);
+			}
+			return `${truncate(lines.join("\n"), 1600 - Buffer.byteLength(`${footer}\n`, "utf8"))}\n${footer}`;
+		}
+		/**
+		* Handle one `/s …` command: every branch replies directly on the frame,
+		* so a command never reaches the model and never burns a turn.
+		* 权限与 `/ws` 一致：`allowFrom` 已在 `dispatchInbound` 拦过，这里列表人人
+		* 可看，其余命令要过 `workspaceAllowFrom`，改绑定另要 `workspaceSwitch=true`。
+		*/
+		async function handleSessionCommand(frame, ref, command) {
+			console.log(`[im-bridge] 会话命令 key=${ref.key} kind=${command.kind}`);
+			if (command.kind === "list") {
+				await replyCommand(frame, sessionListText(ref.key));
+				return;
+			}
+			if (!canManageWorkspace(ref.sender)) {
+				await replyCommand(frame, "你没有切换会话的权限（workspaceAllowFrom 未包含你的 userid）");
+				return;
+			}
+			if (command.kind === "help") {
+				await replyCommand(frame, sessionHelpText);
+				return;
+			}
+			if (!cfg().workspaceSwitch) {
+				await replyCommand(frame, "会话切换已关闭（workspaceSwitch=false）");
+				return;
+			}
+			if (command.kind === "reset") {
+				windowSessions.delete(ref.key);
+				saveWorkspaceBindings();
+				await replyCommand(frame, "↩️ 已解除会话绑定，回到按窗口的默认会话");
+				return;
+			}
+			const sessionId = command.sessionId;
+			if (archivedSessions().has(sessionId)) {
+				await replyCommand(frame, `该会话已归档，无法绑定：${sessionId}`);
+				return;
+			}
+			const titles = ctx.get("sessionTitle");
+			const live = activeSessions().find((session) => session.id === sessionId);
+			let title;
+			let path;
+			if (live !== void 0) {
+				if (live.header?.origin === "subagent" || (live.header?.delegationDepth ?? 0) > 0) {
+					await replyCommand(frame, `该会话是子代理会话，无法绑定：${sessionId}`);
+					return;
+				}
+				title = titles?.get(live)?.title || "(无标题)";
+				path = live.header?.cwd ?? activeBindingFor(ref.key).path;
+			} else {
+				const persistence = ctx.get("sessionPersistence");
+				const header = (persistence === void 0 ? [] : await persistence.list()).find((entry) => entry.id === sessionId);
+				if (header === void 0) {
+					await replyCommand(frame, `会话不存在：${sessionId}`);
+					return;
+				}
+				if (header.origin === "subagent" || (header.delegationDepth ?? 0) > 0) {
+					await replyCommand(frame, `该会话是子代理会话，无法绑定：${sessionId}`);
+					return;
+				}
+				title = header.title || "(无标题)";
+				path = header.cwd ?? activeBindingFor(ref.key).path;
+			}
+			windowSessions.set(ref.key, {
+				sessionId,
+				title,
+				path
+			});
+			saveWorkspaceBindings();
+			await replyCommand(frame, `✅ 已把本窗口绑定到会话「${title}」\n会话：${sessionId}\n路径：${path}\n下一条消息将在该会话执行`);
 		}
 		const ws = new AiBot.WSClient({
 			botId,
@@ -10210,8 +10418,8 @@ function apply(ctx, config) {
 		/**
 		* Shared inbound route for text and image messages: resolve the window,
 		* apply `allowFrom`, pick the workspace binding, then enqueue on that
-		* session's queue. Text-only `/ws` commands are parsed before queueing;
-		* an image message never carries a command.
+		* session's queue. Text-only `/ws` and `/s` commands are parsed before
+		* queueing; an image message never carries a command.
 		* @param frame - raw WeCom frame (used for routing and replies).
 		* @param content - stripped text; empty for an image message.
 		* @param image - image download already in flight, when this is a picture.
@@ -10267,18 +10475,33 @@ function apply(ctx, config) {
 					});
 					return;
 				}
+				const sessionCommand = parseSessionCommand(content);
+				if (sessionCommand !== void 0) {
+					handleSessionCommand(frame, ref, sessionCommand).catch((error) => {
+						const message = error instanceof Error ? error.message : String(error);
+						console.error(`[im-bridge] 会话命令异常: ${message}`);
+						ws.replyStream(frame, generateReqId("stream"), `会话命令执行失败：${truncate(message, 300)}`, true).catch(() => {});
+					});
+					return;
+				}
 			}
 			const binding = activeBindingFor(ref.key);
 			const defaultBinding = currentDefaultBinding();
 			const effective = sameWorkspacePath(binding.path, defaultBinding.path) ? defaultBinding : binding;
-			const sessionKey = sessionKeyForWorkspace(ref.key, effective, defaultBinding.path);
+			const pin = activePinFor(ref.key);
+			const sessionKey = pin !== void 0 ? sessionKeyForPinnedSession(ref.key, pin.sessionId) : sessionKeyForWorkspace(ref.key, effective, defaultBinding.path);
 			const st = chats.get(sessionKey) ?? emptyChatState();
 			st.kind = ref.kind;
 			chats.set(sessionKey, st);
-			st.queue = st.queue.then(() => handle(frame, ref, content, binding, sessionKey, image)).catch((error) => {
+			const run = () => handle(frame, ref, content, binding, sessionKey, image, pin).catch((error) => {
 				const message = error instanceof Error ? error.message : String(error);
 				console.error(`[im-bridge] 任务异常: ${message}`);
+				ws.replyStream(frame, generateReqId("stream"), `处理失败: ${truncate(message, 300)}`, true).catch(() => {});
 			});
+			if (pin !== void 0) {
+				const previous = sessionQueues.get(pin.sessionId) ?? Promise.resolve();
+				sessionQueues.set(pin.sessionId, previous.then(run));
+			} else st.queue = st.queue.then(run);
 		}
 		ws.on("message.text", ((frame) => {
 			const inbound = (frame.body?.text?.content || "").trim();
