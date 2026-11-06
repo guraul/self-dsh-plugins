@@ -3,6 +3,17 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.1] — 2026-11-06
+
+### 内部
+
+- **删 `progress-server.mjs` 里一段不可达代码**（#330）：`snapshot()` 在 `if (live) return …` 之后还留着
+  「端口活着、旧令牌也失效了，但 url.txt 还不能认证」的注释与第二个 `return { phase: 'verifying', … }`——
+  上面一行已经无条件返回，这两行永远执行不到。删除后该函数每个出口仍都返回 `verifying`（或更早的其它阶段），
+  **行为零变化**，只为消除「声明与实现不一致」的死代码（2026-11-05 交接 P1 欠账）。
+- 配套台账：`docs/pipeline/PROGRESS.md` §三 新增阶段 8（逐 PR 记 2026-11-05 合并的 13 个 PR）、
+  §四 欠账表与 §五 变更记录按实际更新。
+
 ## [0.9.0] — 2026-11-06
 
 ### 新增
