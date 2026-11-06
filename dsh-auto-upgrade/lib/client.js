@@ -23,6 +23,8 @@ window.__ModuleLoader__.load({
       checkAuto: '/api/dsh-auto-upgrade/check/auto',
       checkRun: '/api/dsh-auto-upgrade/check/run',
       preflight: '/api/dsh-auto-upgrade/preflight',
+      probe: '/api/dsh-auto-upgrade/probe',
+      smoke: '/api/dsh-auto-upgrade/smoke',
       plugins: '/api/dsh-auto-upgrade/plugins',
       pluginAction: '/api/dsh-auto-upgrade/plugins/action',
       policy: '/api/dsh-auto-upgrade/policy',
@@ -37,6 +39,11 @@ window.__ModuleLoader__.load({
     }
 
     const RESULT_FRESH_MS = 10 * 60 * 1000
+
+    /** 试装 / 冒烟结论的轮询节奏：`POST` 只负责开跑，结论要等后台写盘。 */
+    const CONCLUSION_POLL_MS = 2000
+    /** 轮询上限（4 分钟）：耗尽就停在最后一次结论上，重新进设置页会再取一次。 */
+    const CONCLUSION_POLL_MAX = 120
 
     const ZH = {
       'settings.label': '自动升级',
@@ -100,6 +107,28 @@ window.__ModuleLoader__.load({
       'settings.saved': '已保存',
       'settings.checkNow': '立即检查',
       'settings.preflight': '本机体检',
+      'settings.probeTitle': '试装结论（升级前逐个真装一遍）',
+      'settings.probeRun': '跑一次试装',
+      'settings.probeEmpty': '还没有试装结论，点「跑一次试装」看每个插件装不装得上',
+      'settings.probeRunning': '试装正在跑，跑完自动刷新…',
+      'settings.probeFailed': '试装没跑起来：{error}',
+      'settings.probeOk': '● 装配通过',
+      'settings.probeBad': '● 装配失败',
+      'settings.probeMore': '明细',
+      'settings.probeForVersion': '按 {version} 试装',
+      'settings.probeAt': '结论时间 {at}',
+      'settings.probeStale': '结论已过期（插件或渠道可能已变）',
+      'settings.smokeTitle': '冒烟结论（升级后逐插件验证行为）',
+      'settings.smokeRun': '跑一次冒烟',
+      'settings.smokeEmpty': '还没有冒烟结论，点「跑一次冒烟」看每个插件行为过没过',
+      'settings.smokeRunning': '冒烟正在跑，跑完自动刷新…',
+      'settings.smokeFailed': '冒烟没跑起来：{error}',
+      'settings.smokeOk': '● 通过',
+      'settings.smokeBad': '● 失败',
+      'settings.smokePartial': '只验了兜底三项，行为未验证',
+      'settings.smokeAllOk': '全部 {count} 项检查通过',
+      'settings.smokeSomeBad': '{count} 项检查未通过',
+      'settings.smokeChecks': '检查明细',
       'settings.plugins': '已装插件兼容性',
       'settings.pluginsFor': '已装插件兼容性（按 {target} 评估）',
       'settings.pluginsForInstalled': '已装插件兼容性（按本机已装版本评估）',
@@ -182,6 +211,28 @@ window.__ModuleLoader__.load({
       'settings.saved': 'Saved',
       'settings.checkNow': 'Check now',
       'settings.preflight': 'Local preflight',
+      'settings.probeTitle': 'Trial-install results (really installs each plugin before upgrading)',
+      'settings.probeRun': 'Run trial install',
+      'settings.probeEmpty': 'No trial-install result yet — run it to see which plugins still install',
+      'settings.probeRunning': 'Trial install is running; this refreshes itself when it finishes…',
+      'settings.probeFailed': 'Trial install did not start: {error}',
+      'settings.probeOk': '● installs',
+      'settings.probeBad': '● fails to install',
+      'settings.probeMore': 'Details',
+      'settings.probeForVersion': 'trial-installed for {version}',
+      'settings.probeAt': 'result at {at}',
+      'settings.probeStale': 'stale result (plugins or channel may have changed)',
+      'settings.smokeTitle': 'Smoke results (verify behaviour after upgrading)',
+      'settings.smokeRun': 'Run smoke',
+      'settings.smokeEmpty': 'No smoke result yet — run it to see which plugins behave',
+      'settings.smokeRunning': 'Smoke is running; this refreshes itself when it finishes…',
+      'settings.smokeFailed': 'Smoke did not start: {error}',
+      'settings.smokeOk': '● pass',
+      'settings.smokeBad': '● fail',
+      'settings.smokePartial': 'fallback checks only, behaviour unverified',
+      'settings.smokeAllOk': 'all {count} checks passed',
+      'settings.smokeSomeBad': '{count} checks failed',
+      'settings.smokeChecks': 'Check details',
       'settings.plugins': 'Installed plugin compatibility',
       'settings.pluginsFor': 'Installed plugin compatibility (evaluated against {target})',
       'settings.pluginsForInstalled': 'Installed plugin compatibility (evaluated against the installed version)',
@@ -1222,7 +1273,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 设置页：渠道、当日检测、体检详情、插件兼容表、交接结果、回滚与重启。
+     * 设置页：渠道、当日检测、体检详情、试装 / 冒烟结论、插件兼容表、交接结果、回滚与重启。
      * @param {{t?:Function}} props 框架注入的属性。
      * @returns {any} React 元素。
      */
@@ -1242,6 +1293,9 @@ window.__ModuleLoader__.load({
       const [report, setReport] = react.useState(null)
       const [progress, setProgress] = react.useState(null)
       const [recheck, setRecheck] = react.useState(null)
+      // 试装 / 冒烟的结论（issue #329）：进设置页各 GET 一次就铺出来，不逼用户先点一次。
+      const [probe, setProbe] = react.useState(null)
+      const [smoke, setSmoke] = react.useState(null)
       const watchRef = react.useRef(null)
 
       const refresh = react.useCallback(async () => {
@@ -1284,6 +1338,32 @@ window.__ModuleLoader__.load({
           }
         }
       }, [refresh])
+
+      // 试装 / 冒烟结论各 GET 一次：进设置页就把已缓存的结论铺出来，不让用户先点一次才看得到。
+      // 进页时若那一轮还在跑，就**接着轮询到结束**——面板写着「跑完自动刷新」，就必须真的会刷新（别假承诺）。
+      react.useEffect(() => {
+        let cancelled = false
+        ;(async () => {
+          const [probeSnapshot, smokeSnapshot] = await Promise.all([request(API.probe), request(API.smoke)])
+          if (cancelled) return
+          // 两条互不阻塞：试装还在跑时冒烟结论也要先铺出来。
+          const settle = (snapshot, url, setter) => {
+            if (snapshot.ok !== true) return Promise.resolve()
+            if (snapshot.running !== true) {
+              setter(snapshot)
+              return Promise.resolve()
+            }
+            return loadConclusion(url, setter)
+          }
+          await Promise.all([
+            settle(probeSnapshot, API.probe, setProbe),
+            settle(smokeSnapshot, API.smoke, setSmoke),
+          ])
+        })()
+        return () => {
+          cancelled = true
+        }
+      }, [])
 
       const policy = state?.policy ?? { channel: 'latest', exactVersion: '', dailyCheck: true }
       const settings = state?.settings ?? { overlay: true, dismissed: false }
@@ -1349,6 +1429,56 @@ window.__ModuleLoader__.load({
         const result = await request(API.preflight)
         setBusy(false)
         if (result.ok === true) setPreflightFacts(result.preflight)
+      }
+
+      /**
+       * 取一次试装 / 冒烟结论：`POST` 开跑后立刻 `GET` 铺出「正在跑 / 已有旧结论」，
+       * 仍在跑就按 `CONCLUSION_POLL_MS` 轮询到这一轮结束。
+       * @param {string} url 端点。
+       * @param {(value:any)=>void} setter 结论写入。
+       * @returns {Promise<any>} 最后一次 `GET` 的结果。
+       */
+      const loadConclusion = async (url, setter) => {
+        let snapshot = await request(url)
+        if (snapshot.ok === true) setter(snapshot)
+        for (let i = 0; i < CONCLUSION_POLL_MAX && snapshot.running === true; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, CONCLUSION_POLL_MS))
+          snapshot = await request(url)
+        }
+        if (snapshot.ok === true) setter(snapshot)
+        return snapshot
+      }
+
+      /**
+       * 跑一次试装（`POST` 触发 → `GET` 取结论）。
+       * @returns {Promise<void>} 完成。
+       */
+      const runProbe = async () => {
+        setBusy(true)
+        const started = await request(API.probe, { method: 'POST', body: {} })
+        setBusy(false)
+        if (started.ok !== true) {
+          setNotice(t('settings.probeFailed', { error: started.error ?? String(started.httpStatus ?? '') }))
+          return
+        }
+        if (started.skipped === true) setNotice(started.detail)
+        await loadConclusion(API.probe, setProbe)
+      }
+
+      /**
+       * 跑一次逐插件冒烟（`POST` 触发 → `GET` 取结论）。
+       * @returns {Promise<void>} 完成。
+       */
+      const runSmoke = async () => {
+        setBusy(true)
+        const started = await request(API.smoke, { method: 'POST', body: {} })
+        setBusy(false)
+        if (started.ok !== true) {
+          setNotice(t('settings.smokeFailed', { error: started.error ?? String(started.httpStatus ?? '') }))
+          return
+        }
+        if (started.skipped === true) setNotice(started.detail)
+        await loadConclusion(API.smoke, setSmoke)
       }
       const checkNow = async () => {
         setBusy(true)
@@ -1437,6 +1567,54 @@ window.__ModuleLoader__.load({
           h('div', { key: 'b', className: 'dsh-au-detail-body' }, plugin.detail),
         ]),
       ))
+
+      // 试装结论：逐插件一行（红/绿点 + 插件名 + 结论摘要），明细折叠复用 `dsh-au-details`。
+      const probeRows = (Array.isArray(probe?.entries) ? probe.entries : []).map((entry) => settingRow(
+        entry.name,
+        entry.name,
+        h('span', { key: 's', className: entry.ok === true ? 'dsh-au-ok' : 'dsh-au-bad' },
+          entry.ok === true ? t('settings.probeOk') : t('settings.probeBad')),
+        [
+          h('span', { key: 'sum' }, [
+            typeof entry.detail === 'string' && entry.detail !== '' ? entry.detail : null,
+            entry.stale === true ? ` ${t('settings.probeStale')}` : '',
+          ]),
+          h('details', { key: 'more', className: 'dsh-au-details' }, [
+            h('summary', { key: 's' }, t('settings.probeMore')),
+            h('div', { key: 'b', className: 'dsh-au-detail-body' }, [
+              t('settings.probeForVersion', { version: entry.version ?? '?' }),
+              entry.at == null ? '' : ` · ${t('settings.probeAt', { at: new Date(entry.at).toLocaleString() })}`,
+            ]),
+          ]),
+        ],
+      ))
+
+      // 冒烟结论：同样逐插件一行；明细折叠里列每一项检查（✓ / ✗ + 检查名 + 说明）。
+      const smokeRows = (Array.isArray(smoke?.results) ? smoke.results : []).map((item) => {
+        const checks = Array.isArray(item.checks) ? item.checks : []
+        const failed = checks.filter((check) => check.ok !== true).length
+        const summary = item.partial === true
+          ? t('settings.smokePartial')
+          : (typeof item.detail === 'string' && item.detail !== ''
+            ? item.detail
+            : (item.ok === true
+              ? t('settings.smokeAllOk', { count: checks.length })
+              : t('settings.smokeSomeBad', { count: failed })))
+        return settingRow(
+          item.name,
+          item.name,
+          h('span', { key: 's', className: item.ok === true ? 'dsh-au-ok' : 'dsh-au-bad' },
+            item.ok === true ? t('settings.smokeOk') : t('settings.smokeBad')),
+          [
+            h('span', { key: 'sum' }, summary),
+            checks.length === 0 ? null : h('details', { key: 'more', className: 'dsh-au-details' }, [
+              h('summary', { key: 's' }, t('settings.smokeChecks')),
+              h('div', { key: 'b', className: 'dsh-au-detail-body' }, checks.map((check, index) => h('div', { key: `c${index}` },
+                `${check.ok === true ? '✓' : '✗'} ${check.name ?? ''}${typeof check.detail === 'string' && check.detail !== '' ? `：${check.detail}` : ''}`))),
+            ]),
+          ],
+        )
+      })
 
       const pending = state?.pendingRestart ?? null
       const resultLine = diagnostics.result === null
@@ -1563,6 +1741,37 @@ window.__ModuleLoader__.load({
         preflightFacts === null ? null : h('div', { key: 'facts', className: 'dsh-au-panel' }, [
           h('div', { key: 'l', className: 'dsh-au-title' }, t('settings.preflight')),
           h('div', { key: 'pre', className: 'dsh-au-pre' }, JSON.stringify(preflightFacts, null, 2)),
+        ]),
+        // 试装 / 冒烟结论（issue #329）：没数据也留面板 + 占位文案，不留空白面板。
+        h('div', { key: 'probe', className: 'dsh-au-panel' }, [
+          h('div', { key: 'l', className: 'dsh-au-title' }, t('settings.probeTitle')),
+          h('div', { key: 'row', className: 'dsh-au-row' }, [
+            h('button', { key: 'run', className: 'dsh-au-selectbtn', disabled: busy, onClick: runProbe }, t('settings.probeRun')),
+            probe?.running === true
+              ? h('span', { key: 'running', className: 'dsh-au-muted' }, t('settings.probeRunning'))
+              : null,
+            probe?.error == null
+              ? null
+              : h('span', { key: 'err', className: 'dsh-au-warn' }, t('settings.probeFailed', { error: probe.error })),
+          ]),
+          probeRows.length === 0
+            ? h('div', { key: 'empty', className: 'dsh-au-muted' }, t('settings.probeEmpty'))
+            : h('div', { key: 'rows' }, probeRows),
+        ]),
+        h('div', { key: 'smoke', className: 'dsh-au-panel' }, [
+          h('div', { key: 'l', className: 'dsh-au-title' }, t('settings.smokeTitle')),
+          h('div', { key: 'row', className: 'dsh-au-row' }, [
+            h('button', { key: 'run', className: 'dsh-au-selectbtn', disabled: busy, onClick: runSmoke }, t('settings.smokeRun')),
+            smoke?.running === true
+              ? h('span', { key: 'running', className: 'dsh-au-muted' }, t('settings.smokeRunning'))
+              : null,
+            smoke?.error == null
+              ? null
+              : h('span', { key: 'err', className: 'dsh-au-warn' }, t('settings.smokeFailed', { error: smoke.error })),
+          ]),
+          smokeRows.length === 0
+            ? h('div', { key: 'empty', className: 'dsh-au-muted' }, t('settings.smokeEmpty'))
+            : h('div', { key: 'rows' }, smokeRows),
         ]),
         h('div', { key: 'plugins', className: 'dsh-au-panel' }, [
           h('div', { key: 'l', className: 'dsh-au-title' }, pluginsTarget === null

@@ -7,8 +7,9 @@ import { API } from '../lib/host/protocol.js'
 const client = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
 test('浏览器半边与本文件的路由表一致（无构建 = 靠测试保证）', () => {
-  // 只在宿主侧用、浏览器半边还没接入的路由（#300 的 probe 属 P1 后端，P1b 接 UI 后删掉）。
-  const HOST_ONLY = new Set([API.probe, API.smoke, API.refillPlan, API.refillRun])
+  // 只在宿主侧用、浏览器半边还没接入的路由：危险动作（回填写盘 + 开 PR）本轮不进 UI（#329）。
+  // `probe` / `smoke` 已接进设置页，从这里删掉了；refill 两条必须继续挡住。
+  const HOST_ONLY = new Set([API.refillPlan, API.refillRun])
   const expected = Object.values(API).filter((path) => !HOST_ONLY.has(path))
   const found = new Set(client.match(/\/api\/dsh-auto-upgrade[\w/-]*/g) ?? [])
   assert.deepEqual([...found].sort(), expected.sort())

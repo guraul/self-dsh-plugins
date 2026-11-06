@@ -3,6 +3,19 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.0] — 2026-11-06
+
+### 新增
+
+- **设置页接上试装 / 冒烟结论**（#329）：`API` 补 `probe` / `smoke` 两条路由，
+  进设置页各 `GET` 一次把已缓存结论直接铺出来（那一轮还在跑就接着轮询到结束，「正在跑」的文案不假承诺），
+  两个按钮各触发一次（`POST` 开跑 → `GET` 取结论，
+  仍在跑就 2 秒一轮轮询到结束）。结果区逐插件一行（红/绿点 + 插件名 + 结论摘要），
+  明细折叠复用 `dsh-au-details` 与 `dsh-au-setting` 行布局；没数据时给占位文案，不留空白面板。
+  中英文案进 `ZH` / `EN` 字典（`settings.probe*` / `settings.smoke*`）。
+- `test/client-protocol.test.mjs` 的 `HOST_ONLY` 只剩 `refillPlan` / `refillRun`——
+  危险动作（回填写盘 + 开 PR）本轮仍不进 UI。
+
 ## [0.8.3] — 2026-11-05
 
 ### 修复（清欠账）
