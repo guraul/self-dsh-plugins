@@ -1,7 +1,7 @@
 {
   "description": "审核变更并给出结构化判定。只读：不改代码、不合并、不写 PR。",
   "provider": "codebuddy",
-  "model": "codebuddy/glm-5.3-flash",
+  "model": "codebuddy/mimo-v2.6-pro",
   "permissionMode": "readonly",
   "allowDelegation": false,
   "outputContract": "review-result",
