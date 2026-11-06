@@ -63,7 +63,7 @@
 
 顶层其它文件：[`README.md`](./README.md)（对外说明）、[`upgrade-dsh.sh`](./upgrade-dsh.sh)（全局 dsh 升级/回滚/恢复）、
 [`dsh-web-stop.sh`](./dsh-web-stop.sh)（停服）、[`.dsh-web/`](./.dsh-web)（LaunchAgent 与重启脚本）、
-[`docs/`](./docs)（插件文档 / pipeline / 归档）、[`scripts/pipeline/`](./scripts/pipeline)（交付脚本）。
+[`docs/`](./docs)（插件文档 / pipeline / 归档）、[`scripts/pipeline/`](./scripts/pipeline)（共享包生成的 6 个交付入口，禁止手改）。
 
 ## 强制规定
 
@@ -72,18 +72,23 @@
 1. **全仓库只允许根目录一份 `AGENTS.md`。** 任何子目录**不得**再新增 `AGENTS.md` / `CLAUDE.md`。
    插件级说明一律写进 [`docs/plugins/`](./docs/plugins/README.md)。
 2. **包管理器只用 pnpm**：见 `~/.dsh/AGENTS.md` §3；本仓库脚本 / CI / 文档一律照此写。
-3. **所有改动走 pipeline**：流程纪律见 `~/.dsh/AGENTS.md` §7（第 6 条人在环、第 7 条绕过闸门）。本仓脚本：
+3. **所有改动走 pipeline**：流程纪律见 `~/.dsh/AGENTS.md` §7（第 6 条人在环、第 7 条绕过闸门）。本仓入口：
    开 issue → `scripts/pipeline/new-task.sh <号>` → 在 worktree 里开发 →
    `scripts/pipeline/open-pr.sh` → 审核方出判定（`APPROVE` 且未命中高风险则直接合并）→
-   `scripts/pipeline/merge-pr.sh --review-record=<记录>`。
-   **本仓有审核闸门**：`merge-pr.sh` 默认要求 `--review-record`；绕过（`--no-review`）的规则与留痕要求见全局 §7 第 7 条。
+   `scripts/pipeline/merge-pr.sh --record <记录>`。
+   **`scripts/pipeline/` 里的 6 个 `*.sh` 是共享包 `@guraul/dsh-pipeline` 生成的入口，禁止手改**
+   （`shim check` 会红）；参数就是包子命令的参数、不再做本地改名转发——**入口与参数以
+   [`guraul/dsh-pipeline` 的 `docs/CONTRACT.md`](https://github.com/guraul/dsh-pipeline/blob/main/docs/CONTRACT.md) 为准**。
+   **本仓有审核闸门**：`merge-pr.sh` 默认要求 `--record`；绕过（`--no-review`）的规则与留痕要求见全局 §7 第 7 条。
    worktree 与分支命名契约、清理纪律、审核循环细节见
    [`docs/pipeline/README.md`](./docs/pipeline/README.md) 与 [`docs/pipeline/review-loop.md`](./docs/pipeline/review-loop.md)。
 4. **subagent 委派约定**：通用规则见 `~/.dsh/AGENTS.md` §8 / §9（跨项目单一真源）；本条只写本仓特有部分。
    - **本仓特有**：
      - 门禁：**按插件跑** `pnpm test` 与 `pnpm run lint`——两者各自按插件 `package.json` 里有没有
-       `scripts.test` / `scripts.lint` 决定跑不跑；根目录**没有**统一入口（也没有 `scripts/lint.js`）；
-       CI 见 `.github/workflows/`（matrix 逐插件执行）。
+       `scripts.test` / `scripts.lint` 决定跑不跑；本地一键汇总用
+       `scripts/pipeline/pipeline.sh check-all`（逐包跑 `test` / `check` / `typecheck`，
+       包清单是 `.dsh/pipeline.json` 的 `checks.packages`；**`lint` 不在其中**，有 `scripts.lint` 的插件仍单独跑）；
+       CI 见 `.github/workflows/`（matrix 逐插件执行，`lint` 有就跑）。
      - **打断语义**：`interrupt_agent` 会让远端**立刻停**（发 ACP `session/cancel`），但进程按 `idleTimeoutMs`（默认 10 分钟）回收——**别把 `opencode acp` 赖着当泄漏**；详见 `dsh-plugin-product-subagents/README.md` §Interrupting a delegation（issue #12 实测）。
 5. **宿主安全**：禁止随意重启 dsh web（会终止当前会话）——需要时用
    [`.dsh-web/restart-once.sh`](./.dsh-web/restart-once.sh)；
