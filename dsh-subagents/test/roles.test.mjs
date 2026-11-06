@@ -35,17 +35,17 @@ test('normalizeRole 保留 model（与 provider）', () => {
 test('内置角色：reviewer 钉 provider + model，executor 不钉', () => {
   const { roles } = loadRoles()
   assert.equal(roles.get('reviewer').provider, 'codebuddy')
-  assert.equal(roles.get('reviewer').model, 'codebuddy/glm-5.3-flash')
+  assert.equal(roles.get('reviewer').model, 'codebuddy/mimo-v2.6-pro')
   assert.equal(roles.get('executor').provider, '')
   assert.equal(roles.get('executor').model, '')
 })
 
-test('不传 model 调 reviewer → 下发角色钉的 codebuddy/glm-5.3-flash', async () => {
+test('不传 model 调 reviewer → 下发角色钉的 codebuddy/mimo-v2.6-pro', async () => {
   const { tools, specs, exec } = await fakeHost()
   const out = await tools.get('product_delegate').execute({ role: 'reviewer', task: '审一下' }, exec)
   assert.equal(specs.length, 1)
   assert.equal(specs[0].provider, 'product-subagents:codebuddy')
-  assert.equal(specs[0].request.model, 'codebuddy/glm-5.3-flash')
+  assert.equal(specs[0].request.model, 'codebuddy/mimo-v2.6-pro')
   assert.equal(out.role, 'reviewer')
   assert.equal(out.provider, 'codebuddy')
 })
@@ -54,11 +54,11 @@ test('传角色钉的 model（等价）→ 放行，下发角色钉的带前缀�
   const { tools, specs, exec } = await fakeHost()
   await tools
     .get('product_delegate')
-    .execute({ role: 'reviewer', model: 'codebuddy/glm-5.3-flash', task: 't' }, exec)
-  assert.equal(specs[0].request.model, 'codebuddy/glm-5.3-flash')
+    .execute({ role: 'reviewer', model: 'codebuddy/mimo-v2.6-pro', task: 't' }, exec)
+  assert.equal(specs[0].request.model, 'codebuddy/mimo-v2.6-pro')
 
-  await tools.get('product_delegate').execute({ role: 'reviewer', model: 'glm-5.3-flash', task: 't' }, exec)
-  assert.equal(specs[1].request.model, 'codebuddy/glm-5.3-flash', '去掉 codebuddy/ 前缀视为同一个模型')
+  await tools.get('product_delegate').execute({ role: 'reviewer', model: 'mimo-v2.6-pro', task: 't' }, exec)
+  assert.equal(specs[1].request.model, 'codebuddy/mimo-v2.6-pro', '去掉 codebuddy/ 前缀视为同一个模型')
 })
 
 test('传冲突模型直接报错，且不发起调用', async () => {
@@ -66,7 +66,7 @@ test('传冲突模型直接报错，且不发起调用', async () => {
   await assert.rejects(
     () => tools.get('product_delegate').execute({ role: 'reviewer', model: '别的模型', task: 't' }, exec),
     (error) => {
-      assert.ok(error.message.includes('角色 reviewer 钉的模型是 codebuddy/glm-5.3-flash'))
+      assert.ok(error.message.includes('角色 reviewer 钉的模型是 codebuddy/mimo-v2.6-pro'))
       assert.ok(error.message.includes('本次请求 别的模型'))
       return true
     },
@@ -111,7 +111,7 @@ test('product_continue 续接同样吃角色钉的模型，冲突也报错', asy
     .get('product_continue')
     .execute({ role: 'reviewer', session: 's-abc', task: '补一条 finding' }, exec)
   assert.equal(specs.length, 1)
-  assert.equal(specs[0].request.model, 'codebuddy/glm-5.3-flash')
+  assert.equal(specs[0].request.model, 'codebuddy/mimo-v2.6-pro')
   assert.equal(specs[0].request.sessionId, 's-abc')
 
   await assert.rejects(
@@ -119,7 +119,7 @@ test('product_continue 续接同样吃角色钉的模型，冲突也报错', asy
       tools
         .get('product_continue')
         .execute({ role: 'reviewer', session: 's-abc', model: '别的模型', task: 't' }, exec),
-    (error) => error.message.includes('角色 reviewer 钉的模型是 codebuddy/glm-5.3-flash'),
+    (error) => error.message.includes('角色 reviewer 钉的模型是 codebuddy/mimo-v2.6-pro'),
   )
   assert.equal(specs.length, 1, '冲突那次不发起调用')
 })
@@ -174,13 +174,13 @@ test('resolveRoute：reviewer 传不一致模型仍然抛错（硬钉回归）',
   const { roles } = loadRoles()
   assert.throws(
     () => resolveRoute(roles.get('reviewer'), { model: '别的模型' }),
-    /角色 reviewer 钉的模型是 codebuddy\/glm-5\.3-flash，本次请求 别的模型/,
+    /角色 reviewer 钉的模型是 codebuddy\/mimo-v2\.6-pro，本次请求 别的模型/,
   )
 
   const { tools, specs, exec } = await fakeHost()
   await assert.rejects(
     () => tools.get('product_delegate').execute({ role: 'reviewer', model: '别的模型', task: 't' }, exec),
-    /钉的模型是 codebuddy\/glm-5\.3-flash/,
+    /钉的模型是 codebuddy\/mimo-v2\.6-pro/,
   )
   assert.equal(specs.length, 0, '硬钉冲突必须在发起调用之前抛出')
 })
