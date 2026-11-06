@@ -818,3 +818,27 @@ test('设置页：点按钮走 POST 触发、随后 GET 取结论', async () => 
   assert.ok(calls.filter((call) => call.url === API.probe && call.method === 'GET').length >= 2, 'POST 之后必须再 GET 取结论')
   assert.ok(calls.filter((call) => call.url === API.smoke && call.method === 'GET').length >= 2, 'POST 之后必须再 GET 取结论')
 })
+
+test('设置页：挂载时那一轮还在跑 → 接着轮询到结束再铺新结论（文案不许假承诺）', async () => {
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: CALM_STATUS,
+    // 前两次 GET（挂载那次 + 轮询前那次）都还在跑，第三次才写完结论。
+    [API.probe]: () => {
+      const payload = calls.filter((call) => call.url === API.probe && call.method === 'GET').length < 3
+        ? { ok: true, running: true, startedAt: Date.now(), target: '0.2.0-rc.2', error: null, entries: [] }
+        : { ok: true, running: false, startedAt: null, target: null, error: null, entries: [{ version: '0.2.0-rc.2', name: 'dsh-awake', at: Date.now(), ok: true, detail: '装配通过', stale: false }] }
+      return { status: 200, json: async () => payload }
+    },
+    [API.smoke]: { ok: true, running: false, startedAt: null, error: null, results: [] },
+  })
+  const duringRun = textOf(await react.mount(Settings, {}))
+  assert.ok(duringRun.includes('试装正在跑'), '还在跑时要如实显示「正在跑」')
+  // 轮询节奏 2s 一轮：等它跑到「跑完」那一拍再看。
+  await new Promise((resolve) => setTimeout(resolve, 2600))
+  const settled = textOf(await react.flush())
+  const probeGets = calls.filter((call) => call.url === API.probe && call.method === 'GET').length
+  assert.ok(probeGets >= 3, `挂载路径必须继续轮询，实际只 GET 了 ${String(probeGets)} 次`)
+  assert.ok(settled.includes('dsh-awake'), '轮询结束后必须铺出新结论')
+  assert.ok(!settled.includes('试装正在跑'), '跑完就不该再挂着「正在跑」')
+})

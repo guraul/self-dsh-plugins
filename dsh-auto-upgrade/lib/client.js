@@ -1340,13 +1340,25 @@ window.__ModuleLoader__.load({
       }, [refresh])
 
       // 试装 / 冒烟结论各 GET 一次：进设置页就把已缓存的结论铺出来，不让用户先点一次才看得到。
+      // 进页时若那一轮还在跑，就**接着轮询到结束**——面板写着「跑完自动刷新」，就必须真的会刷新（别假承诺）。
       react.useEffect(() => {
         let cancelled = false
         ;(async () => {
-          const probeSnapshot = await request(API.probe)
-          if (!cancelled && probeSnapshot.ok === true) setProbe(probeSnapshot)
-          const smokeSnapshot = await request(API.smoke)
-          if (!cancelled && smokeSnapshot.ok === true) setSmoke(smokeSnapshot)
+          const [probeSnapshot, smokeSnapshot] = await Promise.all([request(API.probe), request(API.smoke)])
+          if (cancelled) return
+          // 两条互不阻塞：试装还在跑时冒烟结论也要先铺出来。
+          const settle = (snapshot, url, setter) => {
+            if (snapshot.ok !== true) return Promise.resolve()
+            if (snapshot.running !== true) {
+              setter(snapshot)
+              return Promise.resolve()
+            }
+            return loadConclusion(url, setter)
+          }
+          await Promise.all([
+            settle(probeSnapshot, API.probe, setProbe),
+            settle(smokeSnapshot, API.smoke, setSmoke),
+          ])
         })()
         return () => {
           cancelled = true
