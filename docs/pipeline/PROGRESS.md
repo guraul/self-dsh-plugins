@@ -136,8 +136,8 @@ GitHub Issue（任务入口）
 | 2 | memx 迁到共享包 | **已完成**（memx PR #56）：`tools/` + `.dsh/pipeline.json` + 五个转发壳 + `test-forwarding.sh`（13 组）；`new-task.sh` 固定 `--worktrees-dir /Users/gubin/workspace/memx-worktrees`（包 PR #23 补的参数；memx 被 opencode 加载源码，worktree 必须建在仓外） | 无。memx 无 CI，按 `ci: []` 如实声明 |
 | 3 | 本仓 `review.sh` 未统一到共享包 | **已完成**（本仓 PR #278，`70eaa3d`）：`prepare` / `prompt` 已转发到包的 `review` 子命令（`--facts` / `--include` / 提示词生成都由包提供）；四仓（agent-mobile / homebase / memx / 本仓）一致 | 剩余已知边界：`publish`（把判定发到 GitHub 当 review）仍留本仓自己实现，包侧 `review publish` 只落盘记录 |
 | 4 | 2026-11-05 交接的两条欠账（`progress-server.mjs` 不可达 `return`、本台账补阶段 8） | **已完成**（本 issue #330）；交接 §4 的另一条「设置页 UI」已由 `dsh-auto-upgrade` 0.9.0（PR #331）完成 | 无 |
-| 5 | 设置页 UI 的两个未决问题：要不要放「一键回填开 PR」按钮、要不要做深色模式 | 待用户拍板（交接 §8，**别自己定**） | 危险动作是否进 UI、浅色进度页与宿主设置页主题是否统一 |
-| 6 | 真实升级没跑过 | 未执行（交接 §10；跑一次会终止当前会话，需用户授权） | 试装 / 冒烟 / 回填的结论目前只来自探针、冒烟与单测 |
+| 5 | 设置页 UI 的两个未决问题：要不要放「一键回填开 PR」按钮、要不要做深色模式 | **已决（用户 2026-11-06 拍板）**：深色模式**不做**；「一键回填开 PR」按钮**继续保持原状**（`POST /refill/pr` 仍只在 API，不进 UI） | 两条均已定案，无欠账：进度页维持浅色，危险动作不进 UI |
+| 6 | 真实升级没跑过 | **已决（用户 2026-11-06 决定不跑真实升级）**：不再申请授权跑真实升级 | 后续验证口径：试装 / 冒烟 / 回填的结论一律只来自**探针 / 冒烟 / 单测**三条通道，不以真实升级为依据 |
 
 > **`#117` 不是欠账**：它是 `compat-matrix.yml` 每周把结果写进去的**滚动 issue**，按设计长期 open（最近一次成功：2026-11-02）。此前台账把它列为「未完成」是误判。（2026-11-05 补记：该工作流与其脚本已删除，能力移交 #300，#117 已关闭。）
 
@@ -179,3 +179,4 @@ GitHub Issue（任务入口）
 | 2026-11-05 | 删除 `install-check` / `compat-matrix` / `audit-subagents`（#301 / PR #302） | 能力移交 `dsh-auto-upgrade` #300（升级前试装 + 升级后逐插件冒烟）；文档同步清引用，脚本与 CI 文件删除由另一单负责 |
 | 2026-11-06 | 清两条交接欠账（#330） | §三 新增阶段 8（2026-11-05 的 13 个 PR 逐条台账，`dsh-auto-upgrade` 0.2.6 → 0.8.3）；删 `progress-server.mjs` 里 `if (live) return …` 之后不可达的注释与第二个 `return`（行为零变化）；§四 补 #330 与交接遗留的两条欠账；`dsh-auto-upgrade` 0.9.0 → 0.9.1 |
 | 2026-11-06 | 手写脚本全换成生成入口（#333 / PR #334） | 删 12 个手写脚本；`.dsh/pipeline.json` 加 `checks.packages`（11 个插件，顺序不变）与 `exclude: ["tools"]`；`shim install` 生成 6 个入口、`hooks install` 替换手写 pre-push 钩子；新增 `scripts/pipeline/README.md`；`AGENTS.md`、手册、`review-loop.md`、`README.md`、CI 同步改写 |
+| 2026-11-06 | 三条已拍板决策落台账（#348 / PR #349） | 纯文档：§四 #5 改成已决结论（深色模式**不做**、「一键回填开 PR」按钮保持原状、`POST /refill/pr` 仍只在 API），§四 #6 改成「用户 2026-11-06 决定不跑真实升级」并写明验证口径（探针 / 冒烟 / 单测）；不动代码、不动 `docs/plugins/` |
