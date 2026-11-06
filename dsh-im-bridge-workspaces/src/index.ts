@@ -1559,6 +1559,12 @@ export function apply(ctx: Context, config: Config): void {
       let plan: WecomBindPlan
       let stored: SessionPersistenceHeader | undefined
       if (pin !== undefined) {
+        // 归档没有反向操作：继续钉着只会每条消息都失败，先把绑定解掉再报错。
+        if (archivedSessions().has(pin.sessionId)) {
+          windowSessions.delete(ref.key)
+          saveWorkspaceBindings()
+          throw new Error(`会话已归档，已解除绑定: ${pin.sessionId}`)
+        }
         // 钉住的会话按字面 id 取：活着就 adopt，只在持久化里就 resume，
         // 两边都没有就报错——绝不 create，那会绕开用户绑定的会话。
         const pinnedLive = agents.get(SessionId(pin.sessionId)) !== undefined
@@ -1619,7 +1625,8 @@ export function apply(ctx: Context, config: Config): void {
         )
         // Fire-and-forget: `attach` stays synchronous, and its three callers
         // (adopt / resume / create) must not wait on a ledger write.
-        void attachToWorkspace(sessionId, binding)
+        // 钉住的是 GUI 那条会话：不折进当前企微窗口的工作区分组。
+        if (!st.pinned) void attachToWorkspace(sessionId, binding)
       }
 
       const live = agents.get(sessionId)
@@ -2410,7 +2417,13 @@ export function apply(ctx: Context, config: Config): void {
       if (pin !== undefined) {
         // 同一会话可能被多个窗口钉住：按会话 id 归并成一条串行队列。
         const previous = sessionQueues.get(pin.sessionId) ?? Promise.resolve()
-        sessionQueues.set(pin.sessionId, previous.then(run))
+        const tail = previous.then(run)
+        sessionQueues.set(pin.sessionId, tail)
+        // 用后清理：结算后若该键仍是当前尾巴就删掉，否则按会话 id 无界累积。
+        const cleanup = (): void => {
+          if (sessionQueues.get(pin.sessionId) === tail) sessionQueues.delete(pin.sessionId)
+        }
+        void tail.then(cleanup, cleanup)
       } else {
         st.queue = st.queue.then(run)
       }

@@ -9841,6 +9841,11 @@ function apply(ctx, config) {
 			let plan;
 			let stored;
 			if (pin !== void 0) {
+				if (archivedSessions().has(pin.sessionId)) {
+					windowSessions.delete(ref.key);
+					saveWorkspaceBindings();
+					throw new Error(`会话已归档，已解除绑定: ${pin.sessionId}`);
+				}
 				const pinnedLive = agents.get(SessionId(pin.sessionId)) !== void 0;
 				const pinnedStored = headers.some((header) => header.id === pin.sessionId);
 				if (!pinnedLive && !pinnedStored) throw new Error(`会话不存在: ${pin.sessionId}`);
@@ -9877,7 +9882,7 @@ function apply(ctx, config) {
 				if (pin === void 0 && cwd !== void 0 && !sameWorkspacePath(cwd, binding.path)) console.warn(`[im-bridge] 会话 ${sessionId} 仍使用存档目录 ${cwd}，当前 workspace=${binding.path}`);
 				const epoch = plan.epoch > 1 ? ` 第${String(plan.epoch)}段` : "";
 				console.log(`[im-bridge] 为 ${ref.key} @${binding.title} ${how}会话 ${sessionId}${epoch} userid=${ref.sender} chattype=${ref.kind} chatid=${ref.chatid ?? ""}`);
-				attachToWorkspace(sessionId, binding);
+				if (!st.pinned) attachToWorkspace(sessionId, binding);
 			};
 			const live = agents.get(sessionId);
 			if (plan.bind === "adopt" && live !== void 0) {
@@ -10499,8 +10504,12 @@ function apply(ctx, config) {
 				ws.replyStream(frame, generateReqId("stream"), `处理失败: ${truncate(message, 300)}`, true).catch(() => {});
 			});
 			if (pin !== void 0) {
-				const previous = sessionQueues.get(pin.sessionId) ?? Promise.resolve();
-				sessionQueues.set(pin.sessionId, previous.then(run));
+				const tail = (sessionQueues.get(pin.sessionId) ?? Promise.resolve()).then(run);
+				sessionQueues.set(pin.sessionId, tail);
+				const cleanup = () => {
+					if (sessionQueues.get(pin.sessionId) === tail) sessionQueues.delete(pin.sessionId);
+				};
+				tail.then(cleanup, cleanup);
 			} else st.queue = st.queue.then(run);
 		}
 		ws.on("message.text", ((frame) => {
