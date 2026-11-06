@@ -127,19 +127,19 @@ test('product_continue 续接同样吃角色钉的模型，冲突也报错', asy
 test('resolveRoute：executor 没钉，调用方不传就吃软默认', async () => {
   const { roles } = loadRoles()
   const executor = roles.get('executor')
-  assert.equal(executor.defaultProvider, 'opencode')
-  assert.equal(executor.defaultModel, 'opencode/deepseek-v4.1-flash-free')
+  assert.equal(executor.defaultProvider, 'codebuddy')
+  assert.equal(executor.defaultModel, 'codebuddy/deepseek-v4.1-flash')
   assert.deepEqual(resolveRoute(executor, {}), {
-    provider: 'opencode',
-    model: 'opencode/deepseek-v4.1-flash-free',
+    provider: 'codebuddy',
+    model: 'codebuddy/deepseek-v4.1-flash',
   })
 
   // 走到工具层：软默认必须真的进到下发给 CLI 的 spec 里，而不是只停在解析函数
   const { tools, specs, exec } = await fakeHost()
   const out = await tools.get('product_delegate').execute({ role: 'executor', task: 't' }, exec)
-  assert.equal(specs[0].provider, 'product-subagents:opencode')
-  assert.equal(specs[0].request.model, 'opencode/deepseek-v4.1-flash-free')
-  assert.equal(out.provider, 'opencode')
+  assert.equal(specs[0].provider, 'product-subagents:codebuddy')
+  assert.equal(specs[0].request.model, 'codebuddy/deepseek-v4.1-flash')
+  assert.equal(out.provider, 'codebuddy')
 })
 
 test('resolveRoute：软默认不覆盖调用方传的 model', () => {
@@ -152,6 +152,22 @@ test('resolveRoute：软默认不覆盖调用方传的 model', () => {
     model: 'opencode/调用方模型',
   })
   assert.equal(resolveRoute(role, { provider: 'codebuddy' }).provider, 'codebuddy', '调用方传的 provider 优先于软默认')
+})
+
+test('resolveRoute：调用方指定别的 provider 时，软默认 model 不跨产品补位', async () => {
+  const { roles } = loadRoles()
+  const executor = roles.get('executor')
+  // 显式点名另一个产品、又没给 model → 不把 codebuddy 的默认模型塞给它
+  assert.deepEqual(resolveRoute(executor, { provider: 'opencode' }), { provider: 'opencode', model: '' })
+  // 传的就是 defaultProvider → 仍然可以补软默认 model
+  assert.deepEqual(resolveRoute(executor, { provider: 'codebuddy' }), {
+    provider: 'codebuddy',
+    model: 'codebuddy/deepseek-v4.1-flash',
+  })
+
+  const { tools, specs, exec } = await fakeHost()
+  await tools.get('product_delegate').execute({ role: 'executor', provider: 'opencode', task: 't' }, exec)
+  assert.equal('model' in specs[0].request, false, '跨产品时不带 model，交给那个 CLI 自己决定')
 })
 
 test('resolveRoute：reviewer 传不一致模型仍然抛错（硬钉回归）', async () => {

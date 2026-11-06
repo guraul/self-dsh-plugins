@@ -111,17 +111,28 @@ export function resolveRoleModel(role, requested) {
  * 空串表示「没有这个值」，与 `normalizeRole()` 的归一化口径一致——调用方据此决定是否下发，
  * 而不是把空串当模型名传给 CLI。
  *
+ * 软默认 model 不跨产品补位：调用方指定了别的 provider 且没给 model 时，model 返回空串
+ * （由那个 CLI 自己决定），避免把 defaultProvider 的模型名发给另一个产品。
+ *
  * @param {object} role 归一化后的角色
  * @param {{ provider?: string, model?: string }} [request] 调用方显式请求（缺省视为都没传）
  * @returns {{ provider: string, model: string }}
  */
 export function resolveRoute(role, { provider, model } = {}) {
+  const requestedProvider = provider || ''
   const resolvedProvider =
-    resolveRoleProvider(role, provider) || (typeof role?.defaultProvider === 'string' ? role.defaultProvider : '')
+    resolveRoleProvider(role, requestedProvider) ||
+    (typeof role?.defaultProvider === 'string' ? role.defaultProvider : '')
+
   // 硬钉优先：角色钉了模型时，软默认不参与，避免把硬钉的冲突放过去
   const pinned = typeof role?.model === 'string' ? role.model : ''
-  const resolvedModel = pinned
-    ? resolveRoleModel(role, model)
-    : model || (typeof role?.defaultModel === 'string' ? role.defaultModel : '')
-  return { provider: resolvedProvider, model: resolvedModel || '' }
+  if (pinned) return { provider: resolvedProvider || '', model: resolveRoleModel(role, model) || '' }
+
+  if (model) return { provider: resolvedProvider || '', model }
+
+  const defaultProvider = typeof role?.defaultProvider === 'string' ? role.defaultProvider : ''
+  const defaultModel = typeof role?.defaultModel === 'string' ? role.defaultModel : ''
+  // 只有「没传 provider」或「传的就是 defaultProvider」才允许补软默认 model
+  const sameProduct = requestedProvider === '' || (defaultProvider !== '' && requestedProvider === defaultProvider)
+  return { provider: resolvedProvider || '', model: sameProduct ? defaultModel : '' }
 }

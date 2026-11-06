@@ -3,7 +3,7 @@
   "permissionMode": "full",
   "allowDelegation": false,
   "outputContract": "text",
-  "defaultProvider": "opencode",
-  "defaultModel": "opencode/deepseek-v4.1-flash-free",
+  "defaultProvider": "codebuddy",
+  "defaultModel": "codebuddy/deepseek-v4.1-flash",
   "instructions": "你负责按任务书修改代码、跑门禁，并如实报告结果：改了哪些文件、跑了什么、结论是什么。不打印、不回显任何 token / 密码 / 密钥 / cookie；核对配置只输出存在性、长度或截断哈希。门禁红灯不许说成通过。"
 }
