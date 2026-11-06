@@ -209,3 +209,18 @@ test('resolveRoleProvider：直接字符串比较，不做规范化', () => {
     /角色 reviewer 钉的 provider 是 codebuddy，本次请求 opencode/,
   )
 })
+
+test('reviewer-tools：带工具审核，permissionMode=full 且非硬只读（想只读又有工具，codebuddy 无此档：靠任务书约束）', () => {
+  const { roles } = loadRoles()
+  const role = roles.get('reviewer-tools')
+  assert.ok(role, 'reviewer-tools 角色必须存在')
+  assert.equal(role.provider, 'codebuddy')
+  assert.equal(role.model, 'codebuddy/mimo-v2.6-pro')
+  assert.equal(
+    role.permissionMode,
+    'full',
+    'full = 带工具、非硬只读：安全靠任务书 + 事后 git status + 闸门 SHA 比对兜底，不得写成「只读审核」',
+  )
+  assert.equal(role.allowDelegation, false)
+  assert.equal(role.outputContract, 'review-result')
+})
