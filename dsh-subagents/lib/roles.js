@@ -25,6 +25,9 @@ export function normalizeRole(id, raw = {}) {
     provider: typeof raw.provider === 'string' ? raw.provider : '',
     // 空串表示角色不钉模型，按调用方给的值走（issue #314：钉了才不会静默落到 CLI 默认模型）
     model: typeof raw.model === 'string' ? raw.model : '',
+    // 软默认（issue #335）：只在调用方没传时生效，与上面的硬钉是两套语义
+    defaultProvider: typeof raw.defaultProvider === 'string' ? raw.defaultProvider : '',
+    defaultModel: typeof raw.defaultModel === 'string' ? raw.defaultModel : '',
     permissionMode: PERMISSION_MODES.includes(raw.permissionMode) ? raw.permissionMode : 'default',
     allowDelegation: raw.allowDelegation !== false,
     outputContract: OUTPUT_CONTRACTS.includes(raw.outputContract) ? raw.outputContract : 'text',
@@ -92,4 +95,33 @@ export function resolveRoleModel(role, requested) {
     throw new Error(`角色 ${role.id} 钉的模型是 ${pinned}，本次请求 ${requested}`)
   }
   return pinned
+}
+
+/**
+ * 一次算出本次委派实际下发的 provider / model。
+ *
+ * 这里有两套**不同**的语义，改动时别混：
+ *
+ * - **硬钉**（`role.provider` / `role.model`，reviewer 用）：调用方没传就用角色的值；
+ *   传了不一致的值直接抛错。保的是「这次到底派给了谁 / 哪个模型」可复盘（issue #314）。
+ * - **软默认**（`role.defaultProvider` / `role.defaultModel`，executor 用）：只在调用方**没传**
+ *   时生效；传了就用传的，不做一致性校验。补的是「漏传 model → 不带 --model → 静默落到 CLI
+ *   默认模型」这条漂移路径（issue #335）。
+ *
+ * 空串表示「没有这个值」，与 `normalizeRole()` 的归一化口径一致——调用方据此决定是否下发，
+ * 而不是把空串当模型名传给 CLI。
+ *
+ * @param {object} role 归一化后的角色
+ * @param {{ provider?: string, model?: string }} [request] 调用方显式请求（缺省视为都没传）
+ * @returns {{ provider: string, model: string }}
+ */
+export function resolveRoute(role, { provider, model } = {}) {
+  const resolvedProvider =
+    resolveRoleProvider(role, provider) || (typeof role?.defaultProvider === 'string' ? role.defaultProvider : '')
+  // 硬钉优先：角色钉了模型时，软默认不参与，避免把硬钉的冲突放过去
+  const pinned = typeof role?.model === 'string' ? role.model : ''
+  const resolvedModel = pinned
+    ? resolveRoleModel(role, model)
+    : model || (typeof role?.defaultModel === 'string' ? role.defaultModel : '')
+  return { provider: resolvedProvider, model: resolvedModel || '' }
 }
