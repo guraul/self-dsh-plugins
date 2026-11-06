@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import {
+  PROBE_CACHE_SCHEMA,
   PROBE_TTL_MS,
   buildProbeCommands,
   entryCandidates,
@@ -83,7 +85,7 @@ test('runProbes：命中缓存不重新试装（mtime 变了才重跑）', async
     now, run,
   })
   assert.equal(calls.length, 0, '缓存命中时不许再 spawn')
-  assert.deepEqual(hit.results, [{ name: 'p', id: 'p', ok: true, detail: '装配通过', cached: true }])
+  assert.deepEqual(hit.results, [{ name: 'p', id: 'p', idFallback: true, ok: true, detail: '装配通过', cached: true }])
 
   const miss = await runProbes({
     targets: [{ name: 'p', path: '/x/p', mtimeMs: 42 }], targetVersion: 'v', dshBin: '/dsh',
@@ -117,34 +119,68 @@ test('探针路由用到的助手都已导入（漏了 `run` 会静默失效—�
   }
 })
 
-test('#346 插件 id 从模块导出的 name 解析，不是包名', () => {
-  assert.equal(pluginIdFromSource("export const name = 'dsh-auto-upgrade'"), 'dsh-auto-upgrade')
-  assert.equal(pluginIdFromSource('export const name = "im-bridge"'), 'im-bridge')
-  assert.equal(pluginIdFromSource("module.exports.name = 'x'"), 'x')
-  assert.equal(pluginIdFromSource("export const name='minified'"), 'minified')
+test('#346 插件 id 从模块导出的 name 解析：覆盖常见导出写法，且先剥注释', () => {
+  const cases = [
+    ["export const name = 'a'", 'a'],
+    ['export const name = "b"', 'b'],
+    ["module.exports.name = 'c'", 'c'],
+    ["exports['name'] = 'd'", 'd'],
+    ["module.exports = { name: 'e' }", 'e'],
+    ['export default { name: "f" }', 'f'],
+    ["definePlugin({ name: 'g' })", 'g'],
+    ["// module.exports.name = 'old'\nexport const name = 'real'", 'real', '注释里的旧写法不能抢先命中'],
+  ]
+  for (const [source, expected, why] of cases) {
+    assert.equal(pluginIdFromSource(source), expected, why ?? source)
+  }
   assert.equal(pluginIdFromSource('export const other = 1'), undefined, '没写 name 就是没写')
   assert.equal(pluginIdFromSource(undefined), undefined)
 })
 
-test('#346 入口候选按 exports → main → 约定路径', () => {
-  assert.deepEqual(entryCandidates({ exports: './dist/index.js' })[0], './dist/index.js')
-  assert.deepEqual(entryCandidates({ exports: { '.': './lib/main.mjs' } })[0], './lib/main.mjs')
-  assert.deepEqual(entryCandidates({ exports: { '.': { default: './dist/x.js' } } })[0], './dist/x.js')
-  assert.deepEqual(entryCandidates({ main: 'lib/index.js' })[0], 'lib/index.js')
+test('#346 真实插件入口能解析出 id（不是循环自证：读的是仓库里真文件）', async () => {
+  const root = join(import.meta.dirname, '..', '..')
+  const cases = [
+    ['dsh-auto-upgrade/lib/index.js', 'dsh-auto-upgrade'],
+    ['dsh-awake/lib/index.js', 'dsh-awake'],
+    ['dsh-im-bridge-workspaces/src/index.ts', 'im-bridge'],
+  ]
+  for (const [file, expected] of cases) {
+    const source = await readFile(join(root, file), 'utf8')
+    assert.equal(pluginIdFromSource(source), expected, `${file} 的 id 应是 ${expected}`)
+  }
+})
+
+test('#346 入口候选按 exports → main → 约定路径，且认 import/require 条件', () => {
+  assert.equal(entryCandidates({ exports: './dist/index.js' })[0], './dist/index.js')
+  assert.equal(entryCandidates({ exports: { '.': './lib/main.mjs' } })[0], './lib/main.mjs')
+  assert.equal(entryCandidates({ exports: { '.': { default: './dist/x.js' } } })[0], './dist/x.js')
+  assert.equal(entryCandidates({ exports: { '.': { import: './esm.mjs' } } })[0], './esm.mjs')
+  assert.equal(entryCandidates({ exports: { '.': { require: './cjs.js' } } })[0], './cjs.js')
+  assert.equal(entryCandidates({ main: 'lib/index.js' })[0], 'lib/index.js')
   assert.ok(entryCandidates({}).includes('lib/index.js'), '没有声明也要有约定路径兜底')
 })
 
-test('#346 runProbes 用 id 比对 dump，返回结果同时带包名与 id', async () => {
-  const dump = '- id: dsh-auto-upgrade\n'
-  const calls = []
+test('#346 缓存 key 带 schema 版本：判定逻辑一改，旧结论全部失效', () => {
+  const key = probeKey({ targetVersion: 'v', name: 'p', mtimeMs: 1 })
+  assert.ok(key.startsWith(`${PROBE_CACHE_SCHEMA}|`), 'key 必须以 schema 版本开头')
+  assert.notEqual(key, `v|p|1`, '旧的「版本|包名|mtime」key 不能再命中')
+})
+
+test('#346 解析不到 id 时不再静默：结果标 idFallback，失败文案点明仅供参考', async () => {
   const result = await runProbes({
-    targetVersion: '0.2.2-rc.1',
-    dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
+    targetVersion: 'v', dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
+    targets: [{ name: 'p', path: '/p', mtimeMs: 1 }],
+    run: async () => ({ status: 0, stdout: '- id: something-else\n' }),
+  })
+  assert.equal(result.results[0].idFallback, true)
+  assert.match(result.results[0].detail, /未能从入口解析插件 id/)
+})
+
+test('#346 runProbes 用 id 比对 dump，返回结果同时带包名与 id', async () => {
+  const result = await runProbes({
+    targetVersion: '0.2.2-rc.1', dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
     targets: [{ name: 'dsh-plugin-auto-upgrade', id: 'dsh-auto-upgrade', path: '/p', mtimeMs: 1 }],
-    run: async (bin, args) => {
-      calls.push(args[args.length - 1])
-      return args.includes('--dump-config') ? { status: 0, stdout: dump } : { status: 0, stdout: '' }
-    },
+    run: async (bin, args) => (args.includes('--dump-config') ? { status: 0, stdout: '- id: dsh-auto-upgrade\n' } : { status: 0, stdout: '' }),
   })
   assert.equal(result.results[0].ok, true, '用包名比对会误报失败，用 id 才对')
   assert.equal(result.results[0].id, 'dsh-auto-upgrade')
