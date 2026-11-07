@@ -224,7 +224,8 @@ test('#361 差集为空 = 装了但没进 profile；基线拿不到时回落按 
     run: async (bin, args) => {
       if (!args.includes('--dump-config')) return { status: 0, stdout: '' }
       n += 1
-      return n === 1 ? { status: 1, stdout: '' } : { status: 0, stdout: '- id: p\n' }
+      // #373 起基线失败会**重试一次**：要连续两次都失败才走到「无法判定」。
+      return n <= 2 ? { status: 1, stdout: '' } : { status: 0, stdout: '- id: p\n' }
     },
   })
   assert.equal(fallback.results[0].ok, false)
@@ -238,7 +239,8 @@ test('#361 差集为空 = 装了但没进 profile；基线拿不到时回落按 
     run: async (bin, args) => {
       if (!args.includes('--dump-config')) return { status: 0, stdout: '' }
       m += 1
-      return m === 1 ? { status: null, stdout: '' } : { status: 0, stdout: '- id: p\n' }
+      // spawn 失败两次（基线 + 重试）才算「拿不到基线」；一次失败会被重试救回来。
+      return m <= 2 ? { status: null, stdout: '' } : { status: 0, stdout: '- id: p\n' }
     },
   })
   assert.match(spawnFail.results[0].detail, /无法判定/, 'status 为 null 不能当成功')
@@ -302,4 +304,25 @@ test('#361 idsFromDump 只收顶层 `- id:` 列表项，不吃嵌套 config 的 
   assert.equal(ids.has('with-comment'), true, '行尾注释要剥掉')
   assert.equal(ids.has('nested-provider-id'), false, '嵌套 config 的 id 不算插件')
   assert.equal(ids.has('nested-mcp-id'), false)
+})
+
+test('#373 基线 dump 第一次失败要重试：第一个插件的 profile 还没建好', async () => {
+  let dumps = 0
+  let added = false
+  const result = await runProbes({
+    targetVersion: 'v', dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
+    targets: [{ name: 'first', id: 'first', path: '/x/first', mtimeMs: 1 }],
+    run: async (bin, args) => {
+      if (!args.includes('--dump-config')) {
+        added = true
+        return { status: 0, stdout: '' }
+      }
+      dumps += 1
+      // 第 1 次（基线）失败 —— 真机上第一个插件就是这样；第 2 次重试成功；第 3 次是装后 dump。
+      if (dumps === 1) return { status: 1, stdout: '' }
+      return { status: 0, stdout: added ? '- id: first\n' : '' }
+    },
+  })
+  assert.equal(result.results[0].ok, true, '重试拿到基线后应判为通过，而不是「无法判定」')
+  assert.match(result.results[0].detail, /新增 first/)
 })

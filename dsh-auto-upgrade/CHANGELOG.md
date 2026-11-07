@@ -3,6 +3,15 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.7] — 2026-11-07
+
+### 修复
+
+- **试装时列表第一个插件必然判不出来**（#373）。真机首次完整跑：10 个插件里 9 个判对，唯一失败的
+  `@mhfire/dsh-im-bridge` 恰好是第一个，报「基线 `--dump-config` 不可用」。
+  根因是一次性 profile 这时还没建好，`--dump-config` 直接非 0；从第二个起就正常。
+  改成**基线失败重试一次**，仍失败才不下结论（fail-closed 语义不变）。
+
 ## [0.9.6] — 2026-11-07
 
 ### 安全
