@@ -215,3 +215,17 @@ test('#359 缓存键解析：过期的结论要标 stale，空缓存返回空数
   assert.deepEqual(probeCacheEntries({}, now), [])
   assert.deepEqual(probeCacheEntries(undefined, now), [])
 })
+
+test('#359 同一插件的多个键只留最新那条（插件更新后旧键不会被删）', () => {
+  const now = 1_000_000
+  const cache = {
+    [`${PROBE_CACHE_SCHEMA}|0.2.2-rc.1|p|100`]: { at: now - 5000, ok: false, detail: '旧 mtime 的结论' },
+    [`${PROBE_CACHE_SCHEMA}|0.2.2-rc.1|p|200`]: { at: now - 1000, ok: true, detail: '新 mtime 的结论' },
+    [`${PROBE_CACHE_SCHEMA}|0.2.2-rc.1|q|100`]: { at: now - 1000, ok: true },
+  }
+  const entries = probeCacheEntries(cache, now)
+  assert.equal(entries.length, 2, 'p 只留一条、q 一条')
+  const p = entries.find((entry) => entry.name === 'p')
+  assert.equal(p.ok, true, '要留 mtime 更大的那条')
+  assert.equal(p.detail, '新 mtime 的结论')
+})

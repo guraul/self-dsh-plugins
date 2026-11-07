@@ -149,22 +149,28 @@ export function probeKey(options) {
  * @returns {{version: string, name: string, ok: boolean, detail?: string, at?: number, stale: boolean}[]} 供 UI 的条目。
  */
 export function probeCacheEntries(cache, now, schema = PROBE_CACHE_SCHEMA) {
-  const entries = []
+  /** @type {Map<string, {version: string, name: string, mtime: number, entry: object}>} */
+  const byName = new Map()
   for (const [key, value] of Object.entries(cache ?? {})) {
     const parts = String(key).split('|')
     if (parts.length !== 4) continue
-    const [keySchema, version, name] = parts
+    const [keySchema, version, name, mtimeText] = parts
     if (keySchema !== String(schema)) continue
-    entries.push({
-      version,
-      name,
-      ok: value?.ok === true,
-      ...(value?.detail === undefined ? {} : { detail: value.detail }),
-      ...(value?.at === undefined ? {} : { at: value.at }),
-      stale: !cacheHit(value, now),
-    })
+    const mtime = Number(mtimeText)
+    // 键里带 mtime：插件一更新就会多出一条同名的键，旧键又不会被删。
+    // 同名只留 mtime 最大的那条，否则界面会重复展示（正是 #359 的「10 条变 20 条」）。
+    const previous = byName.get(name)
+    if (previous !== undefined && previous.mtime >= (Number.isFinite(mtime) ? mtime : 0)) continue
+    byName.set(name, { version, name, mtime: Number.isFinite(mtime) ? mtime : 0, entry: value })
   }
-  return entries
+  return [...byName.values()].map(({ version, name, entry }) => ({
+    version,
+    name,
+    ok: entry?.ok === true,
+    ...(entry?.detail === undefined ? {} : { detail: entry.detail }),
+    ...(entry?.at === undefined ? {} : { at: entry.at }),
+    stale: !cacheHit(entry, now),
+  }))
 }
 
 /**
