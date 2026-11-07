@@ -69,7 +69,6 @@ import {
 import {
   parseSessionCommand,
   sessionKeyForPinnedSession,
-  shortSessionId,
   type SessionCommand,
 } from './session-router.ts'
 import {
@@ -903,6 +902,8 @@ export function apply(ctx: Context, config: Config): void {
   const windowWorkspaces = new Map<string, WorkspaceBinding>()
   /** 每个企微窗口 `/s` 钉住的会话，重启后从磁盘恢复。 */
   const windowSessions = new Map<string, StoredSessionPin>()
+  /** 每个企微窗口上一次 `/s` 列表的完整会话 id 顺序，`/s <序号>` 按它取值（仅内存）。 */
+  const lastSessionLists = new Map<string, string[]>()
   /** 配置默认工作区在 registry 中的记录；初始化期间解析。 */
   let defaultBinding: WorkspaceBinding | undefined
   /** 兜底绑定的重试时刻：registry 曾失败时按节流继续升级。 */
@@ -2175,7 +2176,7 @@ export function apply(ctx: Context, config: Config): void {
       return (ctx.get('sessions') as SessionStore | undefined)?.list() ?? []
     }
 
-    /** `/s` 列表：序号、当前标记、短 id、标题与 cwd。 */
+    /** `/s` 列表：序号、当前标记、标题与 cwd，第二行给完整 id；渲染时记住本次顺序供 `/s <序号>` 绑定。 */
     function sessionListText(windowKey: string): string {
       const active = activeSessions()
       if (active.length === 0) {
@@ -2183,20 +2184,73 @@ export function apply(ctx: Context, config: Config): void {
       }
       const titles = ctx.get('sessionTitle') as SessionTitleService | undefined
       const pinned = activePinFor(windowKey)?.sessionId
-      const footer = '绑定：/s <会话id>　解绑：/s reset　帮助：/s help'
+      const footer = '绑定：/s <序号> 或 /s <会话id>　解绑：/s reset　帮助：/s help'
       const lines = [`📋 活跃会话（共 ${String(active.length)} 个）`]
+      const orderedIds: string[] = []
       for (let index = 0; index < active.length; index += 1) {
         const session = active[index]
         if (session === undefined) continue
         const marker = session.id === pinned ? '[← 当前] ' : ''
         const title = titles?.get(session)?.title || '(无标题)'
         const cwd = session.header?.cwd ?? '(未知目录)'
-        lines.push(`${String(index + 1)}. ${marker}${shortSessionId(session.id)} · ${title} · ${cwd}`)
+        orderedIds.push(session.id)
+        lines.push(`${String(index + 1)}. ${marker}${title} · ${cwd}`)
+        lines.push(`   id: ${session.id}`)
       }
+      // 序号绑定按「本次渲染的顺序」取值，与列表逐行对齐。
+      lastSessionLists.set(windowKey, orderedIds)
       const body = lines.join('\n')
       // 与 `/ws` 列表同款：先截断正文再补页脚，别让最有用的指引被切掉。
       const budget = 1600 - Buffer.byteLength(`${footer}\n`, 'utf8')
       return `${truncate(body, budget)}\n${footer}`
+    }
+
+    /**
+     * 把本窗口绑定到指定会话：先拒归档，再拒子代理，两边都查不到才算「会话不存在」。
+     * `/s <会话id>` 与 `/s <序号>` 两条路径共用这一段。
+     */
+    async function bindWindowToSession(
+      frame: WecomFrame,
+      ref: WecomSessionRef,
+      sessionId: string,
+    ): Promise<void> {
+      if (archivedSessions().has(sessionId)) {
+        await replyCommand(frame, `该会话已归档，无法绑定：${sessionId}`)
+        return
+      }
+      const titles = ctx.get('sessionTitle') as SessionTitleService | undefined
+      const live = activeSessions().find((session) => session.id === sessionId)
+      let title: string
+      let path: string
+      if (live !== undefined) {
+        if (live.header?.origin === 'subagent' || (live.header?.delegationDepth ?? 0) > 0) {
+          await replyCommand(frame, `该会话是子代理会话，无法绑定：${sessionId}`)
+          return
+        }
+        title = titles?.get(live)?.title || '(无标题)'
+        // header 几乎总有 cwd；缺失时先记窗口当前工作区，避免存空串。
+        path = live.header?.cwd ?? activeBindingFor(ref.key).path
+      } else {
+        const persistence = ctx.get('sessionPersistence') as SessionPersistence | undefined
+        const headers = persistence === undefined ? [] : await persistence.list()
+        const header = headers.find((entry) => entry.id === sessionId)
+        if (header === undefined) {
+          await replyCommand(frame, `会话不存在：${sessionId}`)
+          return
+        }
+        if (header.origin === 'subagent' || (header.delegationDepth ?? 0) > 0) {
+          await replyCommand(frame, `该会话是子代理会话，无法绑定：${sessionId}`)
+          return
+        }
+        title = header.title || '(无标题)'
+        path = header.cwd ?? activeBindingFor(ref.key).path
+      }
+      windowSessions.set(ref.key, { sessionId, title, path })
+      saveWorkspaceBindings()
+      await replyCommand(
+        frame,
+        `✅ 已把本窗口绑定到会话「${title}」\n会话：${sessionId}\n路径：${path}\n下一条消息将在该会话执行`,
+      )
     }
 
     /**
@@ -2235,45 +2289,21 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
 
-      // bind：先拒归档，再拒子代理，两边都查不到才算「会话不存在」。
-      const sessionId = command.sessionId
-      if (archivedSessions().has(sessionId)) {
-        await replyCommand(frame, `该会话已归档，无法绑定：${sessionId}`)
+      if (command.kind === 'bindIndex') {
+        const list = lastSessionLists.get(ref.key)
+        if (list === undefined) {
+          await replyCommand(frame, '先发 /s 看列表，再用 /s <序号> 绑定')
+          return
+        }
+        if (command.index > list.length) {
+          await replyCommand(frame, `当前列表只有 ${String(list.length)} 条，先发 /s 重新看`)
+          return
+        }
+        await bindWindowToSession(frame, ref, list[command.index - 1])
         return
       }
-      const titles = ctx.get('sessionTitle') as SessionTitleService | undefined
-      const live = activeSessions().find((session) => session.id === sessionId)
-      let title: string
-      let path: string
-      if (live !== undefined) {
-        if (live.header?.origin === 'subagent' || (live.header?.delegationDepth ?? 0) > 0) {
-          await replyCommand(frame, `该会话是子代理会话，无法绑定：${sessionId}`)
-          return
-        }
-        title = titles?.get(live)?.title || '(无标题)'
-        // header 几乎总有 cwd；缺失时先记窗口当前工作区，避免存空串。
-        path = live.header?.cwd ?? activeBindingFor(ref.key).path
-      } else {
-        const persistence = ctx.get('sessionPersistence') as SessionPersistence | undefined
-        const headers = persistence === undefined ? [] : await persistence.list()
-        const header = headers.find((entry) => entry.id === sessionId)
-        if (header === undefined) {
-          await replyCommand(frame, `会话不存在：${sessionId}`)
-          return
-        }
-        if (header.origin === 'subagent' || (header.delegationDepth ?? 0) > 0) {
-          await replyCommand(frame, `该会话是子代理会话，无法绑定：${sessionId}`)
-          return
-        }
-        title = header.title || '(无标题)'
-        path = header.cwd ?? activeBindingFor(ref.key).path
-      }
-      windowSessions.set(ref.key, { sessionId, title, path })
-      saveWorkspaceBindings()
-      await replyCommand(
-        frame,
-        `✅ 已把本窗口绑定到会话「${title}」\n会话：${sessionId}\n路径：${path}\n下一条消息将在该会话执行`,
-      )
+
+      await bindWindowToSession(frame, ref, command.sessionId)
     }
 
     const ws = new AiBot.WSClient({ botId, secret })

@@ -14,6 +14,8 @@ export type SessionCommand =
   | { kind: 'help' }
   /** `/s reset`, `/s default` — back to the default session. */
   | { kind: 'reset' }
+  /** `/s <序号>` — bind by the 1-based index shown in this window's last `/s` listing. */
+  | { kind: 'bindIndex'; index: number }
   /** `/s <sessionId>` — pin this window to one DSH session. */
   | { kind: 'bind'; sessionId: string }
 
@@ -32,6 +34,18 @@ const COMMAND_PATTERN = /^\/(s|session|会话)(?:\s+([\s\S]*))?$/i
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
 
 /**
+ * A list index is pure digits, 1–3 wide (`/s 1` … `/s 999`); digits glued to
+ * anything else (`1a`) are not one.
+ */
+const BIND_INDEX_PATTERN = /^[0-9]{1,3}$/
+
+/**
+ * Digit-led arguments are index attempts only — real session ids start with a
+ * letter — so anything digit-led that is not a valid index is plain chat.
+ */
+const DIGIT_LED_PATTERN = /^[0-9]/
+
+/**
  * Parse one inbound text message as a session command.
  * @param text - trimmed message text after the bot mention is stripped.
  * @returns the parsed command, or `undefined` when the text is ordinary chat.
@@ -45,6 +59,14 @@ export function parseSessionCommand(text: string): SessionCommand | undefined {
   if (lower === 'list') return { kind: 'list' }
   if (lower === 'help' || lower === '?' || args === '帮助') return { kind: 'help' }
   if (lower === 'reset' || lower === 'default') return { kind: 'reset' }
+  // A digit-led argument can only be an index: bind it when it is a valid
+  // 1–3 digit number ≥ 1, and treat `0` / `00` / `1a` / `1234` as plain chat.
+  if (DIGIT_LED_PATTERN.test(args)) {
+    if (!BIND_INDEX_PATTERN.test(args)) return undefined
+    const index = Number.parseInt(args, 10)
+    if (index < 1) return undefined
+    return { kind: 'bindIndex', index }
+  }
   if (!SESSION_ID_PATTERN.test(args)) return undefined
   return { kind: 'bind', sessionId: args }
 }

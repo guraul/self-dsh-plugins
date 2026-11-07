@@ -4,7 +4,7 @@
 > 提炼（2026-10-17，仓库统一治理 issue #1）。使用者文档仍以该 README 为准。
 
 - 目录：`dsh-im-bridge-workspaces/`　包名：**`@mhfire/dsh-im-bridge`**（目录名 ≠ 包名）
-- 来源：**fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`，本地 fork 版本 `0.5.0-ws.4`；
+- 来源：**fork** 自 npm 包 `@mhfire/dsh-im-bridge@0.4.4`，本地 fork 版本 `0.5.0-ws.5`；
   上游原版说明见 `README.upstream.md`。
 - 改动范围：只加**多工作区列表与 `/ws` 切换**、**`/s` 会话切换**；其余行为（按企微窗口建 Agent、单聊一人一条、
   群聊共用一条、Settings 配置卡片、wecom-cli 办公层）与上游一致。

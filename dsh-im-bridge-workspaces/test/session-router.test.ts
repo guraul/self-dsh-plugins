@@ -30,6 +30,19 @@ describe('parseSessionCommand', () => {
     }
   })
 
+  it('binds a 1-based index from the last `/s` listing', () => {
+    assert.deepEqual(parseSessionCommand('/s 1'), { kind: 'bindIndex', index: 1 })
+    assert.deepEqual(parseSessionCommand('/s 12'), { kind: 'bindIndex', index: 12 })
+    assert.deepEqual(parseSessionCommand('/s 007'), { kind: 'bindIndex', index: 7 })
+    assert.deepEqual(parseSessionCommand('/session 3'), { kind: 'bindIndex', index: 3 })
+  })
+
+  it('treats an unusable digit-led argument as plain chat', () => {
+    for (const text of ['/s 0', '/s 00', '/s 1a', '/s 1234']) {
+      assert.equal(parseSessionCommand(text), undefined, text)
+    }
+  })
+
   it('binds a well-formed session id', () => {
     assert.deepEqual(parseSessionCommand('/s session-abc123'), {
       kind: 'bind',
