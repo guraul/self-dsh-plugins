@@ -24,6 +24,7 @@ import { runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
+import { tokenOf } from './host/token-url.js'
 import { refreshUrlFile, repoRootFrom } from './host/url-file.mjs'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
@@ -129,6 +130,14 @@ export function apply(ctx, config = {}) {
     ? profileContext.home
     : join(process.env.HOME ?? '', '.dsh')
   const stateDir = typeof config.stateDir === 'string' && config.stateDir !== '' ? config.stateDir : resolveStateDir()
+  // `url.txt` 是**配置文件**：它记着当前进程的启动地址（含令牌）。插件每次启动会刷新它（#365）。
+  // 默认从插件自身位置推仓库根，测试/特殊部署可用 `config.urlFile` 覆盖。
+  const urlFile = typeof config.urlFile === 'string' && config.urlFile !== ''
+    ? config.urlFile
+    : (() => {
+      const root = repoRootFrom(import.meta.url)
+      return root === undefined ? '' : join(root, '.dsh-web', 'url.txt')
+    })()
   const registry = typeof config.registry === 'string' && config.registry !== '' ? config.registry : DEFAULT_REGISTRY
   /** GitHub API 基址；只读、只为取 release notes，单测会指到假服务器。 */
   const githubApiBase = typeof config.githubApiBase === 'string' && config.githubApiBase !== ''
@@ -327,8 +336,48 @@ export function apply(ctx, config = {}) {
      * @param {Record<string, Function>} handlers 方法表。
      * @returns {void}
      */
+    /**
+     * 写操作要带启动令牌（issue #363）。
+     *
+     * 路由已有 loopback 围栏（挡跨站浏览器），但**本机任意进程**仍能直接 POST——
+     * `refill/pr` 会真的推分支、开 PR。令牌取自 `url.txt`（配置文件，插件每次启动刷新它）。
+     * 读不到令牌时**拒绝写操作**（fail-closed），读接口不受影响。
+     * @param {import('node:http').IncomingMessage} req 请求。
+     * @returns {Promise<boolean>} 令牌正确返回 true。
+     */
+    const tokenValid = async (req) => {
+      if (urlFile === '') return false
+      let current
+      try {
+        current = tokenOf(await readFile(urlFile, 'utf8'))
+      } catch {
+        return false
+      }
+      if (current === undefined) return false
+      const header = req.headers['x-dsh-token']
+      const fromHeader = Array.isArray(header) ? header[0] : header
+      if (typeof fromHeader === 'string' && fromHeader === current) return true
+      return new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('token') === current
+    }
+
+    /** 把写操作包上令牌校验；读操作原样透传。 */
+    const guardWrites = (handlers) => {
+      const wrapped = {}
+      for (const [method, handler] of Object.entries(handlers)) {
+        wrapped[method] = method === 'POST'
+          ? async (req, res) => {
+            if (!(await tokenValid(req))) {
+              throw new RequestError(401, CODE.UNAUTHORIZED, '缺少或无效的启动令牌（x-dsh-token）')
+            }
+            return handler(req, res)
+          }
+          : handler
+      }
+      return wrapped
+    }
+
     const route = (path, handlers) => {
-      disposers.push(webServer.register({ kind: 'exact', path, handler: createRoute(handlers, isLoopbackRequest) }))
+      disposers.push(webServer.register({ kind: 'exact', path, handler: createRoute(guardWrites(handlers), isLoopbackRequest) }))
     }
 
     /**

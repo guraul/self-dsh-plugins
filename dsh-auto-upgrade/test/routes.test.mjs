@@ -12,6 +12,9 @@ import { issueTitle } from '../lib/host/report-issue.js'
 import { localDate } from '../lib/host/state.js'
 import { apply } from '../lib/index.js'
 
+/** 写接口要带启动令牌（issue #363）。 */
+const TOKEN = { 'x-dsh-token': 'TEST_TOKEN' }
+
 /**
  * 找到本机正在运行的 dsh 安装（测试用它当 installAnchor）；找不到就跳过。
  * @returns {string|undefined} dsh 的 package.json 绝对路径。
@@ -143,6 +146,7 @@ async function startHost(options) {
     registry: options.registry,
     githubApiBase: options.githubApiBase,
     stateDir: options.stateDir,
+    urlFile: options.stateDir === undefined ? undefined : join(options.stateDir, 'url.txt'),
     exit: (code) => exits.push(code),
     ...(options.runGh === undefined ? {} : { runGh: options.runGh }),
     scheduleHelper: async ({ stateDir, payload }) => {
@@ -185,6 +189,12 @@ async function makeEnvironment(options = {}) {
   const home = join(root, '.dsh')
   const stateDir = join(root, 'state')
   await mkdir(home, { recursive: true })
+  // 写接口校验令牌（#363）：夹具里给一份固定的 url.txt，并让插件读它。
+  await mkdir(stateDir, { recursive: true })
+  // `options.omitUrlFile` 用于验证 fail-closed：没有配置文件时写操作必须被拒。
+  if (options.omitUrlFile !== true) {
+    await writeFile(join(stateDir, 'url.txt'), 'http://127.0.0.1:1/?token=TEST_TOKEN\n')
+  }
   const profileDir = await makeProfile({ plugins: options.plugins ?? [] })
   const registry = await makeRegistry({ latest: '9.9.9', next: '9.9.9' })
   const github = await makeGithub({
@@ -298,14 +308,14 @@ test('POST /check/auto 判定有更新，且当天第二次走缓存', async (t)
   const env = await makeEnvironment()
   if (env.skip !== undefined) return t.skip(env.skip)
   try {
-    const first = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    const first = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })).json()
     assert.equal(first.decision, 'update-available')
     assert.equal(first.target, '9.9.9')
     assert.equal(first.cached, false)
-    const second = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    const second = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })).json()
     assert.equal(second.cached, true)
     const forced = await (await fetch(`${env.host.base}${API.checkAuto}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ force: true }),
     })).json()
     assert.equal(forced.cached, false)
@@ -339,7 +349,7 @@ test('过期缓存：installed / channel 变了就标 stale，/check/auto 必须
     assert.equal(status.dsh.installed, installed, '/status 的已装版本仍是实时值')
     assert.equal(status.lastCheck.installed, '0.2.1-rc.5', '缓存里的 installed 如实保留（用来解释「上次检查时是 X」）')
 
-    const recomputed = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    const recomputed = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })).json()
     assert.equal(recomputed.cached, false, '当天幂等不能把过期结论锁死一天，必须重算')
     assert.equal(recomputed.stale, false, '刚算出来的结论自己不过期')
     assert.equal(recomputed.installed, installed, '重算用的是实时已装版本')
@@ -352,7 +362,7 @@ test('过期缓存：installed / channel 变了就标 stale，/check/auto 必须
     assert.equal(channelStatus.lastCheck.stale, true, '换渠道后缓存也必须失效')
     assert.equal(channelStatus.lastCheck.staleReason, 'channel-changed')
 
-    const channelRecomputed = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    const channelRecomputed = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })).json()
     assert.equal(channelRecomputed.cached, false, '换渠道后必须按新渠道重算')
     assert.equal(channelRecomputed.channel, 'next')
     assert.equal(channelRecomputed.target, '9.9.9', '新渠道的 dist-tag 就是新目标')
@@ -363,11 +373,11 @@ test('过期缓存：installed / channel 变了就标 stale，/check/auto 必须
     assert.equal(bothStatus.lastCheck.staleReason, 'installed-changed', '两项都变时优先 installed-changed')
 
     // ④ 前提没变：不 stale，当天第二次仍然走缓存（原本的幂等没被破坏）。
-    const fresh = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    const fresh = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })).json()
     const consistent = await (await fetch(`${env.host.base}${API.status}`)).json()
     assert.equal(consistent.lastCheck.stale, false)
     assert.equal(consistent.lastCheck.staleReason, null)
-    const cached = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    const cached = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })).json()
     assert.equal(cached.cached, true, '前提仍成立时不许无脑重算')
     assert.equal(cached.checkedAt, fresh.checkedAt, '缓存回放的必须是同一条结论')
   } finally {
@@ -392,11 +402,11 @@ test('不兼容插件：/plugins 报不兼容，检测降级为风险，/update 
     assert.equal(inventory.incompatible[0].name, 'fake-plugin')
     assert.equal(inventory.plugins[0].exempted, false)
 
-    const check = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    const check = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })).json()
     assert.equal(check.decision, 'update-with-plugin-risk')
 
     for (const body of [{ version: '9.9.9' }, { version: '9.9.9', acceptPluginRisk: true }, { version: '9.9.9', force: true }]) {
-      const response = await fetch(`${env.host.base}${API.update}`, { method: 'POST', body: JSON.stringify(body) })
+      const response = await fetch(`${env.host.base}${API.update}`, { method: 'POST', headers: TOKEN, body: JSON.stringify(body) })
       assert.equal(response.status, 409)
       const payload = await response.json()
       assert.equal(payload.code, 'E_PLUGIN_INCOMPATIBLE')
@@ -418,13 +428,13 @@ test('会话门禁：有会话在跑先 409（可强制），强制后交接给 
     assert.equal(status.sessions.available, true)
     assert.equal(status.sessions.sessions.length, 1)
 
-    const blocked = await fetch(`${env.host.base}${API.update}`, { method: 'POST', body: JSON.stringify({ version: '9.9.9' }) })
+    const blocked = await fetch(`${env.host.base}${API.update}`, { method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9' }) })
     assert.equal(blocked.status, 409)
     const blockedBody = await blocked.json()
     assert.equal(blockedBody.code, 'E_SESSIONS_RUNNING')
     assert.equal(blockedBody.detail.bypassable, true)
 
-    const forced = await fetch(`${env.host.base}${API.update}`, { method: 'POST', body: JSON.stringify({ version: '9.9.9', force: true }) })
+    const forced = await fetch(`${env.host.base}${API.update}`, { method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9', force: true }) })
     assert.equal(forced.status, 202)
     const accepted = await forced.json()
     assert.equal(accepted.handoff, true)
@@ -454,8 +464,8 @@ test('回滚：没有目标时 400，给出目标后交接给 helper', async (t)
   const env = await makeEnvironment({ agents: { list: () => [] } })
   if (env.skip !== undefined) return t.skip(env.skip)
   try {
-    assert.equal((await fetch(`${env.host.base}${API.rollback}`, { method: 'POST', body: '{}' })).status, 400)
-    const response = await fetch(`${env.host.base}${API.rollback}`, { method: 'POST', body: JSON.stringify({ version: '0.1.5-rc.3' }) })
+    assert.equal((await fetch(`${env.host.base}${API.rollback}`, { method: 'POST', headers: TOKEN, body: '{}' })).status, 400)
+    const response = await fetch(`${env.host.base}${API.rollback}`, { method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '0.1.5-rc.3' }) })
     assert.equal(response.status, 202)
     await waitFor(() => env.host.scheduled.length === 1, 'the rollback helper to be scheduled')
     assert.equal(env.host.scheduled[0].mode, 'rollback')
@@ -469,7 +479,7 @@ test('只重启：不安装任何东西，诊断接口回显 payload', async (t)
   const env = await makeEnvironment({ agents: { list: () => [] } })
   if (env.skip !== undefined) return t.skip(env.skip)
   try {
-    const response = await fetch(`${env.host.base}${API.restart}`, { method: 'POST', body: '{}' })
+    const response = await fetch(`${env.host.base}${API.restart}`, { method: 'POST', headers: TOKEN, body: '{}' })
     assert.equal(response.status, 202)
     await waitFor(() => env.host.scheduled.length === 1, 'the restart helper to be scheduled')
     assert.equal(env.host.scheduled[0].mode, 'restart')
@@ -490,6 +500,9 @@ test('profileContext 缺失时优雅降级：状态 200、能力关闭、变更�
   if (anchor === undefined) return t.skip('no global @deepseek-ai/dsh installation found')
   const root = await mkdtemp(join(tmpdir(), 'dsh-au-degraded-'))
   const stateDir = join(root, 'state')
+  // 写接口要令牌（#363）：这份自建夹具也得有 url.txt，否则全是 401 而不是它要测的 500。
+  await mkdir(stateDir, { recursive: true })
+  await writeFile(join(stateDir, 'url.txt'), 'http://127.0.0.1:1/?token=TEST_TOKEN\n')
   const routes = []
   const ctx = {
     profileContext: {},
@@ -497,7 +510,7 @@ test('profileContext 缺失时优雅降级：状态 200、能力关闭、变更�
     inject: (_deps, callback) => callback({ webServer: { register: (route) => { routes.push(route); return () => {} }, port: 3080 } }),
     effect: (fn) => fn(),
   }
-  apply(ctx, { registry: 'http://127.0.0.1:1', stateDir, exit: () => {}, scheduleHelper: async () => ({}) })
+  apply(ctx, { registry: 'http://127.0.0.1:1', stateDir, urlFile: join(stateDir, 'url.txt'), exit: () => {}, scheduleHelper: async () => ({}) })
   const server = createServer((req, res) => {
     const route = routes.find((candidate) => candidate.path === new URL(req.url, 'http://127.0.0.1').pathname)
     if (route === undefined) {
@@ -521,7 +534,7 @@ test('profileContext 缺失时优雅降级：状态 200、能力关闭、变更�
     assert.equal(facts.status, 500)
     assert.equal((await facts.json()).code, 'E_PRECONDITION')
 
-    const update = await fetch(`${base}${API.update}`, { method: 'POST', body: JSON.stringify({ version: '9.9.9' }) })
+    const update = await fetch(`${base}${API.update}`, { method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9' }) })
     assert.equal(update.status, 500)
   } finally {
     await new Promise((resolve) => server.close(resolve))
@@ -533,21 +546,21 @@ test('参数校验：版本、渠道、方法', async (t) => {
   if (env.skip !== undefined) return t.skip(env.skip)
   try {
     const current = JSON.parse(await readFile(env.anchor, 'utf8')).version
-    assert.equal((await fetch(`${env.host.base}${API.update}`, { method: 'POST', body: '{}' })).status, 400)
-    assert.equal((await fetch(`${env.host.base}${API.update}`, { method: 'POST', body: JSON.stringify({ version: current }) })).status, 400)
-    assert.equal((await fetch(`${env.host.base}${API.update}`, { method: 'POST', body: JSON.stringify({ version: '^9.9.9' }) })).status, 400)
+    assert.equal((await fetch(`${env.host.base}${API.update}`, { method: 'POST', headers: TOKEN, body: '{}' })).status, 400)
+    assert.equal((await fetch(`${env.host.base}${API.update}`, { method: 'POST', headers: TOKEN, body: JSON.stringify({ version: current }) })).status, 400)
+    assert.equal((await fetch(`${env.host.base}${API.update}`, { method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '^9.9.9' }) })).status, 400)
 
-    const bad = await fetch(`${env.host.base}${API.policy}`, { method: 'POST', body: JSON.stringify({ channel: 'nightly' }) })
+    const bad = await fetch(`${env.host.base}${API.policy}`, { method: 'POST', headers: TOKEN, body: JSON.stringify({ channel: 'nightly' }) })
     assert.equal(bad.status, 400)
-    const auto = await fetch(`${env.host.base}${API.policy}`, { method: 'POST', body: JSON.stringify({ mode: 'auto' }) })
+    const auto = await fetch(`${env.host.base}${API.policy}`, { method: 'POST', headers: TOKEN, body: JSON.stringify({ mode: 'auto' }) })
     assert.equal(auto.status, 400)
 
-    const good = await (await fetch(`${env.host.base}${API.policy}`, { method: 'POST', body: JSON.stringify({ channel: 'next' }) })).json()
+    const good = await (await fetch(`${env.host.base}${API.policy}`, { method: 'POST', headers: TOKEN, body: JSON.stringify({ channel: 'next' }) })).json()
     assert.equal(good.policy.channel, 'next')
     const persisted = await (await fetch(`${env.host.base}${API.policy}`)).json()
     assert.equal(persisted.policy.channel, 'next')
 
-    assert.equal((await fetch(`${env.host.base}${API.status}`, { method: 'POST', body: '{}' })).status, 405)
+    assert.equal((await fetch(`${env.host.base}${API.status}`, { method: 'POST', headers: TOKEN, body: '{}' })).status, 405)
     assert.equal((await fetch(`${env.host.base}/api/dsh-auto-upgrade/nope`)).status, 404)
   } finally {
     await env.close()
@@ -585,7 +598,7 @@ test('POST /report-issue：宿主自己生成标题/正文并调 gh 创建，返
   if (env.skip !== undefined) return t.skip(env.skip)
   try {
     const response = await fetch(`${env.host.base}${API.reportIssue}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ target: '9.9.9' }),
     })
     assert.equal(response.status, 200)
@@ -627,7 +640,7 @@ test('POST /report-issue：同名 open issue 已存在时不重复创建', async
   if (env.skip !== undefined) return t.skip(env.skip)
   try {
     const body = await (await fetch(`${env.host.base}${API.reportIssue}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ target: '9.9.9' }),
     })).json()
     assert.equal(body.ok, true)
@@ -647,7 +660,7 @@ test('POST /report-issue：gh 不存在/未登录时 500 并给出原因', async
   if (listFailure.skip !== undefined) return t.skip(listFailure.skip)
   try {
     const response = await fetch(`${listFailure.host.base}${API.reportIssue}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ target: '9.9.9' }),
     })
     assert.equal(response.status, 500)
@@ -666,7 +679,7 @@ test('POST /report-issue：gh 不存在/未登录时 500 并给出原因', async
   if (createFailure.skip !== undefined) return t.skip(createFailure.skip)
   try {
     const response = await fetch(`${createFailure.host.base}${API.reportIssue}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ target: '9.9.9' }),
     })
     assert.equal(response.status, 500)
@@ -683,9 +696,9 @@ test('POST /report-issue：只接受精确 target，GET 不被允许，没有阻
   const env = await makeEnvironment({ plugins: [BLOCKING_PLUGIN], runGh: gh.runGh })
   if (env.skip !== undefined) return t.skip(env.skip)
   try {
-    assert.equal((await fetch(`${env.host.base}${API.reportIssue}`, { method: 'POST', body: '{}' })).status, 400)
+    assert.equal((await fetch(`${env.host.base}${API.reportIssue}`, { method: 'POST', headers: TOKEN, body: '{}' })).status, 400)
     assert.equal((await fetch(`${env.host.base}${API.reportIssue}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ target: '^9.9.9' }),
     })).status, 400)
     assert.equal((await fetch(`${env.host.base}${API.reportIssue}`)).status, 405)
@@ -698,7 +711,7 @@ test('POST /report-issue：只接受精确 target，GET 不被允许，没有阻
   if (clean.skip !== undefined) return t.skip(clean.skip)
   try {
     const response = await fetch(`${clean.host.base}${API.reportIssue}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ target: '9.9.9' }),
     })
     assert.equal(response.status, 400)
@@ -738,12 +751,12 @@ test('自述矩阵：门禁放行但 declared=incompatible 仍点名，升级不
     assert.deepEqual(inventory.flagged[0].sources, ['self-declared'], '能与门禁来源区分')
     assert.equal(inventory.flagged[0].source, 'self-declared')
 
-    const check = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })).json()
+    const check = await (await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })).json()
     assert.equal(check.decision, 'update-available', '自述矩阵不许把检测降级成 plugin-risk')
     assert.equal(check.flagged.length, 1, '检测结果里也要有这份点名')
 
     const reported = await fetch(`${env.host.base}${API.reportIssue}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ target: '9.9.9' }),
     })
     assert.equal(reported.status, 200)
@@ -757,7 +770,7 @@ test('自述矩阵：门禁放行但 declared=incompatible 仍点名，升级不
 
     // 关键边界：自述矩阵**不阻断升级**——门禁放行时 /update 必须照常交接。
     const update = await fetch(`${env.host.base}${API.update}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ version: '9.9.9' }),
     })
     assert.equal(update.status, 202, '自述矩阵不许阻断升级')
@@ -798,7 +811,7 @@ test('自述矩阵：只有 unverified 时不点名、不开 issue（/report-iss
 
     // 「我没测过」不是「已知不兼容」：没有可开的 issue。
     const response = await fetch(`${env.host.base}${API.reportIssue}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ target: '9.9.9' }),
     })
     assert.equal(response.status, 400, '只有 unverified 时必须拒绝开 issue')
@@ -826,7 +839,7 @@ test('自述矩阵：已知不兼容与 unverified 混在一起时，issue 只�
     assert.deepEqual(inventory.flagged.map((plugin) => plugin.name).sort(), ['declared-bad', 'never-verified'], '接口仍报告两份')
 
     const reported = await fetch(`${env.host.base}${API.reportIssue}`, {
-      method: 'POST',
+      method: 'POST', headers: TOKEN,
       body: JSON.stringify({ target: '9.9.9' }),
     })
     assert.equal(reported.status, 200, '有已知不兼容就必须能开 issue')
@@ -846,10 +859,10 @@ test('POST /probe：没有可试装项时早退，且不泄漏占位（否则后
   const env = await makeEnvironment()
   if (env.skip !== undefined) return t.skip(env.skip)
   try {
-    const first = await fetch(`${env.host.base}${API.probe}`, { method: 'POST', body: '{}' })
+    const first = await fetch(`${env.host.base}${API.probe}`, { method: 'POST', headers: TOKEN, body: '{}' })
     assert.equal(first.status, 200)
     assert.equal((await first.json()).skipped, true)
-    const again = await fetch(`${env.host.base}${API.probe}`, { method: 'POST', body: '{}' })
+    const again = await fetch(`${env.host.base}${API.probe}`, { method: 'POST', headers: TOKEN, body: '{}' })
     assert.equal(again.status, 200, '早退必须释放占位，否则这里变 409')
     const state = await (await fetch(`${env.host.base}${API.probe}`)).json()
     assert.equal(state.running, false, 'GET 不许永远 running')
@@ -862,10 +875,10 @@ test('POST /smoke：没有可冒烟插件时早退，且不泄漏占位', async 
   const env = await makeEnvironment()
   if (env.skip !== undefined) return t.skip(env.skip)
   try {
-    const first = await fetch(`${env.host.base}${API.smoke}`, { method: 'POST', body: '{}' })
+    const first = await fetch(`${env.host.base}${API.smoke}`, { method: 'POST', headers: TOKEN, body: '{}' })
     assert.equal(first.status, 200)
     assert.equal((await first.json()).skipped, true)
-    const again = await fetch(`${env.host.base}${API.smoke}`, { method: 'POST', body: '{}' })
+    const again = await fetch(`${env.host.base}${API.smoke}`, { method: 'POST', headers: TOKEN, body: '{}' })
     assert.equal(again.status, 200, '早退必须释放占位')
     assert.equal((await (await fetch(`${env.host.base}${API.smoke}`)).json()).running, false)
   } finally {
@@ -881,6 +894,39 @@ test('GET /refill：没有冒烟结果时明确说「先跑一次 /smoke」，�
     assert.equal(body.ok, true)
     assert.equal(body.skipped, true)
     assert.match(body.detail, /先跑一次/)
+  } finally {
+    await env.close()
+  }
+})
+
+test('#363 写接口要令牌：不带 / 带错都 401，GET 不受影响', async (t) => {
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const noToken = await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })
+    assert.equal(noToken.status, 401, '不带令牌的 POST 必须拒绝')
+    assert.equal((await noToken.json()).code, 'E_UNAUTHORIZED')
+
+    const wrong = await fetch(`${env.host.base}${API.checkAuto}`, {
+      method: 'POST', body: '{}', headers: { 'x-dsh-token': 'not-the-token' },
+    })
+    assert.equal(wrong.status, 401, '令牌不对也要拒绝')
+
+    const read = await fetch(`${env.host.base}${API.status}`)
+    assert.equal(read.status, 200, '读接口不需要令牌')
+  } finally {
+    await env.close()
+  }
+})
+
+test('#363 fail-closed：url.txt 不存在时写操作一律 401，读操作照常', async (t) => {
+  const env = await makeEnvironment({ omitUrlFile: true })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const write = await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })
+    assert.equal(write.status, 401, '拿不到令牌文件就必须拒绝写操作')
+    const read = await fetch(`${env.host.base}${API.status}`)
+    assert.equal(read.status, 200, '读接口不受影响')
   } finally {
     await env.close()
   }

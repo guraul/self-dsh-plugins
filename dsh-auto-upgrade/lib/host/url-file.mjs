@@ -8,6 +8,7 @@
  * 这里改成**插件加载时刷新**：插件每次宿主启动都会被加载，所以不管谁触发启动，文件都是新鲜的。
  * 不动 LaunchAgent 配置（那属于宿主级改动，且要 bootout + bootstrap 才生效）。
  */
+import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,10 +16,8 @@ import { fileURLToPath } from 'node:url'
 import { latestTokenUrl } from './token-url.js'
 
 /**
- * 从插件自己的位置推出仓库根。
- *
- * 插件是 `link:` 装进 profile 的，所以 `import.meta.url` 就落在仓库里
- * （`<repo>/dsh-auto-upgrade/lib/host/url-file.mjs`，往上**四层**是仓库根）。
+ * 从插件自己的位置推出仓库根：**往上找 `.git`**，不按固定层数剥
+ * （`lib/host/*.mjs` 要四层、`lib/index.js` 只要三层，写死层数必错——#369 review 的 blocker）。
  * 注意：这里**只推路径、不判断**是不是 link 安装——从 npm 装时推出来的目录没有 `.dsh-web/`，
  * 调用方读日志会失败并静默放弃（见 `refreshUrlFile` 的「读不到日志」分支）。
  * @param {string} moduleUrl 当前模块的 `import.meta.url`。
@@ -26,9 +25,16 @@ import { latestTokenUrl } from './token-url.js'
  */
 export function repoRootFrom(moduleUrl) {
   try {
-    // mjs → host → lib → 插件目录 → 仓库根：**四层**。
-    const here = fileURLToPath(moduleUrl)
-    return dirname(dirname(dirname(dirname(here))))
+    let dir = dirname(fileURLToPath(moduleUrl))
+    // 不能按固定层数剥：`lib/host/x.mjs` 要四层，`lib/index.js` 只要三层。
+    // 往上找**仓库标记**（`.git` 目录或 linked worktree 的 `.git` 文件）才靠谱。
+    for (let depth = 0; depth < 8; depth += 1) {
+      if (existsSync(join(dir, '.git'))) return dir
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+    return undefined
   } catch {
     return undefined
   }

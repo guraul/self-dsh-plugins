@@ -3,6 +3,21 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.6] — 2026-11-07
+
+### 安全
+
+- **写接口校验启动令牌**（#363）。原来所有 `POST /api/dsh-auto-upgrade/*`（含 `refill/pr`）都不校验：
+  路由有 loopback 围栏挡得住跨站浏览器，但**本机任意进程**能直接 POST，`refill/pr` 会真的推分支、开 PR。
+  - 令牌取自 **`url.txt`（配置文件）**——插件每次启动会刷新它（0.9.5），所以读它就是对的口径；
+  - 写操作要 `x-dsh-token` 头（或 `?token=`）；读接口不需要；
+  - 读不到令牌 → 拒绝写操作（fail-closed）；
+  - 客户端从 `location.search` 取令牌随请求带上，设置页行为不变。
+  - 已知窗口：重启后到 `url.txt` 刷新完成之间的几秒内，写操作可能 401（读不受影响）。判断为可接受。
+- **修 `repoRootFrom()` 的路径推导**（review 抓到的 blocker，**连累 0.9.5**）：它按 `lib/host/*.mjs` 剥四层，
+  但 `lib/index.js` 只该剥三层，结果推到**仓库的父目录**——0.9.5 的启动刷新其实一直没生效（读不到日志就静默返回），
+  本版的默认 `urlFile` 也会指错。改成**往上找 `.git`**，两个入口都验证过推出同一个根。
+
 ## [0.9.5] — 2026-11-07
 
 ### 修复

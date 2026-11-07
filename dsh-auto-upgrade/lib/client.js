@@ -347,12 +347,26 @@ window.__ModuleLoader__.load({
      * @param {{method?:string, body?:unknown}} [options] 选项。
      * @returns {Promise<any>} 解析后的结果。
      */
+    /** 启动令牌：写接口要校验它（issue #363）。页面地址上带着，重启会换。 */
+    function launchToken() {
+      try {
+        return new URLSearchParams(location.search).get('token') ?? ''
+      } catch {
+        return ''
+      }
+    }
+
     async function request(url, options = {}) {
       try {
+        const token = launchToken()
+        const headers = {
+          ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...(token === '' ? {} : { 'x-dsh-token': token }),
+        }
         const response = await fetch(url, {
           method: options.method ?? 'GET',
           cache: 'no-store',
-          headers: options.body === undefined ? undefined : { 'content-type': 'application/json' },
+          headers: Object.keys(headers).length === 0 ? undefined : headers,
           body: options.body === undefined ? undefined : JSON.stringify(options.body),
         })
         const payload = await response.json().catch(() => ({}))
