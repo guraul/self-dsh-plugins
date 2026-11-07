@@ -11,6 +11,8 @@
   `@mhfire/dsh-im-bridge` 恰好是第一个，报「基线 `--dump-config` 不可用」。
   根因是一次性 profile 这时还没建好，`--dump-config` 直接非 0；从第二个起就正常。
   改成**基线失败重试一次**，仍失败才不下结论（fail-closed 语义不变）。
+  `PROBE_CACHE_SCHEMA` 3 → 4：判定路径变了，否则事发机器上那条 `ok:false` 会在 24h TTL 内被原样回放，
+  修复表现为「不生效」（与 #346 同型）。
 
 ## [0.9.6] — 2026-11-07
 
