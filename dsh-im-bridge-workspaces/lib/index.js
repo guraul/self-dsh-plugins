@@ -751,6 +751,16 @@ const COMMAND_PATTERN = /^\/(s|session|会话)(?:\s+([\s\S]*))?$/i;
 */
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 /**
+* A list index is pure digits, 1–3 wide (`/s 1` … `/s 999`); digits glued to
+* anything else (`1a`) are not one.
+*/
+const BIND_INDEX_PATTERN = /^[0-9]{1,3}$/;
+/**
+* Digit-led arguments are index attempts only — real session ids start with a
+* letter — so anything digit-led that is not a valid index is plain chat.
+*/
+const DIGIT_LED_PATTERN = /^[0-9]/;
+/**
 * Parse one inbound text message as a session command.
 * @param text - trimmed message text after the bot mention is stripped.
 * @returns the parsed command, or `undefined` when the text is ordinary chat.
@@ -764,6 +774,15 @@ function parseSessionCommand(text) {
 	if (lower === "list") return { kind: "list" };
 	if (lower === "help" || lower === "?" || args === "帮助") return { kind: "help" };
 	if (lower === "reset" || lower === "default") return { kind: "reset" };
+	if (DIGIT_LED_PATTERN.test(args)) {
+		if (!BIND_INDEX_PATTERN.test(args)) return void 0;
+		const index = Number.parseInt(args, 10);
+		if (index < 1) return void 0;
+		return {
+			kind: "bindIndex",
+			index
+		};
+	}
 	if (!SESSION_ID_PATTERN.test(args)) return void 0;
 	return {
 		kind: "bind",
@@ -781,16 +800,6 @@ function parseSessionCommand(text) {
 */
 function sessionKeyForPinnedSession(windowKey, sessionId) {
 	return `${windowKey}#sid=${sessionId}`;
-}
-/**
-* Short form of a session id for list display: drops the `session-` prefix
-* and keeps the first 8 characters (shorter ids are shown as-is).
-* @param sessionId - full DSH session id.
-* @returns the display short id.
-*/
-function shortSessionId(sessionId) {
-	const bare = sessionId.startsWith("session-") ? sessionId.slice(8) : sessionId;
-	return bare.length > 8 ? bare.slice(0, 8) : bare;
 }
 // node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/esm/index.mjs
 var require$1 = createRequire$1("/");
@@ -9279,6 +9288,8 @@ function apply(ctx, config) {
 	const windowWorkspaces = /* @__PURE__ */ new Map();
 	/** 每个企微窗口 `/s` 钉住的会话，重启后从磁盘恢复。 */
 	const windowSessions = /* @__PURE__ */ new Map();
+	/** 每个企微窗口上一次 `/s` 列表的完整会话 id 顺序，`/s <序号>` 按它取值（仅内存）。 */
+	const lastSessionLists = /* @__PURE__ */ new Map();
 	/** 配置默认工作区在 registry 中的记录；初始化期间解析。 */
 	let defaultBinding;
 	/** 兜底绑定的重试时刻：registry 曾失败时按节流继续升级。 */
@@ -10317,6 +10328,7 @@ function apply(ctx, config) {
 			"📖 企微会话命令",
 			"/s（/session、/会话）— 列出活跃会话并标出当前绑定",
 			"/s <会话id> — 把本窗口绑定到指定会话",
+			"/s <序号> — 绑定上一次 /s 列表里的第 N 条",
 			"/s reset — 解除绑定，回到按窗口的默认会话",
 			"/s help — 显示本帮助",
 			"普通文本仍交给 Agent；以上命令不会发给模型。"
@@ -10325,55 +10337,50 @@ function apply(ctx, config) {
 		function activeSessions() {
 			return ctx.get("sessions")?.list() ?? [];
 		}
-		/** `/s` 列表：序号、当前标记、短 id、标题与 cwd。 */
+		/** `/s` 列表：序号、当前标记、标题与 cwd，第二行给完整 id；按条目截断，渲染时记住本次顺序供 `/s <序号>` 绑定。 */
 		function sessionListText(windowKey) {
 			const active = activeSessions();
 			if (active.length === 0) return "当前没有活跃会话，先发起一轮对话再用 /s 绑定。";
 			const titles = ctx.get("sessionTitle");
 			const pinned = activePinFor(windowKey)?.sessionId;
-			const footer = "绑定：/s <会话id>　解绑：/s reset　帮助：/s help";
+			const footer = "绑定：/s <序号> 或 /s <会话id>　解绑：/s reset　帮助：/s help";
+			const budget = 1600 - Buffer.byteLength(`${footer}\n`, "utf8");
+			const bytesOf = (text) => Buffer.byteLength(`${text}\n`, "utf8");
 			const lines = [`📋 活跃会话（共 ${String(active.length)} 个）`];
+			let used = bytesOf(lines[0]);
+			const orderedIds = [];
 			for (let index = 0; index < active.length; index += 1) {
 				const session = active[index];
 				if (session === void 0) continue;
 				const marker = session.id === pinned ? "[← 当前] " : "";
 				const title = titles?.get(session)?.title || "(无标题)";
 				const cwd = session.header?.cwd ?? "(未知目录)";
-				lines.push(`${String(index + 1)}. ${marker}${shortSessionId(session.id)} · ${title} · ${cwd}`);
+				const entry = `${String(orderedIds.length + 1)}. ${marker}${title} · ${cwd}\n   id: ${session.id}`;
+				const entryBytes = bytesOf(entry);
+				if (used + entryBytes > budget) break;
+				used += entryBytes;
+				lines.push(...entry.split("\n"));
+				orderedIds.push(session.id);
 			}
-			return `${truncate(lines.join("\n"), 1600 - Buffer.byteLength(`${footer}\n`, "utf8"))}\n${footer}`;
+			const hidden = active.length - orderedIds.length;
+			if (hidden > 0) {
+				const more = `…还有 ${String(hidden)} 条未显示（可用 /s <完整 id> 绑定）`;
+				while (orderedIds.length > 0 && used + bytesOf(more) > budget) {
+					lines.pop();
+					lines.pop();
+					orderedIds.pop();
+					used = bytesOf(lines.join("\n"));
+				}
+				lines.push(more);
+			}
+			lastSessionLists.set(windowKey, orderedIds);
+			return `${lines.join("\n")}\n${footer}`;
 		}
 		/**
-		* Handle one `/s …` command: every branch replies directly on the frame,
-		* so a command never reaches the model and never burns a turn.
-		* 权限与 `/ws` 一致：`allowFrom` 已在 `dispatchInbound` 拦过，这里列表人人
-		* 可看，其余命令要过 `workspaceAllowFrom`，改绑定另要 `workspaceSwitch=true`。
+		* 把本窗口绑定到指定会话：先拒归档，再拒子代理，两边都查不到才算「会话不存在」。
+		* `/s <会话id>` 与 `/s <序号>` 两条路径共用这一段。
 		*/
-		async function handleSessionCommand(frame, ref, command) {
-			console.log(`[im-bridge] 会话命令 key=${ref.key} kind=${command.kind}`);
-			if (command.kind === "list") {
-				await replyCommand(frame, sessionListText(ref.key));
-				return;
-			}
-			if (!canManageWorkspace(ref.sender)) {
-				await replyCommand(frame, "你没有切换会话的权限（workspaceAllowFrom 未包含你的 userid）");
-				return;
-			}
-			if (command.kind === "help") {
-				await replyCommand(frame, sessionHelpText);
-				return;
-			}
-			if (!cfg().workspaceSwitch) {
-				await replyCommand(frame, "会话切换已关闭（workspaceSwitch=false）");
-				return;
-			}
-			if (command.kind === "reset") {
-				windowSessions.delete(ref.key);
-				saveWorkspaceBindings();
-				await replyCommand(frame, "↩️ 已解除会话绑定，回到按窗口的默认会话");
-				return;
-			}
-			const sessionId = command.sessionId;
+		async function bindWindowToSession(frame, ref, sessionId) {
 			if (archivedSessions().has(sessionId)) {
 				await replyCommand(frame, `该会话已归档，无法绑定：${sessionId}`);
 				return;
@@ -10410,6 +10417,51 @@ function apply(ctx, config) {
 			});
 			saveWorkspaceBindings();
 			await replyCommand(frame, `✅ 已把本窗口绑定到会话「${title}」\n会话：${sessionId}\n路径：${path}\n下一条消息将在该会话执行`);
+		}
+		/**
+		* Handle one `/s …` command: every branch replies directly on the frame,
+		* so a command never reaches the model and never burns a turn.
+		* 权限与 `/ws` 一致：`allowFrom` 已在 `dispatchInbound` 拦过，这里列表人人
+		* 可看，其余命令要过 `workspaceAllowFrom`，改绑定另要 `workspaceSwitch=true`。
+		*/
+		async function handleSessionCommand(frame, ref, command) {
+			console.log(`[im-bridge] 会话命令 key=${ref.key} kind=${command.kind}`);
+			if (command.kind === "list") {
+				await replyCommand(frame, sessionListText(ref.key));
+				return;
+			}
+			if (!canManageWorkspace(ref.sender)) {
+				await replyCommand(frame, "你没有切换会话的权限（workspaceAllowFrom 未包含你的 userid）");
+				return;
+			}
+			if (command.kind === "help") {
+				await replyCommand(frame, sessionHelpText);
+				return;
+			}
+			if (!cfg().workspaceSwitch) {
+				await replyCommand(frame, "会话切换已关闭（workspaceSwitch=false）");
+				return;
+			}
+			if (command.kind === "reset") {
+				windowSessions.delete(ref.key);
+				saveWorkspaceBindings();
+				await replyCommand(frame, "↩️ 已解除会话绑定，回到按窗口的默认会话");
+				return;
+			}
+			if (command.kind === "bindIndex") {
+				const list = lastSessionLists.get(ref.key);
+				if (list === void 0) {
+					await replyCommand(frame, "先发 /s 看列表，再用 /s <序号> 绑定");
+					return;
+				}
+				if (command.index > list.length) {
+					await replyCommand(frame, `当前列表只有 ${String(list.length)} 条，先发 /s 重新看`);
+					return;
+				}
+				await bindWindowToSession(frame, ref, list[command.index - 1]);
+				return;
+			}
+			await bindWindowToSession(frame, ref, command.sessionId);
 		}
 		const ws = new AiBot.WSClient({
 			botId,

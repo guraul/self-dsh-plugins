@@ -5,11 +5,7 @@
 
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import {
-  parseSessionCommand,
-  sessionKeyForPinnedSession,
-  shortSessionId,
-} from '../src/session-router.ts'
+import { parseSessionCommand, sessionKeyForPinnedSession } from '../src/session-router.ts'
 
 describe('parseSessionCommand', () => {
   it('treats bare command heads and `list` as a list request', () => {
@@ -27,6 +23,19 @@ describe('parseSessionCommand', () => {
   it('parses reset aliases', () => {
     for (const text of ['/s reset', '/s default', '/s DEFAULT', '/session reset']) {
       assert.deepEqual(parseSessionCommand(text), { kind: 'reset' }, text)
+    }
+  })
+
+  it('binds a 1-based index from the last `/s` listing', () => {
+    assert.deepEqual(parseSessionCommand('/s 1'), { kind: 'bindIndex', index: 1 })
+    assert.deepEqual(parseSessionCommand('/s 12'), { kind: 'bindIndex', index: 12 })
+    assert.deepEqual(parseSessionCommand('/s 007'), { kind: 'bindIndex', index: 7 })
+    assert.deepEqual(parseSessionCommand('/session 3'), { kind: 'bindIndex', index: 3 })
+  })
+
+  it('treats an unusable digit-led argument as plain chat', () => {
+    for (const text of ['/s 0', '/s 00', '/s 1a', '/s 1234']) {
+      assert.equal(parseSessionCommand(text), undefined, text)
     }
   })
 
@@ -77,18 +86,5 @@ describe('sessionKeyForPinnedSession', () => {
     assert.notEqual(a, b)
     assert.notEqual(a, c)
     assert.notEqual(a, 'single:GuBin')
-  })
-})
-
-describe('shortSessionId', () => {
-  it('drops the session- prefix and keeps 8 characters', () => {
-    assert.equal(shortSessionId('session-abcdef123456'), 'abcdef12')
-    assert.equal(shortSessionId('session-abc'), 'abc')
-  })
-
-  it('keeps ids without the prefix and short ids as-is', () => {
-    assert.equal(shortSessionId('wecom-321a442c'), 'wecom-32')
-    assert.equal(shortSessionId('short'), 'short')
-    assert.equal(shortSessionId('12345678'), '12345678')
   })
 })
