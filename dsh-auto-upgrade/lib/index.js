@@ -24,6 +24,7 @@ import { runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
+import { refreshUrlFile, repoRootFrom } from './host/url-file.mjs'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
 import { DEFAULT_GITHUB_API, fetchReleaseNotes, repositorySlug } from './host/notes.js'
@@ -347,8 +348,8 @@ export function apply(ctx, config = {}) {
           scriptPath,
           '--state', stateDir,
           '--label', typeof process.env.XPC_SERVICE_NAME === 'string' ? process.env.XPC_SERVICE_NAME : '',
-          // 非 launchd 时的兜底：url.txt 就在实例日志目录旁边。
-          '--url-file', join(stateDir, 'url.txt'),
+          // 不再传 stateDir/url.txt：**没有任何代码写那份文件**，读它只会拿到过期令牌（issue #365）。
+          // 进度页服务自己会从 launchd 找到正确路径；找不到就该报错，而不是读一个没人维护的文件。
           '--port', '0',
         ], { detached: true, stdio: 'ignore' })
         child.unref()
@@ -1219,6 +1220,47 @@ export function apply(ctx, config = {}) {
         }
       },
     })
+
+    // 把 `.dsh-web/url.txt` 刷成**当前**地址（issue #365）。
+    //
+    // 时序是关键：插件 apply **早于**宿主打印 `dsh web: http…`，加载那一刻日志最后一条还是
+    // 上一个进程的地址（已 401）。所以先记下日志长度，之后只接受**新写进来**的那一段，
+    // 并在后台轮询一小段时间等宿主打印。
+    void (async () => {
+      const repoRoot = repoRootFrom(import.meta.url)
+      if (repoRoot === undefined) return
+      const port = typeof webServer.port === 'number' ? webServer.port : undefined
+      // 端口未知就不猜：猜错会把别的端口的历史地址写进去。
+      if (port === undefined) {
+        console.warn('[dsh-auto-upgrade] url.txt 未刷新：拿不到宿主端口')
+        return
+      }
+      const logPath = join(repoRoot, '.dsh-web', 'web.out.log')
+      // 基线必须是**字符数**（与 `log.slice` 同口径）：`stat().size` 是字节，中文日志下差几万。
+      let initial
+      try {
+        initial = await readFile(logPath, 'utf8')
+      } catch {
+        console.warn(`[dsh-auto-upgrade] url.txt 未刷新：读不到 ${logPath}`)
+        return
+      }
+      const since = initial.length
+      // 最多等 ~30 秒：宿主启动通常几秒内就会打印地址。
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        try {
+          const outcome = await refreshUrlFile({ repoRoot, port, since })
+          if (outcome.changed) {
+            console.log(`[dsh-auto-upgrade] url.txt 已刷新为当前地址（端口 ${String(port)}）`)
+            return
+          }
+        } catch (error) {
+          console.warn(`[dsh-auto-upgrade] url.txt 刷新失败：${error instanceof Error ? error.message : String(error)}`)
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+      console.warn('[dsh-auto-upgrade] url.txt 未刷新：等了 30 秒仍没等到新地址')
+    })()
 
     ctx.effect(() => () => {
       for (const dispose of disposers) dispose()

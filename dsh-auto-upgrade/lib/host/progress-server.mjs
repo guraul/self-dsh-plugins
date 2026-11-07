@@ -57,7 +57,12 @@ function resolveUrlFile() {
   return args['url-file'] ?? ''
 }
 
+
 const urlFile = resolveUrlFile()
+if (urlFile === '') {
+  // #365 之后不再有 stateDir 兜底：拿不到路径就是拿不到，别静默等到超时。
+  console.warn('[progress] 找不到 url.txt：进度页无法判断新地址，完成时不会自动跳转')
+}
 /**
  * 启动瞬间 `url.txt` 里的地址 = **旧进程的**地址（点击时它还是有效的）。
  * done 判据必须排除它，否则会立刻把用户送回一个即将死掉的页面（与 issue #293 同源）。
