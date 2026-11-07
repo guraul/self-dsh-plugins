@@ -10328,6 +10328,7 @@ function apply(ctx, config) {
 			"📖 企微会话命令",
 			"/s（/session、/会话）— 列出活跃会话并标出当前绑定",
 			"/s <会话id> — 把本窗口绑定到指定会话",
+			"/s <序号> — 绑定上一次 /s 列表里的第 N 条",
 			"/s reset — 解除绑定，回到按窗口的默认会话",
 			"/s help — 显示本帮助",
 			"普通文本仍交给 Agent；以上命令不会发给模型。"
@@ -10336,14 +10337,17 @@ function apply(ctx, config) {
 		function activeSessions() {
 			return ctx.get("sessions")?.list() ?? [];
 		}
-		/** `/s` 列表：序号、当前标记、标题与 cwd，第二行给完整 id；渲染时记住本次顺序供 `/s <序号>` 绑定。 */
+		/** `/s` 列表：序号、当前标记、标题与 cwd，第二行给完整 id；按条目截断，渲染时记住本次顺序供 `/s <序号>` 绑定。 */
 		function sessionListText(windowKey) {
 			const active = activeSessions();
 			if (active.length === 0) return "当前没有活跃会话，先发起一轮对话再用 /s 绑定。";
 			const titles = ctx.get("sessionTitle");
 			const pinned = activePinFor(windowKey)?.sessionId;
 			const footer = "绑定：/s <序号> 或 /s <会话id>　解绑：/s reset　帮助：/s help";
+			const budget = 1600 - Buffer.byteLength(`${footer}\n`, "utf8");
+			const bytesOf = (text) => Buffer.byteLength(`${text}\n`, "utf8");
 			const lines = [`📋 活跃会话（共 ${String(active.length)} 个）`];
+			let used = bytesOf(lines[0]);
 			const orderedIds = [];
 			for (let index = 0; index < active.length; index += 1) {
 				const session = active[index];
@@ -10351,12 +10355,26 @@ function apply(ctx, config) {
 				const marker = session.id === pinned ? "[← 当前] " : "";
 				const title = titles?.get(session)?.title || "(无标题)";
 				const cwd = session.header?.cwd ?? "(未知目录)";
+				const entry = `${String(orderedIds.length + 1)}. ${marker}${title} · ${cwd}\n   id: ${session.id}`;
+				const entryBytes = bytesOf(entry);
+				if (used + entryBytes > budget) break;
+				used += entryBytes;
+				lines.push(...entry.split("\n"));
 				orderedIds.push(session.id);
-				lines.push(`${String(index + 1)}. ${marker}${title} · ${cwd}`);
-				lines.push(`   id: ${session.id}`);
+			}
+			const hidden = active.length - orderedIds.length;
+			if (hidden > 0) {
+				const more = `…还有 ${String(hidden)} 条未显示（可用 /s <完整 id> 绑定）`;
+				while (orderedIds.length > 0 && used + bytesOf(more) > budget) {
+					lines.pop();
+					lines.pop();
+					orderedIds.pop();
+					used = bytesOf(lines.join("\n"));
+				}
+				lines.push(more);
 			}
 			lastSessionLists.set(windowKey, orderedIds);
-			return `${truncate(lines.join("\n"), 1600 - Buffer.byteLength(`${footer}\n`, "utf8"))}\n${footer}`;
+			return `${lines.join("\n")}\n${footer}`;
 		}
 		/**
 		* 把本窗口绑定到指定会话：先拒归档，再拒子代理，两边都查不到才算「会话不存在」。

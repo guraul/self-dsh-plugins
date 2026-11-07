@@ -5,11 +5,7 @@
 
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import {
-  parseSessionCommand,
-  sessionKeyForPinnedSession,
-  shortSessionId,
-} from '../src/session-router.ts'
+import { parseSessionCommand, sessionKeyForPinnedSession } from '../src/session-router.ts'
 
 describe('parseSessionCommand', () => {
   it('treats bare command heads and `list` as a list request', () => {
@@ -90,18 +86,5 @@ describe('sessionKeyForPinnedSession', () => {
     assert.notEqual(a, b)
     assert.notEqual(a, c)
     assert.notEqual(a, 'single:GuBin')
-  })
-})
-
-describe('shortSessionId', () => {
-  it('drops the session- prefix and keeps 8 characters', () => {
-    assert.equal(shortSessionId('session-abcdef123456'), 'abcdef12')
-    assert.equal(shortSessionId('session-abc'), 'abc')
-  })
-
-  it('keeps ids without the prefix and short ids as-is', () => {
-    assert.equal(shortSessionId('wecom-321a442c'), 'wecom-32')
-    assert.equal(shortSessionId('short'), 'short')
-    assert.equal(shortSessionId('12345678'), '12345678')
   })
 })

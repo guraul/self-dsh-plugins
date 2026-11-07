@@ -83,14 +83,3 @@ export function parseSessionCommand(text: string): SessionCommand | undefined {
 export function sessionKeyForPinnedSession(windowKey: string, sessionId: string): string {
   return `${windowKey}#sid=${sessionId}`
 }
-
-/**
- * Short form of a session id for list display: drops the `session-` prefix
- * and keeps the first 8 characters (shorter ids are shown as-is).
- * @param sessionId - full DSH session id.
- * @returns the display short id.
- */
-export function shortSessionId(sessionId: string): string {
-  const bare = sessionId.startsWith('session-') ? sessionId.slice('session-'.length) : sessionId
-  return bare.length > 8 ? bare.slice(0, 8) : bare
-}
