@@ -10,7 +10,7 @@ export const PROBE_TTL_MS = 24 * 60 * 60 * 1000
  * 判定逻辑的版本：改了「怎么判」就把这个数 +1。
  * 它进了缓存 key，所以旧版本写下的结论会整体失效，不会被原样回放（#346 review 的 blocker）。
  */
-export const PROBE_CACHE_SCHEMA = 3
+export const PROBE_CACHE_SCHEMA = 4
 
 /**
  * 从 profile 的 `dependencies` 里挑出「本机路径型」插件（只有 `link:` / `file:` 能用路径装回去）。
@@ -246,9 +246,18 @@ export async function runProbes(options) {
     })
     const env = { ...process.env, DSH_HOME: options.dshHome }
     // 先 dump 一次记下现有的 id；装完再 dump 一次，差集就是「这次装进去的东西」。
-    const before = await options.run(commands.dump[0], commands.dump.slice(1), { env })
+    //
+    // 第一个插件的基线经常失败：**一次性 profile 这时还没建好**，`--dump-config` 直接非 0。
+    // 从第二个起就正常了——真机实测 10 个插件里恰好第一个报「基线不可用」（issue #373）。
+    // 所以失败重试一次；仍失败才不下结论（fail-closed 不变）。
+    let before = await options.run(commands.dump[0], commands.dump.slice(1), { env })
+    let beforeExit = before.status ?? before.code ?? null
+    if (beforeExit !== 0) {
+      before = await options.run(commands.dump[0], commands.dump.slice(1), { env })
+      beforeExit = before.status ?? before.code ?? null
+    }
     // `?? 0` 会把 spawn 失败（status 为 null）当成成功，得到空基线 → 把既有 id 全算成新增 → 误放行。
-    const beforeExit = before.status ?? before.code ?? null
+    // 上面两次赋值都用 `?? null`，所以 status 为 null 时 beforeExit 仍是 null、不会等于 0。
     const beforeIds = beforeExit === 0 ? idsFromDump(before.stdout) : undefined
     const added = await options.run(commands.add[0], commands.add.slice(1), { env })
     const addExit = added.status ?? added.code ?? null
