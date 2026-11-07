@@ -3,6 +3,17 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.4] — 2026-11-07
+
+### 变更
+
+- **试装判据改成「add 前后 dump 差集」**（#361）。原来靠从源码解析 `export const name` 猜插件 id，
+  真机 10 个插件只猜对 6 个，而且会猜错（`dsh-usage-panel` 的实际 id 是 `usage-stats`）。
+  现在：`dump` 一次记下现有 id → `plugin add` → 再 `dump` → **多出来的 id 就是它**，
+  不依赖命名规律。基线拿不到（dump 失败）时仍回落到原来的 id 比对。
+  - 代价：每个插件多一次 `--dump-config`（约 1 秒），换来 10/10 判对。
+  - `PROBE_CACHE_SCHEMA` 2 → 3：判定规则变了，旧结论一律失效。
+
 ## [0.9.3] — 2026-11-07
 
 ### 修复

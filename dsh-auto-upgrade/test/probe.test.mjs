@@ -93,20 +93,27 @@ test('runProbes：命中缓存不重新试装（mtime 变了才重跑）', async
     profileName: 'probe', dshHome: '/tmp/h', cache: { [stale]: { at: now, ok: true, detail: '旧结论' } },
     now, run,
   })
-  assert.equal(calls.length, 2, 'mtime 变了必须重跑（改过 bundler 配置不能当旧的）')
+  assert.equal(calls.length, 3, 'mtime 变了必须重跑：add 前 dump + add + add 后 dump')
   assert.equal(miss.results[0].cached, false)
 })
 
 test('runProbes：add 失败就不再 dump，且成功失败都进缓存', async () => {
   const now = 1_000_000
-  const { run, calls } = fakeRunner((args) => (args[0] === 'plugin'
-    ? { status: args[args.length - 1].endsWith('bad') ? 1 : 0, stdout: '' }
-    : { status: 0, stdout: '- id: good\n' }))
+  // dump 要能体现「add 前后」：装之前只有 other，装之后多出 good（差集判据）。
+  let added = false
+  const { run, calls } = fakeRunner((args) => {
+    if (args[0] === 'plugin') {
+      if (args[args.length - 1].endsWith('bad')) return { status: 1, stdout: '' }
+      added = true
+      return { status: 0, stdout: '' }
+    }
+    return { status: 0, stdout: added ? '- id: other\n- id: good\n' : '- id: other\n' }
+  })
   const { results, cache } = await runProbes({
     targets: [{ name: 'good', path: '/x/good', mtimeMs: 1 }, { name: 'bad', path: '/x/bad', mtimeMs: 2 }],
     targetVersion: 'v', dshBin: '/dsh', profileName: 'probe', dshHome: '/tmp/h', cache: {}, now, run,
   })
-  assert.equal(calls.length, 3, 'good 两条命令 + bad 只有 add')
+  assert.equal(calls.length, 5, 'good: dump+add+dump；bad: dump+add（add 失败就不再 dump）')
   assert.equal(calls[0].env.DSH_HOME, '/tmp/h', '每条命令都必须带一次性 DSH_HOME')
   assert.deepEqual(results.map((item) => item.ok), [true, false])
   assert.match(results[1].detail, /plugin add 退出码 1/)
@@ -178,15 +185,44 @@ test('#346 解析不到 id 时不再静默：结果标 idFallback，失败文案
   assert.match(result.results[0].detail, /未能从入口解析插件 id/)
 })
 
-test('#346 runProbes 用 id 比对 dump，返回结果同时带包名与 id', async () => {
+test('#361 判据是 add 前后的 dump 差集：多出来的 id 才算装进去', async () => {
+  let dumps = 0
   const result = await runProbes({
     targetVersion: '0.2.2-rc.1', dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
-    targets: [{ name: 'dsh-plugin-auto-upgrade', id: 'dsh-auto-upgrade', path: '/p', mtimeMs: 1 }],
-    run: async (bin, args) => (args.includes('--dump-config') ? { status: 0, stdout: '- id: dsh-auto-upgrade\n' } : { status: 0, stdout: '' }),
+    targets: [{ name: 'dsh-usage-panel', id: 'dsh-usage-panel', path: '/p', mtimeMs: 1 }],
+    run: async (bin, args) => {
+      if (!args.includes('--dump-config')) return { status: 0, stdout: '' }
+      dumps += 1
+      // 第一次 dump（add 之前）没有它，第二次有——但 id 是 `usage-stats`，与包名/解析出的 id 都不同。
+      return { status: 0, stdout: dumps === 1 ? '- id: other\n' : '- id: other\n- id: usage-stats\n' }
+    },
   })
-  assert.equal(result.results[0].ok, true, '用包名比对会误报失败，用 id 才对')
-  assert.equal(result.results[0].id, 'dsh-auto-upgrade')
-  assert.equal(result.results[0].name, 'dsh-plugin-auto-upgrade', '显示仍用包名')
+  assert.equal(result.results[0].ok, true, '差集判定不依赖「插件 id 叫什么」，猜错也能判对')
+  assert.match(result.results[0].detail, /新增 usage-stats/)
+  assert.equal(result.results[0].name, 'dsh-usage-panel', '显示仍用包名')
+})
+
+test('#361 差集为空 = 装了但没进 profile；基线拿不到时回落按 id 比对', async () => {
+  const same = async (bin, args) => (args.includes('--dump-config') ? { status: 0, stdout: '- id: other\n' } : { status: 0, stdout: '' })
+  const empty = await runProbes({
+    targetVersion: 'v', dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
+    targets: [{ name: 'p', id: 'p', path: '/x/p', mtimeMs: 1 }], run: same,
+  })
+  assert.equal(empty.results[0].ok, false)
+  assert.match(empty.results[0].detail, /没有新增插件/)
+
+  // 第一次 dump 失败 → 没有基线 → 回落到 probeHasPlugin（这里 dump 里有 id p，应判通过）
+  let n = 0
+  const fallback = await runProbes({
+    targetVersion: 'v', dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
+    targets: [{ name: 'p', id: 'p', path: '/x/p', mtimeMs: 1 }],
+    run: async (bin, args) => {
+      if (!args.includes('--dump-config')) return { status: 0, stdout: '' }
+      n += 1
+      return n === 1 ? { status: 1, stdout: '' } : { status: 0, stdout: '- id: p\n' }
+    },
+  })
+  assert.equal(fallback.results[0].ok, true, '没有基线时回落按 id 比对')
 })
 
 test('#359 缓存键解析：旧格式键丢弃、schema 不匹配丢弃、新键解析出正确的版本与包名', () => {

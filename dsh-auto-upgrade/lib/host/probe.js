@@ -10,7 +10,7 @@ export const PROBE_TTL_MS = 24 * 60 * 60 * 1000
  * 判定逻辑的版本：改了「怎么判」就把这个数 +1。
  * 它进了缓存 key，所以旧版本写下的结论会整体失效，不会被原样回放（#346 review 的 blocker）。
  */
-export const PROBE_CACHE_SCHEMA = 2
+export const PROBE_CACHE_SCHEMA = 3
 
 /**
  * 从 profile 的 `dependencies` 里挑出「本机路径型」插件（只有 `link:` / `file:` 能用路径装回去）。
@@ -96,6 +96,22 @@ export function entryCandidates(manifest) {
 }
 
 /**
+ * 从 `--dump-config` 输出里抽出**所有**插件 id。
+ *
+ * 试装判据不再猜「这个插件的 id 叫什么」，而是比较 add 前后的 id 集合：
+ * 多出来的那个就是它（`dsh-usage-panel` 的 id 其实是 `usage-stats`，猜不准）。
+ * @param {string} text dump 输出。
+ * @returns {Set<string>} id 集合。
+ */
+export function idsFromDump(text) {
+  const ids = new Set()
+  for (const matched of String(text ?? '').matchAll(/^\s*-?\s*id:\s*["']?([A-Za-z0-9@/_.-]+)["']?\s*$/gm)) {
+    ids.add(matched[1])
+  }
+  return ids
+}
+
+/**
  * `--dump-config` 里是否**恰好**有这条插件（`- id: <名字>` 行）。
  * 不用 `includes`：同一次性 profile 里插件是顺序 add 的，后装的插件 dump 里会带上前面
  * 装过的名字；子串匹配还会被「名字是另一个名字的前缀」骗到。
@@ -120,6 +136,13 @@ export function judgeProbe(result) {
   if (result.dumpExit !== 0) {
     return { ok: false, detail: `--dump-config 退出码 ${String(result.dumpExit)}` }
   }
+  // 有 add 前后的 id 集合就用**差集**判定：不依赖「插件的 id 叫什么」，也就不用猜。
+  if (result.beforeIds instanceof Set && result.afterIds instanceof Set) {
+    const added = [...result.afterIds].filter((id) => !result.beforeIds.has(id))
+    if (added.length > 0) return { ok: true, detail: `装配通过（新增 ${added.join('、')}）` }
+    return { ok: false, detail: '装了但没进 profile（dump 里没有新增插件）' }
+  }
+  // 拿不到基线（dump 失败等）时回落到按 id 比对。
   const text = typeof result.dumpText === 'string' ? result.dumpText : ''
   if (!probeHasPlugin(text, result.pluginName)) {
     return { ok: false, detail: '--dump-config 里没有该插件（装了但没进 profile）' }
@@ -214,6 +237,9 @@ export async function runProbes(options) {
       profileName: options.profileName,
     })
     const env = { ...process.env, DSH_HOME: options.dshHome }
+    // 先 dump 一次记下现有的 id；装完再 dump 一次，差集就是「这次装进去的东西」。
+    const before = await options.run(commands.dump[0], commands.dump.slice(1), { env })
+    const beforeIds = (before.status ?? before.code ?? 0) === 0 ? idsFromDump(before.stdout) : undefined
     const added = await options.run(commands.add[0], commands.add.slice(1), { env })
     const addExit = added.status ?? added.code ?? null
     const dumped = addExit === 0
@@ -224,6 +250,8 @@ export async function runProbes(options) {
       dumpExit: dumped.status ?? dumped.code ?? null,
       dumpText: dumped.stdout,
       pluginName: id,
+      beforeIds,
+      afterIds: (dumped.status ?? dumped.code ?? 0) === 0 ? idsFromDump(dumped.stdout) : undefined,
     })
     cache[key] = { at: options.now, ok: verdict.ok, detail: verdict.detail }
     const detail = idFallback && verdict.ok === false
