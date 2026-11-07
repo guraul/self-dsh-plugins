@@ -138,6 +138,42 @@ export function probeKey(options) {
 }
 
 /**
+ * 把缓存文件的键拆回字段，供界面直接用。
+ *
+ * 键格式是 `<schema>|<目标版本>|<包名>|<mtime>`（见 `probeKey`）。两件事必须做对：
+ * 1. **段数不对的旧键要丢**：0.9.2 之前写的是三段 `版本|包名|mtime`，解析出来会把版本号当插件名；
+ * 2. **schema 与当前不一致的要丢**：那是旧判定逻辑留下的结论，回放会误导人。
+ * @param {Record<string, {at?: number, ok?: boolean, detail?: string}>} cache 缓存文件内容。
+ * @param {number} now 当前时间（毫秒）。
+ * @param {number} [schema] 当前判定逻辑版本。
+ * @returns {{version: string, name: string, ok: boolean, detail?: string, at?: number, stale: boolean}[]} 供 UI 的条目。
+ */
+export function probeCacheEntries(cache, now, schema = PROBE_CACHE_SCHEMA) {
+  /** @type {Map<string, {version: string, name: string, mtime: number, entry: object}>} */
+  const byName = new Map()
+  for (const [key, value] of Object.entries(cache ?? {})) {
+    const parts = String(key).split('|')
+    if (parts.length !== 4) continue
+    const [keySchema, version, name, mtimeText] = parts
+    if (keySchema !== String(schema)) continue
+    const mtime = Number(mtimeText)
+    // 键里带 mtime：插件一更新就会多出一条同名的键，旧键又不会被删。
+    // 同名只留 mtime 最大的那条，否则界面会重复展示（正是 #359 的「10 条变 20 条」）。
+    const previous = byName.get(name)
+    if (previous !== undefined && previous.mtime >= (Number.isFinite(mtime) ? mtime : 0)) continue
+    byName.set(name, { version, name, mtime: Number.isFinite(mtime) ? mtime : 0, entry: value })
+  }
+  return [...byName.values()].map(({ version, name, entry }) => ({
+    version,
+    name,
+    ok: entry?.ok === true,
+    ...(entry?.detail === undefined ? {} : { detail: entry.detail }),
+    ...(entry?.at === undefined ? {} : { at: entry.at }),
+    stale: !cacheHit(entry, now),
+  }))
+}
+
+/**
  * 缓存里的结论还能不能用。
  * @param {{at?: number, ok?: boolean, detail?: string}|undefined} entry 缓存条目。
  * @param {number} now 当前时间（毫秒）。

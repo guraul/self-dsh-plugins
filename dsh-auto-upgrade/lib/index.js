@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
-import { cacheHit, entryCandidates, linkTargets, pluginIdFromSource, runProbes } from './host/probe.js'
+import { entryCandidates, linkTargets, pluginIdFromSource, probeCacheEntries, runProbes } from './host/probe.js'
 import { runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
@@ -542,11 +542,11 @@ export function apply(ctx, config = {}) {
     /** 上一轮探针的整体异常（前端据此提示，而不是看着「没动静」）。 */
     let probeError = null
 
-    /** 把缓存文件的键拆回字段，供 UI 直接用。 */
-    const probeEntries = (cache, now) => Object.entries(cache ?? {}).map(([key, value]) => {
-      const [version, name] = key.split('|')
-      return { version, name, ...value, stale: !cacheHit(value, now) }
-    })
+    /**
+     * 把缓存文件的键拆回字段，供 UI 直接用。
+     * 解析与过滤都在 `probeCacheEntries` 里（键格式带 schema 前缀，旧键要丢——见 issue #359）。
+     */
+    const probeEntries = (cache, now) => probeCacheEntries(cache, now)
 
     route(API.probe, {
       GET: async (_req, res) => {
