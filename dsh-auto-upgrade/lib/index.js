@@ -24,6 +24,7 @@ import { runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
+import { refreshUrlFile, repoRootFrom } from './host/url-file.mjs'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
 import { DEFAULT_GITHUB_API, fetchReleaseNotes, repositorySlug } from './host/notes.js'
@@ -347,8 +348,8 @@ export function apply(ctx, config = {}) {
           scriptPath,
           '--state', stateDir,
           '--label', typeof process.env.XPC_SERVICE_NAME === 'string' ? process.env.XPC_SERVICE_NAME : '',
-          // 非 launchd 时的兜底：url.txt 就在实例日志目录旁边。
-          '--url-file', join(stateDir, 'url.txt'),
+          // 不再传 stateDir/url.txt：**没有任何代码写那份文件**，读它只会拿到过期令牌（issue #365）。
+          // 进度页服务自己会从 launchd 找到正确路径；找不到就该报错，而不是读一个没人维护的文件。
           '--port', '0',
         ], { detached: true, stdio: 'ignore' })
         child.unref()
@@ -1219,6 +1220,22 @@ export function apply(ctx, config = {}) {
         }
       },
     })
+
+    // 启动时把 `.dsh-web/url.txt` 刷成**当前**地址（issue #365）。
+    // 插件每次宿主启动都会被加载，所以不管谁触发启动（脚本 / kickstart / 登录自启），文件都是新鲜的。
+    // 只在不打扰启动的前提下做：失败只记日志，不影响任何路由。
+    void (async () => {
+      const repoRoot = repoRootFrom(import.meta.url)
+      if (repoRoot === undefined) return
+      try {
+        const port = typeof webServer.port === 'number' ? webServer.port : 3080
+        const outcome = await refreshUrlFile({ repoRoot, port })
+        if (outcome.changed) console.log(`[dsh-auto-upgrade] url.txt 已刷新为当前地址（端口 ${String(port)}）`)
+        else if (outcome.reason !== undefined) console.log(`[dsh-auto-upgrade] url.txt 未刷新：${outcome.reason}`)
+      } catch (error) {
+        console.warn(`[dsh-auto-upgrade] url.txt 刷新失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+    })()
 
     ctx.effect(() => () => {
       for (const dispose of disposers) dispose()

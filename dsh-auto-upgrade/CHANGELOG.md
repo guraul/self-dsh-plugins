@@ -3,6 +3,18 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.5] — 2026-11-07
+
+### 修复
+
+- **`url.txt` 谁在维护这件事，原来是个坑**（#365）。
+  - `~/.dsh-auto-upgrade/url.txt` **没有任何代码写它**，却作为进度页服务的兜底参数被读——本机那份停在 11-02，
+    读到就是过期令牌。已删掉这条兜底（进度页服务本来就能从 launchd 找到正确路径）。
+  - `.dsh-web/url.txt` 原来只有「升级 helper」会刷新；`restart-once.sh`、手动 `launchctl kickstart`、
+    登录自启都绕过它。现在**插件在加载时自己刷新**：从自身路径推出仓库根 → 读日志取最后一条带令牌的地址
+    → **认证通过才写**（写一个 401 的地址比留着旧的更糟）。插件每次启动都会加载，所以不管谁触发启动，
+    文件都是新鲜的，不用改 LaunchAgent 配置。
+
 ## [0.9.4] — 2026-11-07
 
 ### 变更
