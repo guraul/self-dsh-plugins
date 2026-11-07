@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   PROBE_CACHE_SCHEMA,
   PROBE_TTL_MS,
+  idsFromDump,
   probeCacheEntries,
   buildProbeCommands,
   entryCandidates,
@@ -45,8 +46,12 @@ test('judgeProbe：两条判据都过才算装配通过（表驱动）', () => {
   const cases = [
     [{ addExit: 1, dumpExit: 0, dumpText: 'x', pluginName: 'dsh-awake' }, false, /plugin add 退出码 1/],
     [{ addExit: 0, dumpExit: 2, dumpText: '', pluginName: 'dsh-awake' }, false, /--dump-config 退出码 2/],
-    [{ addExit: 0, dumpExit: 0, dumpText: 'plugins:\n  - id: other\n', pluginName: 'dsh-awake' }, false, /没有该插件/],
-    [{ addExit: 0, dumpExit: 0, dumpText: '- id: dsh-awake\n', pluginName: 'dsh-awake' }, true, /装配通过/],
+    // 差集为空 → 没进 profile
+    [{ addExit: 0, dumpExit: 0, dumpText: '- id: other\n', pluginName: 'x', beforeIds: new Set(['other']), afterIds: new Set(['other']) }, false, /没有新增插件/],
+    // 差集非空 → 通过
+    [{ addExit: 0, dumpExit: 0, dumpText: '- id: other\n- id: dsh-awake\n', pluginName: 'x', beforeIds: new Set(['other']), afterIds: new Set(['other', 'dsh-awake']) }, true, /装配通过/],
+    // 没有基线 → 不下结论
+    [{ addExit: 0, dumpExit: 0, dumpText: '- id: dsh-awake\n', pluginName: 'dsh-awake' }, false, /无法判定/],
   ]
   for (const [input, ok, detail] of cases) {
     const verdict = judgeProbe(input)
@@ -211,7 +216,7 @@ test('#361 差集为空 = 装了但没进 profile；基线拿不到时回落按 
   assert.equal(empty.results[0].ok, false)
   assert.match(empty.results[0].detail, /没有新增插件/)
 
-  // 第一次 dump 失败 → 没有基线 → 回落到 probeHasPlugin（这里 dump 里有 id p，应判通过）
+  // 第一次 dump 失败 → 没有基线 → **不下结论**（不再拿猜出来的 id 兜底）
   let n = 0
   const fallback = await runProbes({
     targetVersion: 'v', dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
@@ -222,7 +227,21 @@ test('#361 差集为空 = 装了但没进 profile；基线拿不到时回落按 
       return n === 1 ? { status: 1, stdout: '' } : { status: 0, stdout: '- id: p\n' }
     },
   })
-  assert.equal(fallback.results[0].ok, true, '没有基线时回落按 id 比对')
+  assert.equal(fallback.results[0].ok, false)
+  assert.match(fallback.results[0].detail, /无法判定/, '要明确说「无法判定」，不能假装是「没进 profile」')
+
+  // spawn 失败（status 为 null）也不能被当成「空基线」，否则既有 id 会全被算成新增
+  let m = 0
+  const spawnFail = await runProbes({
+    targetVersion: 'v', dshBin: 'dsh', profileName: 't', dshHome: '/tmp/x', cache: {}, now: 1,
+    targets: [{ name: 'p', id: 'p', path: '/x/p', mtimeMs: 1 }],
+    run: async (bin, args) => {
+      if (!args.includes('--dump-config')) return { status: 0, stdout: '' }
+      m += 1
+      return m === 1 ? { status: null, stdout: '' } : { status: 0, stdout: '- id: p\n' }
+    },
+  })
+  assert.match(spawnFail.results[0].detail, /无法判定/, 'status 为 null 不能当成功')
 })
 
 test('#359 缓存键解析：旧格式键丢弃、schema 不匹配丢弃、新键解析出正确的版本与包名', () => {
@@ -264,4 +283,23 @@ test('#359 同一插件的多个键只留最新那条（插件更新后旧键不
   const p = entries.find((entry) => entry.name === 'p')
   assert.equal(p.ok, true, '要留 mtime 更大的那条')
   assert.equal(p.detail, '新 mtime 的结论')
+})
+
+test('#361 idsFromDump 只收顶层 `- id:` 列表项，不吃嵌套 config 的 id，也认行尾注释', () => {
+  const dump = [
+    '- id: timer',
+    '  name: \'@deepseek-ai/cordis-plugin-timer\'',
+    '  config:',
+    '    id: nested-provider-id',
+    '    servers:',
+    '      - id: nested-mcp-id',
+    '- id: "quoted-id"',
+    '- id: with-comment   # 这是注释',
+  ].join('\n')
+  const ids = idsFromDump(dump)
+  assert.equal(ids.has('timer'), true)
+  assert.equal(ids.has('quoted-id'), true, '引号要去掉')
+  assert.equal(ids.has('with-comment'), true, '行尾注释要剥掉')
+  assert.equal(ids.has('nested-provider-id'), false, '嵌套 config 的 id 不算插件')
+  assert.equal(ids.has('nested-mcp-id'), false)
 })
