@@ -4,6 +4,9 @@ import assert from 'node:assert/strict'
 import { createRoute } from '../lib/host/http.js'
 import { isIPv4Loopback, isLoopbackAddress, isLoopbackRequest } from '../lib/host/loopback.js'
 
+/** 写接口要带启动令牌（issue #363）；夹具在 stateDir 写了这个令牌的 url.txt。 */
+const TOKEN = { 'x-dsh-token': 'TEST_TOKEN' }
+
 /**
  * 造一个假请求。
  * @param {{address?:string, host?:string, site?:string, origin?:string}} options 字段。

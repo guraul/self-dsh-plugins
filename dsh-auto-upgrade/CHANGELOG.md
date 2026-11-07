@@ -3,6 +3,23 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.5] — 2026-11-07
+
+### 安全
+
+- **写接口校验启动令牌**（#363）。原来所有 `POST /api/dsh-auto-upgrade/*`（含 `refill/pr`）都不校验令牌：
+  路由虽有 loopback 围栏（挡跨站浏览器），但**本机任意进程**能直接 POST，`refill/pr` 会真的推分支、开 PR。
+  - 写操作要求 `x-dsh-token` 头（或 `?token=`），令牌取自 `~/.dsh-auto-upgrade/url.txt`——**进程级、每次重启换**，
+    所以每次现读，不缓存；
+  - 读接口（GET）不需要令牌（无副作用）；
+  - 令牌文件读不到时**拒绝写操作**（fail-closed），读不受影响；
+  - 客户端从 `location.search` 取令牌随请求带上，设置页按钮行为不变。
+
+### 修复（顺手）
+
+- **0.9.4 的 CHANGELOG 自相矛盾**：一处写「基线拿不到时回落按 id 比对」，另一处写「不下结论」。
+  以代码为准：**没有基线就不下结论**，CHANGELOG 已改成一致。
+
 ## [0.9.4] — 2026-11-07
 
 ### 变更
@@ -10,7 +27,7 @@
 - **试装判据改成「add 前后 dump 差集」**（#361）。原来靠从源码解析 `export const name` 猜插件 id，
   真机 10 个插件只猜对 6 个，而且会猜错（`dsh-usage-panel` 的实际 id 是 `usage-stats`）。
   现在：`dump` 一次记下现有 id → `plugin add` → 再 `dump` → **多出来的 id 就是它**，
-  不依赖命名规律。基线拿不到（dump 失败）时仍回落到原来的 id 比对。
+  不依赖命名规律。基线拿不到（dump 失败）时**不下结论**，明确报「无法判定」，不假装是「没进 profile」。
   - 代价：每个插件多一次 `--dump-config`（约 1 秒），换来 10/10 判对。
   - `PROBE_CACHE_SCHEMA` 2 → 3：判定规则变了，旧结论一律失效。
   - 三个 review 修正：**基线 dump 失败（`status` 为 `null`）不能再当「空基线」**（否则既有 id 全被算成新增、

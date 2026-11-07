@@ -25,6 +25,7 @@ import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from 
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
+import { tokenOf } from './host/token-url.js'
 import { isLoopbackRequest } from './host/loopback.js'
 import { DEFAULT_GITHUB_API, fetchReleaseNotes, repositorySlug } from './host/notes.js'
 import { loadOfficialAppBoot } from './host/official.js'
@@ -326,8 +327,48 @@ export function apply(ctx, config = {}) {
      * @param {Record<string, Function>} handlers 方法表。
      * @returns {void}
      */
+    /**
+     * 写操作要带启动令牌。
+     *
+     * 路由本来就有 loopback 围栏（挡跨站浏览器），但**本机任意进程**仍能直接 POST——
+     * `refill/pr` 会真的推分支、开 PR。所以写接口额外校验进程级令牌（issue #363）。
+     * 令牌读不到时**拒绝**（fail-closed），读接口不受影响。
+     * @param {import('node:http').IncomingMessage} req 请求。
+     * @returns {Promise<boolean>} 令牌正确返回 true。
+     */
+    const tokenValid = async (req) => {
+      let current
+      try {
+        current = tokenOf(await readFile(join(stateDir, 'url.txt'), 'utf8'))
+      } catch {
+        return false
+      }
+      if (current === undefined) return false
+      const header = req.headers['x-dsh-token']
+      const fromHeader = Array.isArray(header) ? header[0] : header
+      if (typeof fromHeader === 'string' && fromHeader === current) return true
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+      return url.searchParams.get('token') === current
+    }
+
+    /** 把写操作包上令牌校验；读操作原样透传。 */
+    const guardWrites = (handlers) => {
+      const wrapped = {}
+      for (const [method, handler] of Object.entries(handlers)) {
+        wrapped[method] = method === 'POST'
+          ? async (req, res) => {
+            if (!(await tokenValid(req))) {
+              throw new RequestError(401, CODE.UNAUTHORIZED, '缺少或无效的启动令牌（x-dsh-token）')
+            }
+            return handler(req, res)
+          }
+          : handler
+      }
+      return wrapped
+    }
+
     const route = (path, handlers) => {
-      disposers.push(webServer.register({ kind: 'exact', path, handler: createRoute(handlers, isLoopbackRequest) }))
+      disposers.push(webServer.register({ kind: 'exact', path, handler: createRoute(guardWrites(handlers), isLoopbackRequest) }))
     }
 
     /**
