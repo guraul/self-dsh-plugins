@@ -88,3 +88,32 @@ test('#365 repoRootFrom：从插件模块路径往上三层', () => {
   const url = 'file:///Users/x/repo/dsh-auto-upgrade/lib/host/url-file.mjs'
   assert.equal(repoRootFrom(url), join('/Users/x/repo'))
 })
+
+test('#365 只认「加载之后」新写的日志：旧进程的地址不能被当成本进程的', async () => {
+  const oldUrl = 'http://127.0.0.1:3080/?token=OLDOLD\n'
+  const newUrl = 'http://127.0.0.1:3080/?token=NEWNEW\n'
+  const log = `插件挂载完成\n${oldUrl}`
+  const written = []
+  // 偏移正好落在旧地址之后：此时新进程还没打印，必须什么都不写
+  const result = await refreshUrlFile({
+    repoRoot: REPO, port: 3080, since: log.length,
+    readLog: async () => log,
+    readUrl: async () => '',
+    writeUrl: async (text) => { written.push(text) },
+    check: async () => true,
+  })
+  assert.equal(result.changed, false, '加载那一刻不该写（最后一条还是上个进程的）')
+  assert.deepEqual(written, [])
+
+  // 宿主随后打印了新地址：同一偏移下这次应写入新地址
+  const later = log + newUrl
+  const next = await refreshUrlFile({
+    repoRoot: REPO, port: 3080, since: log.length,
+    readLog: async () => later,
+    readUrl: async () => '',
+    writeUrl: async (text) => { written.push(text) },
+    check: async () => true,
+  })
+  assert.equal(next.changed, true)
+  assert.match(written[0], /token=NEWNEW/)
+})

@@ -12,7 +12,7 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -1221,19 +1221,37 @@ export function apply(ctx, config = {}) {
       },
     })
 
-    // 启动时把 `.dsh-web/url.txt` 刷成**当前**地址（issue #365）。
-    // 插件每次宿主启动都会被加载，所以不管谁触发启动（脚本 / kickstart / 登录自启），文件都是新鲜的。
-    // 只在不打扰启动的前提下做：失败只记日志，不影响任何路由。
+    // 把 `.dsh-web/url.txt` 刷成**当前**地址（issue #365）。
+    //
+    // 时序是关键：插件 apply **早于**宿主打印 `dsh web: http…`，加载那一刻日志最后一条还是
+    // 上一个进程的地址（已 401）。所以先记下日志长度，之后只接受**新写进来**的那一段，
+    // 并在后台轮询一小段时间等宿主打印。
     void (async () => {
       const repoRoot = repoRootFrom(import.meta.url)
       if (repoRoot === undefined) return
+      const port = typeof webServer.port === 'number' ? webServer.port : undefined
+      // 端口未知就不猜：猜错会把别的端口的历史地址写进去。
+      if (port === undefined) return
+      const logPath = join(repoRoot, '.dsh-web', 'web.out.log')
+      let since = 0
       try {
-        const port = typeof webServer.port === 'number' ? webServer.port : 3080
-        const outcome = await refreshUrlFile({ repoRoot, port })
-        if (outcome.changed) console.log(`[dsh-auto-upgrade] url.txt 已刷新为当前地址（端口 ${String(port)}）`)
-        else if (outcome.reason !== undefined) console.log(`[dsh-auto-upgrade] url.txt 未刷新：${outcome.reason}`)
-      } catch (error) {
-        console.warn(`[dsh-auto-upgrade] url.txt 刷新失败：${error instanceof Error ? error.message : String(error)}`)
+        since = (await stat(logPath)).size
+      } catch {
+        return
+      }
+      // 最多等 ~30 秒：宿主启动通常几秒内就会打印地址。
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        try {
+          const outcome = await refreshUrlFile({ repoRoot, port, since })
+          if (outcome.changed) {
+            console.log(`[dsh-auto-upgrade] url.txt 已刷新为当前地址（端口 ${String(port)}）`)
+            return
+          }
+        } catch (error) {
+          console.warn(`[dsh-auto-upgrade] url.txt 刷新失败：${error instanceof Error ? error.message : String(error)}`)
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000))
       }
     })()
 

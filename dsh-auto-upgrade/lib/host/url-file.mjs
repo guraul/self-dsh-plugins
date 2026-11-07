@@ -18,8 +18,9 @@ import { latestTokenUrl } from './token-url.js'
  * 从插件自己的位置推出仓库根。
  *
  * 插件是 `link:` 装进 profile 的，所以 `import.meta.url` 就落在仓库里
- * （`<repo>/dsh-auto-upgrade/lib/host/url-file.mjs`，往上三层是仓库根）。
- * 不是 link 安装（比如从 npm 装）时返回 undefined——那种情况没有 `.dsh-web/`，不该猜。
+ * （`<repo>/dsh-auto-upgrade/lib/host/url-file.mjs`，往上**四层**是仓库根）。
+ * 注意：这里**只推路径、不判断**是不是 link 安装——从 npm 装时推出来的目录没有 `.dsh-web/`，
+ * 调用方读日志会失败并静默放弃（见 `refreshUrlFile` 的「读不到日志」分支）。
  * @param {string} moduleUrl 当前模块的 `import.meta.url`。
  * @returns {string|undefined} 仓库根；不在仓库里返回 undefined。
  */
@@ -58,6 +59,9 @@ export async function authenticates(url, fetchImpl = fetch) {
  * @param {object} options 输入。
  * @param {string} options.repoRoot 仓库根（其下有 `.dsh-web/`）。
  * @param {number} options.port 宿主端口（只取这个端口的地址）。
+ * @param {number} [options.since] 只认日志中这个**字节偏移之后**的内容（默认 0）。
+ *   关键：插件加载**早于**宿主打印地址，加载瞬间日志最后一条还是**上一个进程**的（已 401）。
+ *   调用方要在加载时记下日志长度，之后只接受新写进来的那一段。
  * @param {() => Promise<string>} [options.readLog] 读日志（默认读 `<repo>/.dsh-web/web.out.log`）。
  * @param {() => Promise<string>} [options.readUrl] 读 url.txt（默认读 `<repo>/.dsh-web/url.txt`）。
  * @param {(text: string) => Promise<void>} [options.writeUrl] 写 url.txt。
@@ -77,8 +81,10 @@ export async function refreshUrlFile(options) {
   } catch {
     return { changed: false, reason: '读不到日志' }
   }
-  const url = latestTokenUrl(log, options.port)
-  if (url === undefined) return { changed: false, reason: '日志里没有带令牌的启动地址' }
+  // 只看「加载之后」新写进来的那一段：否则会把上一个进程的地址当成当前地址（#293 的坑）。
+  const fresh = options.since === undefined || options.since <= 0 ? log : log.slice(options.since)
+  const url = latestTokenUrl(fresh, options.port)
+  if (url === undefined) return { changed: false, reason: '加载之后日志里还没有带令牌的启动地址' }
 
   let previous = ''
   try {
