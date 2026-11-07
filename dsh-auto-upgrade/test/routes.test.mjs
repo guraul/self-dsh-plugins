@@ -191,7 +191,10 @@ async function makeEnvironment(options = {}) {
   await mkdir(home, { recursive: true })
   // 写接口校验令牌（#363）：夹具里给一份固定的 url.txt，并让插件读它。
   await mkdir(stateDir, { recursive: true })
-  await writeFile(join(stateDir, 'url.txt'), 'http://127.0.0.1:1/?token=TEST_TOKEN\n')
+  // `options.omitUrlFile` 用于验证 fail-closed：没有配置文件时写操作必须被拒。
+  if (options.omitUrlFile !== true) {
+    await writeFile(join(stateDir, 'url.txt'), 'http://127.0.0.1:1/?token=TEST_TOKEN\n')
+  }
   const profileDir = await makeProfile({ plugins: options.plugins ?? [] })
   const registry = await makeRegistry({ latest: '9.9.9', next: '9.9.9' })
   const github = await makeGithub({
@@ -911,6 +914,19 @@ test('#363 写接口要令牌：不带 / 带错都 401，GET 不受影响', asyn
 
     const read = await fetch(`${env.host.base}${API.status}`)
     assert.equal(read.status, 200, '读接口不需要令牌')
+  } finally {
+    await env.close()
+  }
+})
+
+test('#363 fail-closed：url.txt 不存在时写操作一律 401，读操作照常', async (t) => {
+  const env = await makeEnvironment({ omitUrlFile: true })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const write = await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })
+    assert.equal(write.status, 401, '拿不到令牌文件就必须拒绝写操作')
+    const read = await fetch(`${env.host.base}${API.status}`)
+    assert.equal(read.status, 200, '读接口不受影响')
   } finally {
     await env.close()
   }

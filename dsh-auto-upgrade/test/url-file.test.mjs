@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { authenticates, refreshUrlFile, repoRootFrom } from '../lib/host/url-file.mjs'
@@ -84,9 +85,16 @@ test('#365 authenticates：只有 200/302/303 算活，连不上算死', async (
   assert.equal(await authenticates('http://x', boom), false, '连不上不能算活')
 })
 
-test('#365 repoRootFrom：从插件模块路径往上四层', () => {
-  const url = 'file:///Users/x/repo/dsh-auto-upgrade/lib/host/url-file.mjs'
-  assert.equal(repoRootFrom(url), join('/Users/x/repo'))
+test('#369 repoRootFrom：两个真实入口都推回**同一个**仓库根（不按固定层数剥）', () => {
+  // lib/host/url-file.mjs 与 lib/index.js 深度不同：写死层数必错（#369 的 blocker）。
+  const deep = repoRootFrom(new URL('../lib/host/url-file.mjs', import.meta.url).href)
+  const shallow = repoRootFrom(new URL('../lib/index.js', import.meta.url).href)
+  assert.equal(deep, shallow, '两个入口必须推出同一个根')
+  assert.equal(existsSync(join(deep, '.git')), true, '推出来的目录必须带 .git')
+})
+
+test('#369 repoRootFrom：找不到仓库标记时返回 undefined，不瞎猜', () => {
+  assert.equal(repoRootFrom('file:///tmp/not-a-repo/lib/index.js'), undefined)
 })
 
 test('#365 只认「加载之后」新写的日志：旧进程的地址不能被当成本进程的', async () => {
