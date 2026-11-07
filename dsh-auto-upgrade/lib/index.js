@@ -12,7 +12,7 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -1231,14 +1231,20 @@ export function apply(ctx, config = {}) {
       if (repoRoot === undefined) return
       const port = typeof webServer.port === 'number' ? webServer.port : undefined
       // 端口未知就不猜：猜错会把别的端口的历史地址写进去。
-      if (port === undefined) return
-      const logPath = join(repoRoot, '.dsh-web', 'web.out.log')
-      let since = 0
-      try {
-        since = (await stat(logPath)).size
-      } catch {
+      if (port === undefined) {
+        console.warn('[dsh-auto-upgrade] url.txt 未刷新：拿不到宿主端口')
         return
       }
+      const logPath = join(repoRoot, '.dsh-web', 'web.out.log')
+      // 基线必须是**字符数**（与 `log.slice` 同口径）：`stat().size` 是字节，中文日志下差几万。
+      let initial
+      try {
+        initial = await readFile(logPath, 'utf8')
+      } catch {
+        console.warn(`[dsh-auto-upgrade] url.txt 未刷新：读不到 ${logPath}`)
+        return
+      }
+      const since = initial.length
       // 最多等 ~30 秒：宿主启动通常几秒内就会打印地址。
       for (let attempt = 0; attempt < 30; attempt += 1) {
         try {
@@ -1253,6 +1259,7 @@ export function apply(ctx, config = {}) {
         }
         await new Promise((resolve) => setTimeout(resolve, 1000))
       }
+      console.warn('[dsh-auto-upgrade] url.txt 未刷新：等了 30 秒仍没等到新地址')
     })()
 
     ctx.effect(() => () => {

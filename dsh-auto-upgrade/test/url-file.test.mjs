@@ -84,7 +84,7 @@ test('#365 authenticates：只有 200/302/303 算活，连不上算死', async (
   assert.equal(await authenticates('http://x', boom), false, '连不上不能算活')
 })
 
-test('#365 repoRootFrom：从插件模块路径往上三层', () => {
+test('#365 repoRootFrom：从插件模块路径往上四层', () => {
   const url = 'file:///Users/x/repo/dsh-auto-upgrade/lib/host/url-file.mjs'
   assert.equal(repoRootFrom(url), join('/Users/x/repo'))
 })
@@ -116,4 +116,22 @@ test('#365 只认「加载之后」新写的日志：旧进程的地址不能被
   })
   assert.equal(next.changed, true)
   assert.match(written[0], /token=NEWNEW/)
+})
+
+test('#365 since 是**字符**偏移：中文日志下也不能切错（字节偏移会切到末尾之外）', async () => {
+  const oldLine = '插件挂载完成：中文日志会让字节数远大于字符数\n'
+  const oldUrl = 'http://127.0.0.1:3080/?token=OLDOLD\n'
+  const log = oldLine + oldUrl
+  const written = []
+  // 用字符数当基线（实现要求）；若误用 Buffer.byteLength 就会切空
+  const result = await refreshUrlFile({
+    repoRoot: REPO, port: 3080, since: log.length,
+    readLog: async () => log + 'http://127.0.0.1:3080/?token=NEWNEW\n',
+    readUrl: async () => '',
+    writeUrl: async (text) => { written.push(text) },
+    check: async () => true,
+  })
+  assert.equal(result.changed, true)
+  assert.match(written[0], /token=NEWNEW/, '中文前缀下也要能切到新地址')
+  assert.equal(Buffer.byteLength(log, 'utf8') > log.length, true, '前提：这条日志的字节数确实大于字符数')
 })

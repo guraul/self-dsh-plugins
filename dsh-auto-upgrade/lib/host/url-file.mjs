@@ -59,7 +59,9 @@ export async function authenticates(url, fetchImpl = fetch) {
  * @param {object} options 输入。
  * @param {string} options.repoRoot 仓库根（其下有 `.dsh-web/`）。
  * @param {number} options.port 宿主端口（只取这个端口的地址）。
- * @param {number} [options.since] 只认日志中这个**字节偏移之后**的内容（默认 0）。
+ * @param {number} [options.since] 只认日志中这个**字符偏移之后**的内容（默认 0）。
+ *   ⚠️ 是**字符数**（`String.prototype.length`），不是字节数：日志里有中文，两者差着几万，
+ *   用 `stat().size` 当偏移会直接切到文件末尾之外，永远读不到新地址（#365 review 轮 2 的 blocker）。
  *   关键：插件加载**早于**宿主打印地址，加载瞬间日志最后一条还是**上一个进程**的（已 401）。
  *   调用方要在加载时记下日志长度，之后只接受新写进来的那一段。
  * @param {() => Promise<string>} [options.readLog] 读日志（默认读 `<repo>/.dsh-web/web.out.log`）。
