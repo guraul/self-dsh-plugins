@@ -30,3 +30,16 @@ export function latestTokenUrl(text, port) {
     : matches
   return wanted.length === 0 ? undefined : wanted[wanted.length - 1]
 }
+
+/**
+ * 从启动地址里取出令牌。
+ *
+ * 启动令牌是**进程级**的：每次重启都会换。所以校验写操作时要读「当前那份 url.txt」，
+ * 不能把令牌缓存在内存里（重启后就是旧的）。
+ * @param {string} text url.txt 内容。
+ * @returns {string|undefined} 令牌；取不到返回 undefined。
+ */
+export function tokenOf(text) {
+  const matched = /[?&]token=([A-Za-z0-9_-]+)/.exec(String(text ?? ''))
+  return matched === null ? undefined : matched[1]
+}
