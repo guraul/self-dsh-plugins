@@ -3,6 +3,16 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.3] — 2026-11-07
+
+### 修复
+
+- **试装结果把版本号当插件名显示**（#359）。0.9.2 给缓存键加了 schema 前缀，但界面侧的
+  `probeEntries()` 还在按旧的三段格式 `key.split('|')` 解析，于是 `version` 读成 `"2"`、
+  `name` 读成 `"0.2.2-rc.1"`；旧格式的键又没被清理，10 个插件被列成 20 条。
+  现在解析逻辑提到 `lib/host/probe.js` 的 `probeCacheEntries()`：按 `<schema>|<版本>|<包名>|<mtime>`
+  解析，**段数不对的旧键与 schema 不匹配的条目直接丢弃**。
+
 ## [0.9.2] — 2026-11-06
 
 ### 修复

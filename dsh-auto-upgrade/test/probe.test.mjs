@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   PROBE_CACHE_SCHEMA,
   PROBE_TTL_MS,
+  probeCacheEntries,
   buildProbeCommands,
   entryCandidates,
   pluginIdFromSource,
@@ -114,7 +115,8 @@ test('runProbes：add 失败就不再 dump，且成功失败都进缓存', async
 
 test('探针路由用到的助手都已导入（漏了 `run` 会静默失效——#300 的真实 blocker）', async () => {
   const source = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
-  for (const name of ['run', 'cacheHit', 'runProbes', 'linkTargets']) {
+  // `cacheHit` 在 #359 之后不再由 index.js 直接用（改走 `probeCacheEntries`），列表跟着换。
+  for (const name of ['run', 'probeCacheEntries', 'runProbes', 'linkTargets']) {
     assert.match(source, new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./host/`), `缺少 ${name} 的导入`)
   }
 })
@@ -185,4 +187,31 @@ test('#346 runProbes 用 id 比对 dump，返回结果同时带包名与 id', as
   assert.equal(result.results[0].ok, true, '用包名比对会误报失败，用 id 才对')
   assert.equal(result.results[0].id, 'dsh-auto-upgrade')
   assert.equal(result.results[0].name, 'dsh-plugin-auto-upgrade', '显示仍用包名')
+})
+
+test('#359 缓存键解析：旧格式键丢弃、schema 不匹配丢弃、新键解析出正确的版本与包名', () => {
+  const now = 1_000_000
+  const fresh = { at: now - 1000, ok: true, detail: '装配通过' }
+  const cache = {
+    // 0.9.2 之前的三段键：解析出来会把版本号当插件名，必须丢
+    '0.2.2-rc.1|dsh-plugin-auto-upgrade|123': { at: now - 1000, ok: false, detail: '旧结论' },
+    // schema 不匹配：旧判定逻辑的结论，必须丢
+    '1|0.2.2-rc.1|dsh-plugin-awake|123': { at: now - 1000, ok: false, detail: '更旧的结论' },
+    // 当前 schema：保留
+    [`${PROBE_CACHE_SCHEMA}|0.2.2-rc.1|dsh-plugin-awake|123`]: fresh,
+  }
+  const entries = probeCacheEntries(cache, now)
+  assert.equal(entries.length, 1, '只应留下当前 schema 的那条')
+  assert.equal(entries[0].version, '0.2.2-rc.1', '版本不能被写成 schema 号')
+  assert.equal(entries[0].name, 'dsh-plugin-awake', '名字不能被写成版本号')
+  assert.equal(entries[0].ok, true)
+  assert.equal(entries[0].stale, false)
+})
+
+test('#359 缓存键解析：过期的结论要标 stale，空缓存返回空数组', () => {
+  const now = 10 * 24 * 60 * 60 * 1000
+  const entries = probeCacheEntries({ [`${PROBE_CACHE_SCHEMA}|v|p|1`]: { at: 0, ok: false } }, now)
+  assert.equal(entries[0].stale, true, '超出有效期要标 stale')
+  assert.deepEqual(probeCacheEntries({}, now), [])
+  assert.deepEqual(probeCacheEntries(undefined, now), [])
 })
