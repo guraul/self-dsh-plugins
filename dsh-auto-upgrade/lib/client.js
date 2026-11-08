@@ -364,6 +364,8 @@ window.__ModuleLoader__.load({
     }
 
     const TOKEN_KEY = 'dsh-auto-upgrade-token'
+    // 模块加载时先抓一次：万一页面在首个请求之前就发生内部跳转、query 丢了，也还有存下来的值。
+    void Promise.resolve().then(() => launchToken())
 
     /** 读令牌：URL 优先，其次上次存的；顺带把 URL 上的存下来。 */
     function launchToken() {
@@ -399,13 +401,16 @@ window.__ModuleLoader__.load({
         })
         const payload = await response.json().catch(() => ({}))
         if (response.status === 401) {
-          // 令牌随重启轮换：清掉存的值，并让调用方看到人话提示（issue #375）。
+          // 令牌随重启轮换：清掉存的值并给人话提示（issue #375）。
+          // 注意：若当前 URL 上仍带着旧令牌，下次 `launchToken` 会把它再存回来——那是预期
+          // （URL 才是权威）；这里清的是「没有 query 时」的回退值。
           try {
             sessionStorage.removeItem(TOKEN_KEY)
           } catch {
             /* 忽略 */
           }
-          return { ok: false, error: t('settings.tokenRotated'), code: payload.code, httpStatus: 401 }
+          // `t` 只在组件里（`props.t` / `makeT` 包装），`request` 这层没有它——直接用工厂里的表。
+          return { ok: false, error: makeT(ZH)('settings.tokenRotated'), code: payload.code, httpStatus: 401 }
         }
         return { ...payload, httpStatus: response.status }
       } catch (error) {
@@ -1887,6 +1892,7 @@ window.__ModuleLoader__.load({
     exports.phaseText = phaseText
     exports.behaviourUnverified = behaviourUnverified
     exports.pickToken = pickToken
+    exports.request = request
     exports.passState = passState
     return module.exports
   },

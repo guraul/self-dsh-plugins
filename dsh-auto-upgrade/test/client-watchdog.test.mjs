@@ -153,3 +153,22 @@ test('#375 令牌取值：URL 上有就用 URL 的，没有就用之前存的，
   assert.equal(exported.pickToken('', null), '')
   assert.equal(exported.pickToken(undefined, undefined), '')
 })
+
+test('#375 401 给人话提示且清掉回退值；409/500 原样透传', async () => {
+  const exported = await loadClient()
+  const realFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async () => ({ status: 401, json: async () => ({ ok: false, code: 'E_UNAUTHORIZED' }) })
+    const unauthorized = await exported.request('/x', { method: 'POST' })
+    assert.equal(unauthorized.httpStatus, 401)
+    assert.equal(unauthorized.code, 'E_UNAUTHORIZED')
+    assert.match(unauthorized.error, /令牌已更换|token/i, '要给人话提示，不能是 t is not defined')
+
+    globalThis.fetch = async () => ({ status: 409, json: async () => ({ ok: false, code: 'E_BUSY' }) })
+    const busy = await exported.request('/x', { method: 'POST' })
+    assert.equal(busy.httpStatus, 409, '非 401 要原样透传')
+    assert.equal(busy.code, 'E_BUSY')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
