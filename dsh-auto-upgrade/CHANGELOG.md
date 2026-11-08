@@ -3,6 +3,15 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.9] — 2026-11-08
+
+### 修复
+
+- **重启后旧标签页仍报「启动令牌已更换」**（#377）。同一个标签页里 `sessionStorage` 会跨刷新保留**旧令牌**，
+  光提示「请重开标签页」用户照样卡住。
+  - `GET /status` 增加 `launchUrl`（读 `url.txt` 的当前地址）；
+  - 客户端收到 401 时清掉存的令牌，并**自动跳到当前地址**（每次页面加载只跳一次，防循环）。
+
 ## [0.9.8] — 2026-11-08
 
 ### 修复

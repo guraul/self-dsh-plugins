@@ -524,10 +524,18 @@ export function apply(ctx, config = {}) {
           stores.policy.read(),
           stores.settings.read(),
         ])
+        // 当前启动地址（含令牌）：客户端 401 时据此自动跳转（issue #377）。
+        let launchUrl = null
+        try {
+          launchUrl = urlFile === '' ? null : (await readFile(urlFile, 'utf8')).trim() || null
+        } catch {
+          launchUrl = null
+        }
         const installed = installation === undefined ? null : await readInstalledVersion(installation.manifestPath)
         const active = tasks.active('update') ?? tasks.active('rollback') ?? tasks.active('restart')
         writeJson(res, 200, {
           ok: true,
+          launchUrl,
           plugin: { name: ownPackage.name, version: ownPackage.version },
           dsh: {
             package: DSH_PACKAGE,

@@ -931,3 +931,15 @@ test('#363 fail-closed：url.txt 不存在时写操作一律 401，读操作照�
     await env.close()
   }
 })
+
+test('#377 /status 带上当前启动地址，供客户端 401 时自动跳转', async (t) => {
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const body = await (await fetch(`${env.host.base}${API.status}`)).json()
+    assert.equal(body.ok, true)
+    assert.match(String(body.launchUrl), /token=TEST_TOKEN/, '要把 url.txt 里的地址带出来')
+  } finally {
+    await env.close()
+  }
+})

@@ -364,6 +364,25 @@ window.__ModuleLoader__.load({
     }
 
     const TOKEN_KEY = 'dsh-auto-upgrade-token'
+    /** 每个页面只自动跳一次：跳完还 401 就说明不是令牌问题，别再循环。 */
+    let healed = false
+
+    /** 401 之后读一次当前地址并跳过去；拿不到或已经跳过一次就什么都不做。 */
+    async function healToken() {
+      if (healed) return
+      healed = true
+      try {
+        const response = await fetch(API.status, { cache: 'no-store' })
+        if (!response.ok) return
+        const payload = await response.json().catch(() => ({}))
+        const target = typeof payload.launchUrl === 'string' ? payload.launchUrl : ''
+        if (target === '') return
+        if (target === location.href) return
+        location.replace(target)
+      } catch {
+        /* 拿不到就交给用户手动处理 */
+      }
+    }
     // 模块加载时先抓一次：万一页面在首个请求之前就发生内部跳转、query 丢了，也还有存下来的值。
     void Promise.resolve().then(() => launchToken())
 
@@ -401,14 +420,14 @@ window.__ModuleLoader__.load({
         })
         const payload = await response.json().catch(() => ({}))
         if (response.status === 401) {
-          // 令牌随重启轮换：清掉存的值并给人话提示（issue #375）。
-          // 注意：若当前 URL 上仍带着旧令牌，下次 `launchToken` 会把它再存回来——那是预期
-          // （URL 才是权威）；这里清的是「没有 query 时」的回退值。
+          // 令牌随重启轮换：清掉存的值，然后**自动跳到当前地址**（issue #377）。
+          // 同一个标签页里 sessionStorage 会跨刷新保留旧令牌，光提示「请重开」用户照样卡住。
           try {
             sessionStorage.removeItem(TOKEN_KEY)
           } catch {
             /* 忽略 */
           }
+          void healToken()
           // `t` 只在组件里（`props.t` / `makeT` 包装），`request` 这层没有它——直接用工厂里的表。
           return { ok: false, error: makeT(ZH)('settings.tokenRotated'), code: payload.code, httpStatus: 401 }
         }
