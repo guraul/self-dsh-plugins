@@ -903,7 +903,7 @@ export function apply(ctx: Context, config: Config): void {
   /** 每个企微窗口 `/s` 钉住的会话，重启后从磁盘恢复。 */
   const windowSessions = new Map<string, StoredSessionPin>()
   /** 每个企微窗口上一次 `/s` 列表的完整会话 id 顺序，`/s <序号>` 按它取值（仅内存）。 */
-  const lastSessionLists = new Map<string, string[]>()
+  const lastSessionLists = new Map<string, { ids: string[]; page: number; pages: number }>()
   /** 配置默认工作区在 registry 中的记录；初始化期间解析。 */
   let defaultBinding: WorkspaceBinding | undefined
   /** 兜底绑定的重试时刻：registry 曾失败时按节流继续升级。 */
@@ -2178,50 +2178,58 @@ export function apply(ctx: Context, config: Config): void {
     }
 
     /** `/s` 列表：序号、当前标记、标题与 cwd，第二行给完整 id；按条目截断，渲染时记住本次顺序供 `/s <序号>` 绑定。 */
-    function sessionListText(windowKey: string): string {
+    function sessionListText(windowKey: string, page = 0): string {
       const active = activeSessions()
       if (active.length === 0) {
+        // 边界二（#372）：列表变空就把序号记忆清掉，否则 /s 1 还会按旧列表绑定，
+        // 与刚输出的「没有活跃会话」自相矛盾。
+        lastSessionLists.delete(windowKey)
         return '当前没有活跃会话，先发起一轮对话再用 /s 绑定。'
       }
       const titles = ctx.get('sessionTitle') as SessionTitleService | undefined
       const pinned = activePinFor(windowKey)?.sessionId
-      const footer = '绑定：/s <序号> 或 /s <会话id>　解绑：/s reset　帮助：/s help'
-      const budget = 1600 - Buffer.byteLength(`${footer}\n`, 'utf8')
+      const footer = '绑定：/s <序号> 或 /s <会话id>　翻页：/s more　解绑：/s reset　帮助：/s help'
+      // 给页眉/翻页提示预留：它们要等分页算完才知道写什么，先按最坏情况扣掉。
+      const RESERVE = 96
+      const budget = 1600 - Buffer.byteLength(`${footer}\n`, 'utf8') - RESERVE
       const bytesOf = (text: string): number => Buffer.byteLength(`${text}\n`, 'utf8')
-      const lines = [`📋 活跃会话（共 ${String(active.length)} 个）`]
-      let used = bytesOf(lines[0])
-      // 只存真正显示出来的 id：序号绑定按本次渲染顺序取值，显示不全就绑定不到。
-      const orderedIds: string[] = []
+      // 先把每条渲染好：序号是**全局**的，翻到哪一页都能用 /s <序号> 绑到对应会话。
+      const items: { id: string; text: string }[] = []
       for (let index = 0; index < active.length; index += 1) {
         const session = active[index]
         if (session === undefined) continue
         const marker = session.id === pinned ? '[← 当前] ' : ''
         const title = titles?.get(session)?.title || '(无标题)'
         const cwd = session.header?.cwd ?? '(未知目录)'
-        // 序号按「已入列条数 + 1」编号，保证与 lastSessionLists 的下标一一对齐。
-        const entry = `${String(orderedIds.length + 1)}. ${marker}${title} · ${cwd}\n   id: ${session.id}`
-        // 整条放不下就停：宁可少显示几条，也不硬砍出半个 id。
-        const entryBytes = bytesOf(entry)
-        if (used + entryBytes > budget) break
-        used += entryBytes
-        lines.push(...entry.split('\n'))
-        orderedIds.push(session.id)
+        items.push({
+          id: session.id,
+          text: `${String(items.length + 1)}. ${marker}${title} · ${cwd}\n   id: ${session.id}`,
+        })
       }
-      const hidden = active.length - orderedIds.length
-      if (hidden > 0) {
-        const more = `…还有 ${String(hidden)} 条未显示（可用 /s <完整 id> 绑定）`
-        // 提示行挤不下时回退最后一条，保证「没显示全」这件事一定说清楚。
-        while (orderedIds.length > 0 && used + bytesOf(more) > budget) {
-          lines.pop()
-          lines.pop()
-          orderedIds.pop()
-          used = bytesOf(lines.join('\n'))
+      // 按字节预算切页：整条放不下就翻页，绝不硬砍出半个 id。
+      const pages: { ids: string[]; lines: string[] }[] = []
+      let current: { ids: string[]; lines: string[]; used: number } = { ids: [], lines: [], used: 0 }
+      for (const item of items) {
+        const entryBytes = bytesOf(item.text)
+        if (current.ids.length > 0 && current.used + entryBytes > budget) {
+          pages.push({ ids: current.ids, lines: current.lines })
+          current = { ids: [], lines: [], used: 0 }
         }
-        lines.push(more)
+        current.ids.push(item.id)
+        current.lines.push(...item.text.split('\n'))
+        current.used += entryBytes
       }
-      // 序号绑定按「本次渲染的顺序」取值，与列表逐行对齐。
-      lastSessionLists.set(windowKey, orderedIds)
-      return `${lines.join('\n')}\n${footer}`
+      if (current.ids.length > 0) pages.push({ ids: current.ids, lines: current.lines })
+      const total = Math.max(pages.length, 1)
+      const index = ((page % total) + total) % total
+      const chosen = pages[index] ?? { ids: [], lines: [] }
+      const header = total > 1
+        ? `📋 活跃会话（共 ${String(active.length)} 个，第 ${String(index + 1)}/${String(total)} 页）`
+        : `📋 活跃会话（共 ${String(active.length)} 个）`
+      const hint = total > 1 ? `下一页：/s more（共 ${String(total)} 页，序号可跨页使用）` : ''
+      // 存**全部** id：序号绑定按全局编号取值，与列表逐行对齐。
+      lastSessionLists.set(windowKey, { ids: items.map((item) => item.id), page: index, pages: total })
+      return [header, ...chosen.lines, ...(hint === '' ? [] : [hint]), footer].join('\n')
     }
 
     /**
@@ -2288,6 +2296,12 @@ export function apply(ctx: Context, config: Config): void {
         await replyCommand(frame, sessionListText(ref.key))
         return
       }
+      // 翻页与列表同级：人人可看，不要求切换权限（#372 边界一）。
+      if (command.kind === 'more') {
+        const remembered = lastSessionLists.get(ref.key)
+        await replyCommand(frame, sessionListText(ref.key, remembered === undefined ? 0 : remembered.page + 1))
+        return
+      }
       if (!canManageWorkspace(ref.sender)) {
         await replyCommand(frame, '你没有切换会话的权限（workspaceAllowFrom 未包含你的 userid）')
         return
@@ -2314,11 +2328,11 @@ export function apply(ctx: Context, config: Config): void {
           await replyCommand(frame, '先发 /s 看列表，再用 /s <序号> 绑定')
           return
         }
-        if (command.index > list.length) {
-          await replyCommand(frame, `当前列表只有 ${String(list.length)} 条，先发 /s 重新看`)
+        if (command.index > list.ids.length) {
+          await replyCommand(frame, `当前列表只有 ${String(list.ids.length)} 条，先发 /s 重新看`)
           return
         }
-        await bindWindowToSession(frame, ref, list[command.index - 1])
+        await bindWindowToSession(frame, ref, list.ids[command.index - 1])
         return
       }
 
