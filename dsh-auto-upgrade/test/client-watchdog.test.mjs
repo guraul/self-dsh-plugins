@@ -162,12 +162,18 @@ test('#375 401 给人话提示且清掉回退值；409/500 原样透传', async 
     const unauthorized = await exported.request('/x', { method: 'POST' })
     assert.equal(unauthorized.httpStatus, 401)
     assert.equal(unauthorized.code, 'E_UNAUTHORIZED')
-    assert.match(unauthorized.error, /令牌已更换|token/i, '要给人话提示，不能是 t is not defined')
+    assert.match(unauthorized.error, /令牌已更换/, '要给人话提示，不能是 t is not defined')
+    assert.equal(unauthorized.error.includes('settings.'), false, '不能把文案 key 当文案返回（字典缺键时 makeT 会回退成 key）')
 
     globalThis.fetch = async () => ({ status: 409, json: async () => ({ ok: false, code: 'E_BUSY' }) })
     const busy = await exported.request('/x', { method: 'POST' })
     assert.equal(busy.httpStatus, 409, '非 401 要原样透传')
     assert.equal(busy.code, 'E_BUSY')
+
+    globalThis.fetch = async () => ({ status: 500, json: async () => ({ ok: false, error: 'boom' }) })
+    const broken = await exported.request('/x', { method: 'POST' })
+    assert.equal(broken.httpStatus, 500, '500 也要原样透传')
+    assert.equal(broken.error, 'boom')
   } finally {
     globalThis.fetch = realFetch
   }
