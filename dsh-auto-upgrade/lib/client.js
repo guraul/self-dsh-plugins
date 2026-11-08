@@ -364,25 +364,6 @@ window.__ModuleLoader__.load({
     }
 
     const TOKEN_KEY = 'dsh-auto-upgrade-token'
-    /** 每个页面只自动跳一次：跳完还 401 就说明不是令牌问题，别再循环。 */
-    let healed = false
-
-    /** 401 之后读一次当前地址并跳过去；拿不到或已经跳过一次就什么都不做。 */
-    async function healToken() {
-      if (healed) return
-      healed = true
-      try {
-        const response = await fetch(API.status, { cache: 'no-store' })
-        if (!response.ok) return
-        const payload = await response.json().catch(() => ({}))
-        const target = typeof payload.launchUrl === 'string' ? payload.launchUrl : ''
-        if (target === '') return
-        if (target === location.href) return
-        location.replace(target)
-      } catch {
-        /* 拿不到就交给用户手动处理 */
-      }
-    }
     // 模块加载时先抓一次：万一页面在首个请求之前就发生内部跳转、query 丢了，也还有存下来的值。
     void Promise.resolve().then(() => launchToken())
 
@@ -427,7 +408,6 @@ window.__ModuleLoader__.load({
           } catch {
             /* 忽略 */
           }
-          void healToken()
           // `t` 只在组件里（`props.t` / `makeT` 包装），`request` 这层没有它——直接用工厂里的表。
           return { ok: false, error: makeT(ZH)('settings.tokenRotated'), code: payload.code, httpStatus: 401 }
         }

@@ -24,7 +24,7 @@ import { runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
-import { tokenOf } from './host/token-url.js'
+import { tokenAccepted, tokenOf } from './host/token-url.js'
 import { refreshUrlFile, repoRootFrom } from './host/url-file.mjs'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
@@ -345,6 +345,17 @@ export function apply(ctx, config = {}) {
      * @param {import('node:http').IncomingMessage} req 请求。
      * @returns {Promise<boolean>} 令牌正确返回 true。
      */
+    /**
+     * 启动那一刻 url.txt 里的令牌 = **上一个进程**的令牌。
+     *
+     * 重启后已经打开的页面还拿着它；不认它的话用户必须手动重开标签页（#377 的真机症状）。
+     * 给它一个**有限宽限期**：只在不泄露、且只在启动后一小段时间内有效。
+     */
+    let previousToken
+    /** 宽限期：够用户点一下按钮，又不至于让旧令牌长期可用。 */
+    const PREVIOUS_TOKEN_GRACE_MS = 10 * 60 * 1000
+    const loadedAt = Date.now()
+
     const tokenValid = async (req) => {
       if (urlFile === '') return false
       let current
@@ -356,8 +367,16 @@ export function apply(ctx, config = {}) {
       if (current === undefined) return false
       const header = req.headers['x-dsh-token']
       const fromHeader = Array.isArray(header) ? header[0] : header
-      if (typeof fromHeader === 'string' && fromHeader === current) return true
-      return new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('token') === current
+      const presented = typeof fromHeader === 'string'
+        ? fromHeader
+        : new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('token')
+      return tokenAccepted({
+        current,
+        previous: previousToken,
+        presented: presented ?? undefined,
+        ageMs: Date.now() - loadedAt,
+        graceMs: PREVIOUS_TOKEN_GRACE_MS,
+      })
     }
 
     /** 把写操作包上令牌校验；读操作原样透传。 */
@@ -524,18 +543,10 @@ export function apply(ctx, config = {}) {
           stores.policy.read(),
           stores.settings.read(),
         ])
-        // 当前启动地址（含令牌）：客户端 401 时据此自动跳转（issue #377）。
-        let launchUrl = null
-        try {
-          launchUrl = urlFile === '' ? null : (await readFile(urlFile, 'utf8')).trim() || null
-        } catch {
-          launchUrl = null
-        }
         const installed = installation === undefined ? null : await readInstalledVersion(installation.manifestPath)
         const active = tasks.active('update') ?? tasks.active('rollback') ?? tasks.active('restart')
         writeJson(res, 200, {
           ok: true,
-          launchUrl,
           plugin: { name: ownPackage.name, version: ownPackage.version },
           dsh: {
             package: DSH_PACKAGE,
@@ -1291,6 +1302,13 @@ export function apply(ctx, config = {}) {
       if (port === undefined) {
         console.warn('[dsh-auto-upgrade] url.txt 未刷新：拿不到宿主端口')
         return
+      }
+      // 刷新之前先把**当前** url.txt 里的令牌记下来：刷新后它就是「上一个令牌」，
+      // 重启后没来得及重开的页面还拿着它（#377）。
+      try {
+        previousToken = tokenOf(await readFile(urlFile, 'utf8'))
+      } catch {
+        previousToken = undefined
       }
       const logPath = join(repoRoot, '.dsh-web', 'web.out.log')
       // 基线必须是**字符数**（与 `log.slice` 同口径）：`stat().size` 是字节，中文日志下差几万。
