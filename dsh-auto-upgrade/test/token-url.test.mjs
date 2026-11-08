@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { latestTokenUrl } from '../lib/host/token-url.js'
+import { latestTokenUrl, originDecision, tokenAccepted } from '../lib/host/token-url.js'
 
 /**
  * The launch token is process-scoped and only ever printed to stdout, so
@@ -44,7 +44,6 @@ test('requires a plausible token length so stray query strings do not match', ()
 })
 
 test('#377 宽限期：当前令牌永远可用；上一个令牌只在宽限期内可用', async () => {
-  const { tokenAccepted } = await import('../lib/host/token-url.js')
   const base = { current: 'NEW', previous: 'OLD', graceMs: 600_000 }
   assert.equal(tokenAccepted({ ...base, presented: 'NEW', ageMs: 999_999 }), true, '当前令牌不看时间')
   assert.equal(tokenAccepted({ ...base, presented: 'OLD', ageMs: 1_000 }), true, '刚重启时旧令牌仍可用（旧标签页）')
@@ -54,4 +53,13 @@ test('#377 宽限期：当前令牌永远可用；上一个令牌只在宽限期
   assert.equal(tokenAccepted({ ...base, presented: undefined, ageMs: 0 }), false)
   assert.equal(tokenAccepted({ current: undefined, previous: 'OLD', presented: 'OLD', ageMs: 0 }), false, '没有当前令牌时一律拒绝')
   assert.equal(tokenAccepted({ current: 'NEW', previous: undefined, presented: 'OLD', ageMs: 0 }), false, '没有上一个令牌时不能放行')
+})
+
+test('#383 来源判定三态：同源放行、无该头交给令牌、其余一律拒绝', async () => {
+  assert.equal(originDecision('same-origin'), 'allow')
+  assert.equal(originDecision(undefined), 'token', 'curl / 脚本没有这个头 → 走令牌')
+  assert.equal(originDecision('cross-site'), 'deny')
+  assert.equal(originDecision('same-site'), 'deny')
+  assert.equal(originDecision('none'), 'deny', '用户直接敲地址也不会触发写操作')
+  assert.equal(originDecision(''), 'deny', '空串是「有值」，不能当成没有')
 })

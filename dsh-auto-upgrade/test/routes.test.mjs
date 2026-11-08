@@ -959,3 +959,30 @@ test('#379 写接口按来源判定：同源放行、跨站拒绝、无来源头
     await env.close()
   }
 })
+
+test('#383 上一个令牌的时序：apply 时记下旧令牌，刷新后新旧都认', async (t) => {
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    // 模拟「插件启动后刷新了 url.txt」：把文件改成新令牌。
+    // 若捕获时机错了（在刷新之后才记），旧令牌就会被当成当前令牌，下面的断言会红。
+    await writeFile(join(env.stateDir, 'url.txt'), 'http://127.0.0.1:1/?token=NEWTOKEN\n')
+
+    const previous = await fetch(`${env.host.base}${API.checkAuto}`, {
+      method: 'POST', headers: { 'x-dsh-token': 'TEST_TOKEN' }, body: '{}',
+    })
+    assert.notEqual(previous.status, 401, '启动时记下的旧令牌在宽限期内仍可用')
+
+    const current = await fetch(`${env.host.base}${API.checkAuto}`, {
+      method: 'POST', headers: { 'x-dsh-token': 'NEWTOKEN' }, body: '{}',
+    })
+    assert.notEqual(current.status, 401, '当前令牌当然可用')
+
+    const garbage = await fetch(`${env.host.base}${API.checkAuto}`, {
+      method: 'POST', headers: { 'x-dsh-token': 'NOT-A-TOKEN' }, body: '{}',
+    })
+    assert.equal(garbage.status, 401, '既不是当前也不是上一个 → 拒绝')
+  } finally {
+    await env.close()
+  }
+})
