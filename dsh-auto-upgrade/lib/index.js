@@ -336,26 +336,38 @@ export function apply(ctx, config = {}) {
      * @param {Record<string, Function>} handlers 方法表。
      * @returns {void}
      */
-    /**
-     * 写操作要带启动令牌（issue #363）。
-     *
-     * 路由已有 loopback 围栏（挡跨站浏览器），但**本机任意进程**仍能直接 POST——
-     * `refill/pr` 会真的推分支、开 PR。令牌取自 `url.txt`（配置文件，插件每次启动刷新它）。
-     * 读不到令牌时**拒绝写操作**（fail-closed），读接口不受影响。
-     * @param {import('node:http').IncomingMessage} req 请求。
-     * @returns {Promise<boolean>} 令牌正确返回 true。
-     */
-    /**
-     * 启动那一刻 url.txt 里的令牌 = **上一个进程**的令牌。
-     *
-     * 重启后已经打开的页面还拿着它；不认它的话用户必须手动重开标签页（#377 的真机症状）。
-     * 给它一个**有限宽限期**：只在不泄露、且只在启动后一小段时间内有效。
-     */
+    /** 启动时 url.txt 里的令牌 = **上一个进程**的令牌；重启后没重开的页面还拿着它（#377）。 */
     let previousToken
-    /** 宽限期：够用户点一下按钮，又不至于让旧令牌长期可用。 */
+    /** 上一个令牌的宽限期：够用户点一下按钮，又不至于让旧令牌长期可用。 */
     const PREVIOUS_TOKEN_GRACE_MS = 10 * 60 * 1000
     const loadedAt = Date.now()
 
+    /**
+     * 写操作要不要放行（issue #363 → #379）。
+     *
+     * 宿主给浏览器用的是 **HttpOnly + SameSite=Strict** 的 cookie，并把带令牌的地址 303 重定向到干净地址，
+     * 所以页面 URL 里根本没有 `?token=`——强求浏览器带令牌必然 401（真机实测）。
+     * 改成按**请求来源**判定：
+     *   - `Sec-Fetch-Site: same-origin` → 放行（GUI 自己；这个头由浏览器设置，网页伪造不了）；
+     *   - `cross-site` / `same-site` → 拒绝（跨站 CSRF 的真正威胁）；
+     *   - 没有这个头（curl / 脚本）→ 仍要令牌（`url.txt` 是 0600，脚本读得到）。
+     * @param {import('node:http').IncomingMessage} req 请求。
+     * @returns {Promise<boolean>} 放行返回 true。
+     */
+    const writeAllowed = async (req) => {
+      const site = req.headers['sec-fetch-site']
+      const from = Array.isArray(site) ? site[0] : site
+      if (from === 'same-origin') return true
+      if (from !== undefined) return false
+      return tokenValid(req)
+    }
+
+    /**
+     * 令牌校验：只用于没有 `Sec-Fetch-Site` 的调用方（脚本 / curl）。
+     * 当前令牌永远可用；上一个令牌只在启动后 10 分钟内可用（#377）。
+     * @param {import('node:http').IncomingMessage} req 请求。
+     * @returns {Promise<boolean>} 令牌正确返回 true。
+     */
     const tokenValid = async (req) => {
       if (urlFile === '') return false
       let current
@@ -385,7 +397,7 @@ export function apply(ctx, config = {}) {
       for (const [method, handler] of Object.entries(handlers)) {
         wrapped[method] = method === 'POST'
           ? async (req, res) => {
-            if (!(await tokenValid(req))) {
+            if (!(await writeAllowed(req))) {
               throw new RequestError(401, CODE.UNAUTHORIZED, '缺少或无效的启动令牌（x-dsh-token）')
             }
             return handler(req, res)

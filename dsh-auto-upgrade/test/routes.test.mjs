@@ -931,3 +931,31 @@ test('#363 fail-closed：url.txt 不存在时写操作一律 401，读操作照�
     await env.close()
   }
 })
+
+test('#379 写接口按来源判定：同源放行、跨站拒绝、无来源头要令牌', async (t) => {
+  const env = await makeEnvironment()
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    // 浏览器同源请求（GUI 自己）：不带令牌也必须放行
+    const same = await fetch(`${env.host.base}${API.checkAuto}`, {
+      method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'same-origin' },
+    })
+    assert.notEqual(same.status, 401, '同源请求不该被令牌挡住（宿主用 cookie，URL 里没有 token）')
+
+    // 跨站网页发起的请求：拒绝
+    const cross = await fetch(`${env.host.base}${API.checkAuto}`, {
+      method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'cross-site' },
+    })
+    // 跨站请求在更外层的 loopback 围栏就被挡了（403），到不了令牌校验；两者都算拒绝。
+    assert.equal([401, 403].includes(cross.status), true, `跨站请求必须拒绝（实际 ${String(cross.status)}）`)
+
+    // 脚本 / curl（没有来源头）：仍要令牌
+    const script = await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', body: '{}' })
+    assert.equal(script.status, 401, '无来源头又没令牌，必须拒绝')
+
+    const withToken = await fetch(`${env.host.base}${API.checkAuto}`, { method: 'POST', headers: TOKEN, body: '{}' })
+    assert.notEqual(withToken.status, 401, '带令牌的脚本请求应放行')
+  } finally {
+    await env.close()
+  }
+})
