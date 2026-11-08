@@ -2166,7 +2166,8 @@ export function apply(ctx: Context, config: Config): void {
       '📖 企微会话命令',
       '/s（/session、/会话）— 列出活跃会话并标出当前绑定',
       '/s <会话id> — 把本窗口绑定到指定会话',
-      '/s <序号> — 绑定上一次 /s 列表里的第 N 条',
+      '/s <序号> — 绑定上一次 /s 列表里的第 N 条（序号全局，翻页后仍可用）',
+        '/s more — 翻到下一页（会话多到一屏放不下时）',
       '/s reset — 解除绑定，回到按窗口的默认会话',
       '/s help — 显示本帮助',
       '普通文本仍交给 Agent；以上命令不会发给模型。',
@@ -2190,7 +2191,7 @@ export function apply(ctx: Context, config: Config): void {
       const pinned = activePinFor(windowKey)?.sessionId
       const footer = '绑定：/s <序号> 或 /s <会话id>　翻页：/s more　解绑：/s reset　帮助：/s help'
       // 给页眉/翻页提示预留：它们要等分页算完才知道写什么，先按最坏情况扣掉。
-      const RESERVE = 96
+      const RESERVE = 160
       const budget = 1600 - Buffer.byteLength(`${footer}\n`, 'utf8') - RESERVE
       const bytesOf = (text: string): number => Buffer.byteLength(`${text}\n`, 'utf8')
       // 先把每条渲染好：序号是**全局**的，翻到哪一页都能用 /s <序号> 绑到对应会话。
@@ -2201,10 +2202,17 @@ export function apply(ctx: Context, config: Config): void {
         const marker = session.id === pinned ? '[← 当前] ' : ''
         const title = titles?.get(session)?.title || '(无标题)'
         const cwd = session.header?.cwd ?? '(未知目录)'
-        items.push({
-          id: session.id,
-          text: `${String(items.length + 1)}. ${marker}${title} · ${cwd}\n   id: ${session.id}`,
-        })
+        // 单条就超预算时（标题特别长）截断标题，**保住 id 行**——否则 replyCommand 在 1800 字节处
+        // 截断，正好把 id 行和页脚切掉，又回到「拿不到 id」的老问题（#372 review 轮 1）。
+        const idLine = `\n   id: ${session.id}`
+        let head = `${String(items.length + 1)}. ${marker}${title} · ${cwd}`
+        const room = budget - bytesOf(idLine)
+        if (bytesOf(head) > room) {
+          let cut = head
+          while (cut.length > 0 && bytesOf(cut) > room) cut = cut.slice(0, -1)
+          head = `${cut}…`
+        }
+        items.push({ id: session.id, text: `${head}${idLine}` })
       }
       // 按字节预算切页：整条放不下就翻页，绝不硬砍出半个 id。
       const pages: { ids: string[]; lines: string[] }[] = []
