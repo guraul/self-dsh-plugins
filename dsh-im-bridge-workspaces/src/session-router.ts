@@ -10,6 +10,7 @@
 export type SessionCommand =
   /** `/s`, `/s list`, `/session`, `/会话` — list this window's pinned sessions. */
   | { kind: 'list' }
+  | { kind: 'more' }
   /** `/s help`, `/s ?`, `/s 帮助`. */
   | { kind: 'help' }
   /** `/s reset`, `/s default` — back to the default session. */
@@ -57,6 +58,7 @@ export function parseSessionCommand(text: string): SessionCommand | undefined {
   if (args === '') return { kind: 'list' }
   const lower = args.toLowerCase()
   if (lower === 'list') return { kind: 'list' }
+  if (lower === 'more' || args === '更多') return { kind: 'more' }
   if (lower === 'help' || lower === '?' || args === '帮助') return { kind: 'help' }
   if (lower === 'reset' || lower === 'default') return { kind: 'reset' }
   // A digit-led argument can only be an index: bind it when it is a valid

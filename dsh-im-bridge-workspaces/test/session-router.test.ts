@@ -33,6 +33,12 @@ describe('parseSessionCommand', () => {
     assert.deepEqual(parseSessionCommand('/session 3'), { kind: 'bindIndex', index: 3 })
   })
 
+  it('#372 翻页：/s more 与中文「更多」', () => {
+    assert.deepEqual(parseSessionCommand('/s more'), { kind: 'more' })
+    assert.deepEqual(parseSessionCommand('/s MORE'), { kind: 'more' })
+    assert.deepEqual(parseSessionCommand('/s 更多'), { kind: 'more' })
+  })
+
   it('treats an unusable digit-led argument as plain chat', () => {
     for (const text of ['/s 0', '/s 00', '/s 1a', '/s 1234']) {
       assert.equal(parseSessionCommand(text), undefined, text)

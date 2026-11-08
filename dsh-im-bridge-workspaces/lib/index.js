@@ -772,6 +772,7 @@ function parseSessionCommand(text) {
 	if (args === "") return { kind: "list" };
 	const lower = args.toLowerCase();
 	if (lower === "list") return { kind: "list" };
+	if (lower === "more" || args === "更多") return { kind: "more" };
 	if (lower === "help" || lower === "?" || args === "帮助") return { kind: "help" };
 	if (lower === "reset" || lower === "default") return { kind: "reset" };
 	if (DIGIT_LED_PATTERN.test(args)) {
@@ -10328,7 +10329,8 @@ function apply(ctx, config) {
 			"📖 企微会话命令",
 			"/s（/session、/会话）— 列出活跃会话并标出当前绑定",
 			"/s <会话id> — 把本窗口绑定到指定会话",
-			"/s <序号> — 绑定上一次 /s 列表里的第 N 条",
+			"/s <序号> — 绑定上一次 /s 列表里的第 N 条（序号全局，翻页后仍可用）",
+			"/s more — 翻到下一页（会话多到一屏放不下时）",
 			"/s reset — 解除绑定，回到按窗口的默认会话",
 			"/s help — 显示本帮助",
 			"普通文本仍交给 Agent；以上命令不会发给模型。"
@@ -10338,43 +10340,82 @@ function apply(ctx, config) {
 			return ctx.get("sessions")?.list() ?? [];
 		}
 		/** `/s` 列表：序号、当前标记、标题与 cwd，第二行给完整 id；按条目截断，渲染时记住本次顺序供 `/s <序号>` 绑定。 */
-		function sessionListText(windowKey) {
+		function sessionListText(windowKey, page = 0) {
 			const active = activeSessions();
-			if (active.length === 0) return "当前没有活跃会话，先发起一轮对话再用 /s 绑定。";
+			if (active.length === 0) {
+				lastSessionLists.delete(windowKey);
+				return "当前没有活跃会话，先发起一轮对话再用 /s 绑定。";
+			}
 			const titles = ctx.get("sessionTitle");
 			const pinned = activePinFor(windowKey)?.sessionId;
-			const footer = "绑定：/s <序号> 或 /s <会话id>　解绑：/s reset　帮助：/s help";
-			const budget = 1600 - Buffer.byteLength(`${footer}\n`, "utf8");
+			const footer = "绑定：/s <序号> 或 /s <会话id>　翻页：/s more　解绑：/s reset　帮助：/s help";
+			const budget = 1600 - Buffer.byteLength(`${footer}\n`, "utf8") - 160;
 			const bytesOf = (text) => Buffer.byteLength(`${text}\n`, "utf8");
-			const lines = [`📋 活跃会话（共 ${String(active.length)} 个）`];
-			let used = bytesOf(lines[0]);
-			const orderedIds = [];
+			const items = [];
 			for (let index = 0; index < active.length; index += 1) {
 				const session = active[index];
 				if (session === void 0) continue;
 				const marker = session.id === pinned ? "[← 当前] " : "";
 				const title = titles?.get(session)?.title || "(无标题)";
 				const cwd = session.header?.cwd ?? "(未知目录)";
-				const entry = `${String(orderedIds.length + 1)}. ${marker}${title} · ${cwd}\n   id: ${session.id}`;
-				const entryBytes = bytesOf(entry);
-				if (used + entryBytes > budget) break;
-				used += entryBytes;
-				lines.push(...entry.split("\n"));
-				orderedIds.push(session.id);
-			}
-			const hidden = active.length - orderedIds.length;
-			if (hidden > 0) {
-				const more = `…还有 ${String(hidden)} 条未显示（可用 /s <完整 id> 绑定）`;
-				while (orderedIds.length > 0 && used + bytesOf(more) > budget) {
-					lines.pop();
-					lines.pop();
-					orderedIds.pop();
-					used = bytesOf(lines.join("\n"));
+				const idLine = `\n   id: ${session.id}`;
+				let head = `${String(items.length + 1)}. ${marker}${title} · ${cwd}`;
+				const room = budget - bytesOf(idLine);
+				if (bytesOf(head) > room) {
+					let cut = head;
+					while (cut.length > 0 && bytesOf(cut) > room) cut = cut.slice(0, -1);
+					head = `${cut}…`;
 				}
-				lines.push(more);
+				items.push({
+					id: session.id,
+					text: `${head}${idLine}`
+				});
 			}
-			lastSessionLists.set(windowKey, orderedIds);
-			return `${lines.join("\n")}\n${footer}`;
+			const pages = [];
+			let current = {
+				ids: [],
+				lines: [],
+				used: 0
+			};
+			for (const item of items) {
+				const entryBytes = bytesOf(item.text);
+				if (current.ids.length > 0 && current.used + entryBytes > budget) {
+					pages.push({
+						ids: current.ids,
+						lines: current.lines
+					});
+					current = {
+						ids: [],
+						lines: [],
+						used: 0
+					};
+				}
+				current.ids.push(item.id);
+				current.lines.push(...item.text.split("\n"));
+				current.used += entryBytes;
+			}
+			if (current.ids.length > 0) pages.push({
+				ids: current.ids,
+				lines: current.lines
+			});
+			const total = Math.max(pages.length, 1);
+			const index = (page % total + total) % total;
+			const chosen = pages[index] ?? {
+				ids: [],
+				lines: []
+			};
+			const header = total > 1 ? `📋 活跃会话（共 ${String(active.length)} 个，第 ${String(index + 1)}/${String(total)} 页）` : `📋 活跃会话（共 ${String(active.length)} 个）`;
+			const hint = total > 1 ? index + 1 < total ? `下一页：/s more（共 ${String(total)} 页，序号可跨页使用）` : `已是最后一页，/s more 回到第 1 页（共 ${String(total)} 页）` : "";
+			lastSessionLists.set(windowKey, {
+				ids: items.map((item) => item.id),
+				page: index
+			});
+			return [
+				header,
+				...chosen.lines,
+				...hint === "" ? [] : [hint],
+				footer
+			].join("\n");
 		}
 		/**
 		* 把本窗口绑定到指定会话：先拒归档，再拒子代理，两边都查不到才算「会话不存在」。
@@ -10430,6 +10471,11 @@ function apply(ctx, config) {
 				await replyCommand(frame, sessionListText(ref.key));
 				return;
 			}
+			if (command.kind === "more") {
+				const remembered = lastSessionLists.get(ref.key);
+				await replyCommand(frame, sessionListText(ref.key, remembered === void 0 ? 0 : remembered.page + 1));
+				return;
+			}
 			if (!canManageWorkspace(ref.sender)) {
 				await replyCommand(frame, "你没有切换会话的权限（workspaceAllowFrom 未包含你的 userid）");
 				return;
@@ -10454,11 +10500,11 @@ function apply(ctx, config) {
 					await replyCommand(frame, "先发 /s 看列表，再用 /s <序号> 绑定");
 					return;
 				}
-				if (command.index > list.length) {
-					await replyCommand(frame, `当前列表只有 ${String(list.length)} 条，先发 /s 重新看`);
+				if (command.index > list.ids.length) {
+					await replyCommand(frame, `当前列表只有 ${String(list.ids.length)} 条，先发 /s 重新看`);
 					return;
 				}
-				await bindWindowToSession(frame, ref, list[command.index - 1]);
+				await bindWindowToSession(frame, ref, list.ids[command.index - 1]);
 				return;
 			}
 			await bindWindowToSession(frame, ref, command.sessionId);
