@@ -143,3 +143,13 @@ test('#300 深度口径：门禁放行的插件按「未验证 / 可装配 / 兼
   assert.equal(exported.passState({ declared: { verdict: 'unverified' } }), 'unverified', '从没验过就该显示未验证')
   assert.equal(exported.passState({}), 'unverified')
 })
+
+test('#375 令牌取值：URL 上有就用 URL 的，没有就用之前存的，都没有返回空串', async () => {
+  const exported = await loadClient()
+  assert.equal(exported.pickToken('?token=URLTOKEN', null), 'URLTOKEN')
+  assert.equal(exported.pickToken('?token=URLTOKEN', 'STORED'), 'URLTOKEN', 'URL 优先（重启后页面地址是最新的）')
+  assert.equal(exported.pickToken('', 'STORED'), 'STORED', '页面内跳转后 query 丢了，要用存下的')
+  assert.equal(exported.pickToken('?x=1', 'STORED'), 'STORED')
+  assert.equal(exported.pickToken('', null), '')
+  assert.equal(exported.pickToken(undefined, undefined), '')
+})
