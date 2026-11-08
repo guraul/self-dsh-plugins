@@ -63,3 +63,17 @@ export function tokenAccepted(input) {
   const grace = input.graceMs ?? 10 * 60 * 1000
   return input.previous !== undefined && input.presented === input.previous && input.ageMs <= grace
 }
+
+/**
+ * 按请求来源决定写操作怎么处理。
+ *
+ * 宿主给浏览器用的是 HttpOnly cookie，页面 URL 里没有令牌，所以浏览器路径不能靠令牌（#379）。
+ * `Sec-Fetch-Site` 由浏览器写入、网页伪造不了，用它判定来源。
+ * @param {string|undefined} site `Sec-Fetch-Site` 头的值。
+ * @returns {'allow'|'deny'|'token'} 放行 / 拒绝 / 交给令牌校验（脚本没有这个头）。
+ */
+export function originDecision(site) {
+  if (site === 'same-origin') return 'allow'
+  if (site === undefined) return 'token'
+  return 'deny'
+}

@@ -55,3 +55,13 @@ test('#377 宽限期：当前令牌永远可用；上一个令牌只在宽限期
   assert.equal(tokenAccepted({ current: undefined, previous: 'OLD', presented: 'OLD', ageMs: 0 }), false, '没有当前令牌时一律拒绝')
   assert.equal(tokenAccepted({ current: 'NEW', previous: undefined, presented: 'OLD', ageMs: 0 }), false, '没有上一个令牌时不能放行')
 })
+
+test('#383 来源判定三态：同源放行、无该头交给令牌、其余一律拒绝', async () => {
+  const { originDecision } = await import('../lib/host/token-url.js')
+  assert.equal(originDecision('same-origin'), 'allow')
+  assert.equal(originDecision(undefined), 'token', 'curl / 脚本没有这个头 → 走令牌')
+  assert.equal(originDecision('cross-site'), 'deny')
+  assert.equal(originDecision('same-site'), 'deny')
+  assert.equal(originDecision('none'), 'deny', '用户直接敲地址也不会触发写操作')
+  assert.equal(originDecision(''), 'deny', '空串是「有值」，不能当成没有')
+})

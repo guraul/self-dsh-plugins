@@ -3,6 +3,21 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.11] — 2026-11-08
+
+### 修复
+
+- **上一个令牌的捕获改成同步**（#383）。原来在异步 IIFE 里读 `url.txt`，**抓取完成前到达的写请求**
+  拿到的是 `undefined`，旧页面照样 401——补时序用例时当场抓到。文件只有一个 URL，同步读代价可忽略。
+
+### 测试
+
+- 补三个 review 提过的缺口：
+  - **`sessionStorage` 夹具**（Map 版）：令牌「存下来 / 回落到它 / 401 后清掉」三条主路径原来零覆盖
+    （Node 里没有 `sessionStorage`，全落进 catch）；
+  - **上一个令牌的时序**：夹具写 A → `apply` → 改成 B，验证 A 与 B 都通过、乱令牌被拒；
+  - **来源判定三态**：抽成纯函数 `originDecision(site)`，直接单测（同源放行 / 无头走令牌 / 其余拒绝）。
+
 ## [0.9.10] — 2026-11-08
 
 ### 修复

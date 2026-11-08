@@ -178,3 +178,42 @@ test('#375 401 给人话提示且清掉回退值；409/500 原样透传', async 
     globalThis.fetch = realFetch
   }
 })
+
+/** 装一个 Map 版的 sessionStorage：Node 里没有，而令牌存取正是本次修复的核心路径。 */
+function installSessionStorage() {
+  const store = new Map()
+  globalThis.sessionStorage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)) },
+    removeItem: (key) => { store.delete(key) },
+  }
+  return store
+}
+
+test('#383 令牌真的会存进 sessionStorage，并在 401 后被清掉', async () => {
+  const store = installSessionStorage()
+  const realFetch = globalThis.fetch
+  const realLocation = globalThis.location
+  try {
+    globalThis.location = { search: '?token=URLTOKEN' }
+    globalThis.fetch = async () => ({ status: 200, json: async () => ({ ok: true }) })
+    const exported = await loadClient()
+    await exported.request('/x')
+    assert.equal(store.get('dsh-auto-upgrade-token'), 'URLTOKEN', 'URL 上的令牌要存下来')
+
+    // URL 上没有令牌（GUI 内跳转后）→ 回落到存下来的
+    globalThis.location = { search: '' }
+    globalThis.fetch = async () => ({ status: 200, json: async () => ({ ok: true }) })
+    await exported.request('/x')
+    assert.equal(store.get('dsh-auto-upgrade-token'), 'URLTOKEN', '回落路径不应清掉它')
+
+    // 401 → 清掉
+    globalThis.fetch = async () => ({ status: 401, json: async () => ({ code: 'E_UNAUTHORIZED' }) })
+    await exported.request('/x', { method: 'POST' })
+    assert.equal(store.has('dsh-auto-upgrade-token'), false, '401 后要清掉过期令牌')
+  } finally {
+    globalThis.fetch = realFetch
+    globalThis.location = realLocation
+    delete globalThis.sessionStorage
+  }
+})

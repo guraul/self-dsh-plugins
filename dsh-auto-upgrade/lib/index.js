@@ -24,7 +24,7 @@ import { runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
-import { tokenAccepted, tokenOf } from './host/token-url.js'
+import { originDecision, tokenAccepted, tokenOf } from './host/token-url.js'
 import { refreshUrlFile, repoRootFrom } from './host/url-file.mjs'
 import { createRoute, readJsonBody, RequestError, writeJson } from './host/http.js'
 import { isLoopbackRequest } from './host/loopback.js'
@@ -336,8 +336,18 @@ export function apply(ctx, config = {}) {
      * @param {Record<string, Function>} handlers 方法表。
      * @returns {void}
      */
-    /** 启动时 url.txt 里的令牌 = **上一个进程**的令牌；重启后没重开的页面还拿着它（#377）。 */
+    /**
+     * 启动时 url.txt 里的令牌 = **上一个进程**的令牌；重启后没重开的页面还拿着它（#377）。
+     *
+     * **同步读**：异步读的话，抓取完成前到达的写请求会拿到 undefined，旧页面照样 401（#383 的用例抓到的）。
+     * 文件只有一个 URL，同步读的代价可以忽略。
+     */
     let previousToken
+    try {
+      previousToken = tokenOf(readFileSync(urlFile, 'utf8'))
+    } catch {
+      previousToken = undefined
+    }
     /** 上一个令牌的宽限期：够用户点一下按钮，又不至于让旧令牌长期可用。 */
     const PREVIOUS_TOKEN_GRACE_MS = 10 * 60 * 1000
     const loadedAt = Date.now()
@@ -357,8 +367,9 @@ export function apply(ctx, config = {}) {
     const writeAllowed = async (req) => {
       const site = req.headers['sec-fetch-site']
       const from = Array.isArray(site) ? site[0] : site
-      if (from === 'same-origin') return true
-      if (from !== undefined) return false
+      const decision = originDecision(from)
+      if (decision === 'allow') return true
+      if (decision === 'deny') return false
       return tokenValid(req)
     }
 
@@ -1314,13 +1325,6 @@ export function apply(ctx, config = {}) {
       if (port === undefined) {
         console.warn('[dsh-auto-upgrade] url.txt 未刷新：拿不到宿主端口')
         return
-      }
-      // 刷新之前先把**当前** url.txt 里的令牌记下来：刷新后它就是「上一个令牌」，
-      // 重启后没来得及重开的页面还拿着它（#377）。
-      try {
-        previousToken = tokenOf(await readFile(urlFile, 'utf8'))
-      } catch {
-        previousToken = undefined
       }
       const logPath = join(repoRoot, '.dsh-web', 'web.out.log')
       // 基线必须是**字符数**（与 `log.slice` 同口径）：`stat().size` 是字节，中文日志下差几万。
