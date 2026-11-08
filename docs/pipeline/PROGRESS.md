@@ -156,6 +156,11 @@ GitHub Issue（任务入口）
       `HttpOnly + SameSite=Strict` cookie，并把带令牌的地址 **303** 重定向到干净地址，页面 URL 里根本没有 `?token=`。
       改成按 `Sec-Fetch-Site` 判定：只有 `same-origin` 放行，其余值（`cross-site` / `same-site` / `none`）一律拒绝；无该头（脚本）才要令牌。
       **已知取舍**：本机进程可自带该头绕过——#363「挡本机任意进程」实际只挡住跨站网页（同用户进程本来就能读 `url.txt`）。
+- [x] **补三个测试缺口 + 修同步捕获**（issue #383 / PR #384，0.9.11）：补 `sessionStorage` 夹具（Map 版）、
+      「刷新前记 previousToken」的时序用例、来源判定三态的单测（抽成纯函数 `originDecision`）。
+      补时序用例时**当场抓到真 bug**：`previousToken` 原来在异步 IIFE 里读，抓取完成前的写请求拿到 `undefined`，
+      旧页面照样 401——改成 `apply` 时同步读。
+
 
 > 教训（#379）：**先确认宿主到底怎么认证，再设计鉴权**。前面三个 PR（#369/#376/#378）都在修「令牌怎么拿到」，
 > 而真实前提是「浏览器根本不用令牌」——一个 `curl -D -` 看响应头就能发现。
