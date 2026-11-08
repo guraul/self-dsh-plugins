@@ -10405,11 +10405,10 @@ function apply(ctx, config) {
 				lines: []
 			};
 			const header = total > 1 ? `📋 活跃会话（共 ${String(active.length)} 个，第 ${String(index + 1)}/${String(total)} 页）` : `📋 活跃会话（共 ${String(active.length)} 个）`;
-			const hint = total > 1 ? `下一页：/s more（共 ${String(total)} 页，序号可跨页使用）` : "";
+			const hint = total > 1 ? index + 1 < total ? `下一页：/s more（共 ${String(total)} 页，序号可跨页使用）` : `已是最后一页，/s more 回到第 1 页（共 ${String(total)} 页）` : "";
 			lastSessionLists.set(windowKey, {
 				ids: items.map((item) => item.id),
-				page: index,
-				pages: total
+				page: index
 			});
 			return [
 				header,

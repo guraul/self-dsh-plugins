@@ -903,7 +903,7 @@ export function apply(ctx: Context, config: Config): void {
   /** 每个企微窗口 `/s` 钉住的会话，重启后从磁盘恢复。 */
   const windowSessions = new Map<string, StoredSessionPin>()
   /** 每个企微窗口上一次 `/s` 列表的完整会话 id 顺序，`/s <序号>` 按它取值（仅内存）。 */
-  const lastSessionLists = new Map<string, { ids: string[]; page: number; pages: number }>()
+  const lastSessionLists = new Map<string, { ids: string[]; page: number }>()
   /** 配置默认工作区在 registry 中的记录；初始化期间解析。 */
   let defaultBinding: WorkspaceBinding | undefined
   /** 兜底绑定的重试时刻：registry 曾失败时按节流继续升级。 */
@@ -2167,7 +2167,7 @@ export function apply(ctx: Context, config: Config): void {
       '/s（/session、/会话）— 列出活跃会话并标出当前绑定',
       '/s <会话id> — 把本窗口绑定到指定会话',
       '/s <序号> — 绑定上一次 /s 列表里的第 N 条（序号全局，翻页后仍可用）',
-        '/s more — 翻到下一页（会话多到一屏放不下时）',
+      '/s more — 翻到下一页（会话多到一屏放不下时）',
       '/s reset — 解除绑定，回到按窗口的默认会话',
       '/s help — 显示本帮助',
       '普通文本仍交给 Agent；以上命令不会发给模型。',
@@ -2234,9 +2234,14 @@ export function apply(ctx: Context, config: Config): void {
       const header = total > 1
         ? `📋 活跃会话（共 ${String(active.length)} 个，第 ${String(index + 1)}/${String(total)} 页）`
         : `📋 活跃会话（共 ${String(active.length)} 个）`
-      const hint = total > 1 ? `下一页：/s more（共 ${String(total)} 页，序号可跨页使用）` : ''
+      // 末页别再说「下一页」——再发 /s more 会绕回第 1 页，明说更好。
+      const hint = total > 1
+        ? (index + 1 < total
+          ? `下一页：/s more（共 ${String(total)} 页，序号可跨页使用）`
+          : `已是最后一页，/s more 回到第 1 页（共 ${String(total)} 页）`)
+        : ''
       // 存**全部** id：序号绑定按全局编号取值，与列表逐行对齐。
-      lastSessionLists.set(windowKey, { ids: items.map((item) => item.id), page: index, pages: total })
+      lastSessionLists.set(windowKey, { ids: items.map((item) => item.id), page: index })
       return [header, ...chosen.lines, ...(hint === '' ? [] : [hint]), footer].join('\n')
     }
 
