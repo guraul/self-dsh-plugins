@@ -137,6 +137,7 @@ window.__ModuleLoader__.load({
       'settings.pluginBad': '不兼容',
       'settings.pluginExempt': '已豁免',
       'settings.pluginUnknown': '信息不足',
+      'settings.tokenRotated': '启动令牌已更换（重启会换）：请用 .dsh-web/url.txt 里的新地址重新打开本页',
       'settings.pluginUnverified': '未验证',
       'settings.detail': '不兼容详情',
       'settings.noPlugins': '没有第三方插件',
@@ -241,6 +242,7 @@ window.__ModuleLoader__.load({
       'settings.pluginBad': 'incompatible',
       'settings.pluginExempt': 'exempted',
       'settings.pluginUnknown': 'unknown',
+      'settings.tokenRotated': 'Launch token rotated (it changes on every restart): reopen this page with the URL in .dsh-web/url.txt',
       'settings.pluginUnverified': 'unverified',
       'settings.detail': 'Incompatibility details',
       'settings.noPlugins': 'No third-party plugins',
@@ -347,13 +349,41 @@ window.__ModuleLoader__.load({
      * @param {{method?:string, body?:unknown}} [options] 选项。
      * @returns {Promise<any>} 解析后的结果。
      */
-    /** 启动令牌：写接口要校验它（issue #363）。页面地址上带着，重启会换。 */
+    /**
+     * 启动令牌：写接口要校验它（issue #363）。页面地址上带着，重启会换。
+     *
+     * 只读 `location.search` 不够（issue #375）：GUI 内部跳转后 query 可能没了，
+     * 于是写请求不带令牌 → 401。所以首次拿到后存进 `sessionStorage` 兜底。
+     * @param {string} search `location.search`。
+     * @param {string|null} stored 之前存下的令牌。
+     * @returns {string} 令牌；都没有返回空串。
+     */
+    function pickToken(search, stored) {
+      const fromUrl = new URLSearchParams(search ?? '').get('token') ?? ''
+      return fromUrl !== '' ? fromUrl : (stored ?? '')
+    }
+
+    const TOKEN_KEY = 'dsh-auto-upgrade-token'
+    // 模块加载时先抓一次：万一页面在首个请求之前就发生内部跳转、query 丢了，也还有存下来的值。
+    void Promise.resolve().then(() => launchToken())
+
+    /** 读令牌：URL 优先，其次上次存的；顺带把 URL 上的存下来。 */
     function launchToken() {
+      let stored = null
       try {
-        return new URLSearchParams(location.search).get('token') ?? ''
+        stored = sessionStorage.getItem(TOKEN_KEY)
       } catch {
-        return ''
+        stored = null
       }
+      const token = pickToken(typeof location === 'undefined' ? '' : location.search, stored)
+      if (token !== '' && token !== stored) {
+        try {
+          sessionStorage.setItem(TOKEN_KEY, token)
+        } catch {
+          /* 隐私模式下 sessionStorage 可能不可用，忽略 */
+        }
+      }
+      return token
     }
 
     async function request(url, options = {}) {
@@ -370,6 +400,18 @@ window.__ModuleLoader__.load({
           body: options.body === undefined ? undefined : JSON.stringify(options.body),
         })
         const payload = await response.json().catch(() => ({}))
+        if (response.status === 401) {
+          // 令牌随重启轮换：清掉存的值并给人话提示（issue #375）。
+          // 注意：若当前 URL 上仍带着旧令牌，下次 `launchToken` 会把它再存回来——那是预期
+          // （URL 才是权威）；这里清的是「没有 query 时」的回退值。
+          try {
+            sessionStorage.removeItem(TOKEN_KEY)
+          } catch {
+            /* 忽略 */
+          }
+          // `t` 只在组件里（`props.t` / `makeT` 包装），`request` 这层没有它——直接用工厂里的表。
+          return { ok: false, error: makeT(ZH)('settings.tokenRotated'), code: payload.code, httpStatus: 401 }
+        }
         return { ...payload, httpStatus: response.status }
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error), httpStatus: 0 }
@@ -1849,6 +1891,8 @@ window.__ModuleLoader__.load({
     exports.startWatchdog = startWatchdog
     exports.phaseText = phaseText
     exports.behaviourUnverified = behaviourUnverified
+    exports.pickToken = pickToken
+    exports.request = request
     exports.passState = passState
     return module.exports
   },

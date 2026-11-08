@@ -143,3 +143,38 @@ test('#300 深度口径：门禁放行的插件按「未验证 / 可装配 / 兼
   assert.equal(exported.passState({ declared: { verdict: 'unverified' } }), 'unverified', '从没验过就该显示未验证')
   assert.equal(exported.passState({}), 'unverified')
 })
+
+test('#375 令牌取值：URL 上有就用 URL 的，没有就用之前存的，都没有返回空串', async () => {
+  const exported = await loadClient()
+  assert.equal(exported.pickToken('?token=URLTOKEN', null), 'URLTOKEN')
+  assert.equal(exported.pickToken('?token=URLTOKEN', 'STORED'), 'URLTOKEN', 'URL 优先（重启后页面地址是最新的）')
+  assert.equal(exported.pickToken('', 'STORED'), 'STORED', '页面内跳转后 query 丢了，要用存下的')
+  assert.equal(exported.pickToken('?x=1', 'STORED'), 'STORED')
+  assert.equal(exported.pickToken('', null), '')
+  assert.equal(exported.pickToken(undefined, undefined), '')
+})
+
+test('#375 401 给人话提示且清掉回退值；409/500 原样透传', async () => {
+  const exported = await loadClient()
+  const realFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async () => ({ status: 401, json: async () => ({ ok: false, code: 'E_UNAUTHORIZED' }) })
+    const unauthorized = await exported.request('/x', { method: 'POST' })
+    assert.equal(unauthorized.httpStatus, 401)
+    assert.equal(unauthorized.code, 'E_UNAUTHORIZED')
+    assert.match(unauthorized.error, /令牌已更换/, '要给人话提示，不能是 t is not defined')
+    assert.equal(unauthorized.error.includes('settings.'), false, '不能把文案 key 当文案返回（字典缺键时 makeT 会回退成 key）')
+
+    globalThis.fetch = async () => ({ status: 409, json: async () => ({ ok: false, code: 'E_BUSY' }) })
+    const busy = await exported.request('/x', { method: 'POST' })
+    assert.equal(busy.httpStatus, 409, '非 401 要原样透传')
+    assert.equal(busy.code, 'E_BUSY')
+
+    globalThis.fetch = async () => ({ status: 500, json: async () => ({ ok: false, error: 'boom' }) })
+    const broken = await exported.request('/x', { method: 'POST' })
+    assert.equal(broken.httpStatus, 500, '500 也要原样透传')
+    assert.equal(broken.error, 'boom')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})

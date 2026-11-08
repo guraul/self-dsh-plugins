@@ -3,6 +3,15 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.8] — 2026-11-08
+
+### 修复
+
+- **设置页写操作报「缺少或无效的启动令牌」**（#375）。客户端原来只从 `location.search` 取令牌：
+  GUI 内部跳转后 query 可能没了、或页面是重启前打开的（令牌随重启轮换），都会导致写请求不带令牌。
+  - 首次取到后存进 `sessionStorage`，URL 上没有时回落到它；
+  - 收到 401 时清掉存的值，并给出人话提示：「启动令牌已更换，请用 `.dsh-web/url.txt` 里的新地址重新打开本页」。
+
 ## [0.9.7] — 2026-11-07
 
 ### 修复
