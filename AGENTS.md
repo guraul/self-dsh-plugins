@@ -107,5 +107,11 @@ macOS 环境与并发纪律的通用条目见 `~/.dsh/AGENTS.md` §12（bash 3.2
 - **改了 profile 的 `link:` 目标路径后，必须在 `~/.dsh/profiles/web` 跑一次 `pnpm install`**，
   否则 `node_modules/<包名>` 软链悬空、插件加载失败。
 - **不要 `rm -rf` 已装插件的目录**：正在运行的宿主已把模块载入内存，但任何重组合 / 重启都会失败。
+- **分支号必须等于 issue 号，且要「复制」不要「手打」**：建 worktree 前从
+  `gh api ... --jq '"issue #\(.number)"'` 的输出里把号复制过来。
+  `open-pr.sh` 按分支名里的号去取 issue——号错了会认领**别人的 issue**：2026-11-07 建了 `task/325-…`
+  而自己的 issue 是 #326，`Closes #325` 直接把别人的 issue 关掉了；2026-11-08 又建了 `task/372-…`
+  而自己的是 #373，PR 标题被写成 #372 的，squash 后 main 上留下一条**描述错误改动**的提交（提交信息改不了）。
+- **PR 标题会被 squash 成 main 的提交信息**：合并前核对标题写的是不是这次改动；写错就永久留在历史里。
 - **刷新 `tools/` 里的共享包不能靠 `pnpm update`**（会复用旧缓存，装出旧包）；锁文件不入库，
   正确做法见 [pipeline 手册「刷新共享包」](./docs/pipeline/README.md#刷新共享包tools)。
