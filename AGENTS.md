@@ -1,6 +1,6 @@
 # AGENTS.md — self-dsh-plugins
 
-**Updated:** 2026-10-23
+**Updated:** 2026-11-08
 
 给在本仓库工作的 AI agent 的说明。本文件只承担**路由**与**强制规定**两个职责：
 插件细节、流程细节、历史细节一律在 `docs/` 里（见下面的路由表），**不要在本文重复**。
@@ -107,5 +107,15 @@ macOS 环境与并发纪律的通用条目见 `~/.dsh/AGENTS.md` §12（bash 3.2
 - **改了 profile 的 `link:` 目标路径后，必须在 `~/.dsh/profiles/web` 跑一次 `pnpm install`**，
   否则 `node_modules/<包名>` 软链悬空、插件加载失败。
 - **不要 `rm -rf` 已装插件的目录**：正在运行的宿主已把模块载入内存，但任何重组合 / 重启都会失败。
+- **分支号必须等于 issue 号，且要「复制」不要「手打」**：开 issue 时用
+  `gh api --method POST repos/<owner>/<repo>/issues -f title=… -F body=@<文件> --jq '"issue #\(.number)"'`，
+  它会直接打印 `issue #385`，把那个号**复制**进 `scripts/pipeline/new-task.sh <号>`——建分支与 worktree
+  由它做（自己手搓 `git worktree add` 容易把 slug 写得不符合 `task/<号>-<slug>` 契约，后续开 PR 会被拒）。
+  `open-pr.sh` 按分支名里的号去取 issue——号错了会认领**别人的 issue**：2026-11-05 建了 `task/325-…`
+  而自己的 issue 是 #326，`Closes #325` 直接把别人的 issue 关掉了（后人工 reopen）；2026-11-07 又建了
+  `task/372-…` 而自己的是 #373，PR 标题被写成 #372 的，squash 后 main 上留下一条**描述错误改动**的提交。
+  已经建错分支时：`open-pr.sh --issue <号>` **救不了**（分支名带号且与 `--issue` 不一致会被直接拒绝），
+  正确做法是 `git branch -m task/<真正的号>-<slug>` 再开 PR。
+- **PR 标题会被 squash 成 main 的提交信息**：合并前核对标题写的是不是这次改动；写错就永久留在历史里。
 - **刷新 `tools/` 里的共享包不能靠 `pnpm update`**（会复用旧缓存，装出旧包）；锁文件不入库，
   正确做法见 [pipeline 手册「刷新共享包」](./docs/pipeline/README.md#刷新共享包tools)。
