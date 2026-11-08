@@ -3,6 +3,17 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.10] — 2026-11-08
+
+### 修复
+
+- **设置页写操作全部 401**（#379）。根因是设计前提错了：宿主给浏览器用的是 **HttpOnly + SameSite=Strict**
+  的 cookie，并把带令牌的地址 **303 重定向**到干净地址——页面 URL 里根本没有 `?token=`，
+  客户端读 `location.search` 只能拿到空串。令牌方案与宿主的认证方式不兼容。
+  - 写接口改成按**请求来源**判定：`Sec-Fetch-Site: same-origin` 放行；`cross-site` / `same-site` 拒绝；
+    没有这个头（curl / 脚本）仍要令牌；
+  - `Sec-Fetch-Site` 由浏览器设置，网页伪造不了；配合 loopback 围栏与 `SameSite=Strict`，跨站网页无法触发写操作。
+
 ## [0.9.9] — 2026-11-08
 
 ### 修复
