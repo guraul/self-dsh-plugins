@@ -109,7 +109,8 @@ macOS 环境与并发纪律的通用条目见 `~/.dsh/AGENTS.md` §12（bash 3.2
 - **不要 `rm -rf` 已装插件的目录**：正在运行的宿主已把模块载入内存，但任何重组合 / 重启都会失败。
 - **分支号必须等于 issue 号，且要「复制」不要「手打」**：开 issue 时用
   `gh api --method POST repos/<owner>/<repo>/issues -f title=… -F body=@<文件> --jq '"issue #\(.number)"'`，
-  它会直接打印 `issue #385`，把那个号**复制**进 `git worktree add -b task/<号>-<slug>`。
+  它会直接打印 `issue #385`，把那个号**复制**进 `scripts/pipeline/new-task.sh <号>`——建分支与 worktree
+  由它做（自己手搓 `git worktree add` 容易把 slug 写得不符合 `task/<号>-<slug>` 契约，后续开 PR 会被拒）。
   `open-pr.sh` 按分支名里的号去取 issue——号错了会认领**别人的 issue**：2026-11-05 建了 `task/325-…`
   而自己的 issue 是 #326，`Closes #325` 直接把别人的 issue 关掉了（后人工 reopen）；2026-11-07 又建了
   `task/372-…` 而自己的是 #373，PR 标题被写成 #372 的，squash 后 main 上留下一条**描述错误改动**的提交。
