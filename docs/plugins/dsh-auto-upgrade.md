@@ -205,7 +205,7 @@ pnpm run check                                # node --check
 
 - dsh web 实例日志目录下的 `url.txt`（本机 `<repo>/.dsh-web/url.txt`）：helper 拉起新宿主后，
   从 `launchctl print` 给出的 `stdout path` 里取**最后一条** `?token=…` 写回；拿不到 launchd
-  路径时退回 helper 自己的 `$OUT`。token 是进程级的，别指望它跨重启不变。
+  路径时退回 helper 自己的 `$OUT`。token 是进程级的，重启会换；**启动后 10 分钟内也接受上一个令牌**（旧标签页不必立刻重开，0.9.9 起）。
   **写入前两判据缺一不可**（issue #293 的竞态修复）：① 只认重启后新出现的 URL——helper 在
   `relaunch` **之前**用 `refresh-url.mjs --print-latest` 抓 baseline，刷新时 `--previous` 传回，
   与 baseline 相同就 `exit 1` 继续重试；② 候选 URL 必须真能认证——`fetch(url, { redirect: 'manual',

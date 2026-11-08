@@ -402,8 +402,8 @@ window.__ModuleLoader__.load({
         const payload = await response.json().catch(() => ({}))
         if (response.status === 401) {
           // 令牌随重启轮换：清掉存的值并给人话提示（issue #375）。
-          // 注意：若当前 URL 上仍带着旧令牌，下次 `launchToken` 会把它再存回来——那是预期
-          // （URL 才是权威）；这里清的是「没有 query 时」的回退值。
+          // 服务端在启动后 10 分钟内也认上一个令牌（#377），所以旧页面通常还能用；
+          // 真过期了才需要用户按提示重开。
           try {
             sessionStorage.removeItem(TOKEN_KEY)
           } catch {

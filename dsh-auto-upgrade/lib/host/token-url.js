@@ -43,3 +43,23 @@ export function tokenOf(text) {
   const matched = /[?&]token=([A-Za-z0-9_-]+)/.exec(String(text ?? ''))
   return matched === null ? undefined : matched[1]
 }
+
+/**
+ * 判定请求带来的令牌是否可用。
+ *
+ * 除了当前令牌，还接受**上一个令牌**——重启后已经打开的页面还拿着它，
+ * 不认的话用户必须手动重开标签页（#377 的真机症状）。但只给一段宽限期，不让旧令牌长期有效。
+ * @param {object} input 输入。
+ * @param {string|undefined} input.current 当前令牌。
+ * @param {string|undefined} input.previous 启动时记下的上一个令牌。
+ * @param {string|undefined} input.presented 请求带来的令牌。
+ * @param {number} input.ageMs 距启动过了多久。
+ * @param {number} [input.graceMs] 宽限期，默认 10 分钟。
+ * @returns {boolean} 可用返回 true。
+ */
+export function tokenAccepted(input) {
+  if (input.current === undefined || input.presented === undefined) return false
+  if (input.presented === input.current) return true
+  const grace = input.graceMs ?? 10 * 60 * 1000
+  return input.previous !== undefined && input.presented === input.previous && input.ageMs <= grace
+}
