@@ -48,6 +48,7 @@ test('#377 宽限期：当前令牌永远可用；上一个令牌只在宽限期
   const base = { current: 'NEW', previous: 'OLD', graceMs: 600_000 }
   assert.equal(tokenAccepted({ ...base, presented: 'NEW', ageMs: 999_999 }), true, '当前令牌不看时间')
   assert.equal(tokenAccepted({ ...base, presented: 'OLD', ageMs: 1_000 }), true, '刚重启时旧令牌仍可用（旧标签页）')
+  assert.equal(tokenAccepted({ ...base, presented: 'OLD', ageMs: 600_000 }), true, '边界（正好等于宽限期）仍算可用')
   assert.equal(tokenAccepted({ ...base, presented: 'OLD', ageMs: 600_001 }), false, '过了宽限期就不认了')
   assert.equal(tokenAccepted({ ...base, presented: 'GUESS', ageMs: 0 }), false)
   assert.equal(tokenAccepted({ ...base, presented: undefined, ageMs: 0 }), false)

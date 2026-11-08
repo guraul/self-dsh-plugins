@@ -401,8 +401,9 @@ window.__ModuleLoader__.load({
         })
         const payload = await response.json().catch(() => ({}))
         if (response.status === 401) {
-          // 令牌随重启轮换：清掉存的值，然后**自动跳到当前地址**（issue #377）。
-          // 同一个标签页里 sessionStorage 会跨刷新保留旧令牌，光提示「请重开」用户照样卡住。
+          // 令牌随重启轮换：清掉存的值并给人话提示（issue #375）。
+          // 服务端在启动后 10 分钟内也认上一个令牌（#377），所以旧页面通常还能用；
+          // 真过期了才需要用户按提示重开。
           try {
             sessionStorage.removeItem(TOKEN_KEY)
           } catch {
