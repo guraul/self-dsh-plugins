@@ -14,6 +14,84 @@ import { createRequire as createRequire$1 } from "module";
 // \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod, mod.exports), cb = null), mod.exports);
 var __require = /* #__PURE__ */ (() => createRequire(import.meta.url))();
+// src/session-list.ts
+/** 按 UTF-8 字节数（含行尾换行）计长，和企微的 2048 字节上限同一口径。 */
+function bytesOf(text) {
+	return Buffer.byteLength(`${text}\n`, "utf8");
+}
+/**
+* 把「标题行 + id 行」压到预算内：**先截标题，保住 id 行**。
+*
+* 否则整条溢出后会被 `replyCommand` 在 1800 字节处截断，正好切掉 id 行和页脚，
+* 用户又拿不到 id（#372 review 轮 1 抓到的正是这个）。
+* @param head 标题行（不含 id 行）。
+* @param idLine id 行（以换行开头）。
+* @param budget 这一条允许占用的字节数。
+* @returns 放得下的标题行（必要时带 `…`）与 id 行拼起来的完整文本。
+*/
+function fitEntry(head, idLine, budget) {
+	const room = budget - bytesOf(idLine);
+	if (bytesOf(head) <= room) return `${head}${idLine}`;
+	let cut = [...head];
+	while (cut.length > 0 && bytesOf(`${cut.join("")}…`) > room) cut = cut.slice(0, -1);
+	return `${cut.join("")}…${idLine}`;
+}
+/**
+* 按字节预算把条目切成页。
+*
+* 整条放不下就翻页，不硬砍；单条自身超预算时独占一页（由 {@link fitEntry} 先压过）。
+* @param entries 待分页的条目（顺序即全局序号）。
+* @param budget 每页可用字节数（已扣掉页眉与页脚）。
+* @returns 至少一页；空输入返回空数组。
+*/
+function buildListPages(entries, budget) {
+	const pages = [];
+	let current = {
+		ids: [],
+		lines: [],
+		used: 0
+	};
+	for (const entry of entries) {
+		const entryBytes = bytesOf(entry.text);
+		if (current.ids.length > 0 && current.used + entryBytes > budget) {
+			pages.push({
+				ids: current.ids,
+				lines: current.lines
+			});
+			current = {
+				ids: [],
+				lines: [],
+				used: 0
+			};
+		}
+		current.ids.push(entry.id);
+		current.lines.push(...entry.text.split("\n"));
+		current.used += entryBytes;
+	}
+	if (current.ids.length > 0) pages.push({
+		ids: current.ids,
+		lines: current.lines
+	});
+	return pages;
+}
+/**
+* 取第 `page` 页；越界与负数都按取模回绕（`/s more` 在末页会回到第 1 页）。
+* @param pages {@link buildListPages} 的结果。
+* @param page 请求的页码（0 起）。
+* @returns 归一后的页码与该页；`pages` 为空时返回第 0 页的空页。
+*/
+function pickPage(pages, page) {
+	const total = Math.max(pages.length, 1);
+	const index = (Math.trunc(page) % total + total) % total;
+	return {
+		index,
+		total,
+		page: pages[index] ?? {
+			ids: [],
+			lines: []
+		}
+	};
+}
 // src/approval.ts
 /** Button keys carry the request id after the colon. */
 const APPROVE_PREFIX = "approve:";
@@ -10349,8 +10427,7 @@ function apply(ctx, config) {
 			const titles = ctx.get("sessionTitle");
 			const pinned = activePinFor(windowKey)?.sessionId;
 			const footer = "绑定：/s <序号> 或 /s <会话id>　翻页：/s more　解绑：/s reset　帮助：/s help";
-			const budget = 1600 - Buffer.byteLength(`${footer}\n`, "utf8") - 160;
-			const bytesOf = (text) => Buffer.byteLength(`${text}\n`, "utf8");
+			const budget = 1600 - bytesOf(footer) - 160;
 			const items = [];
 			for (let index = 0; index < active.length; index += 1) {
 				const session = active[index];
@@ -10358,52 +10435,13 @@ function apply(ctx, config) {
 				const marker = session.id === pinned ? "[← 当前] " : "";
 				const title = titles?.get(session)?.title || "(无标题)";
 				const cwd = session.header?.cwd ?? "(未知目录)";
-				const idLine = `\n   id: ${session.id}`;
-				let head = `${String(items.length + 1)}. ${marker}${title} · ${cwd}`;
-				const room = budget - bytesOf(idLine);
-				if (bytesOf(head) > room) {
-					let cut = head;
-					while (cut.length > 0 && bytesOf(cut) > room) cut = cut.slice(0, -1);
-					head = `${cut}…`;
-				}
+				const head = `${String(items.length + 1)}. ${marker}${title} · ${cwd}`;
 				items.push({
 					id: session.id,
-					text: `${head}${idLine}`
+					text: fitEntry(head, `\n   id: ${session.id}`, budget)
 				});
 			}
-			const pages = [];
-			let current = {
-				ids: [],
-				lines: [],
-				used: 0
-			};
-			for (const item of items) {
-				const entryBytes = bytesOf(item.text);
-				if (current.ids.length > 0 && current.used + entryBytes > budget) {
-					pages.push({
-						ids: current.ids,
-						lines: current.lines
-					});
-					current = {
-						ids: [],
-						lines: [],
-						used: 0
-					};
-				}
-				current.ids.push(item.id);
-				current.lines.push(...item.text.split("\n"));
-				current.used += entryBytes;
-			}
-			if (current.ids.length > 0) pages.push({
-				ids: current.ids,
-				lines: current.lines
-			});
-			const total = Math.max(pages.length, 1);
-			const index = (page % total + total) % total;
-			const chosen = pages[index] ?? {
-				ids: [],
-				lines: []
-			};
+			const { index, total, page: chosen } = pickPage(buildListPages(items, budget), page);
 			const header = total > 1 ? `📋 活跃会话（共 ${String(active.length)} 个，第 ${String(index + 1)}/${String(total)} 页）` : `📋 活跃会话（共 ${String(active.length)} 个）`;
 			const hint = total > 1 ? index + 1 < total ? `下一页：/s more（共 ${String(total)} 页，序号可跨页使用）` : `已是最后一页，/s more 回到第 1 页（共 ${String(total)} 页）` : "";
 			lastSessionLists.set(windowKey, {

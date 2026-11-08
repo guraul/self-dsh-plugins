@@ -21,6 +21,8 @@ import {
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildListPages, bytesOf, fitEntry, pickPage } from './session-list.ts'
+import type { ListEntry } from './session-list.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
@@ -2192,45 +2194,21 @@ export function apply(ctx: Context, config: Config): void {
       const footer = '绑定：/s <序号> 或 /s <会话id>　翻页：/s more　解绑：/s reset　帮助：/s help'
       // 给页眉/翻页提示预留：它们要等分页算完才知道写什么，先按最坏情况扣掉。
       const RESERVE = 160
-      const budget = 1600 - Buffer.byteLength(`${footer}\n`, 'utf8') - RESERVE
-      const bytesOf = (text: string): number => Buffer.byteLength(`${text}\n`, 'utf8')
+      const budget = 1600 - bytesOf(footer) - RESERVE
       // 先把每条渲染好：序号是**全局**的，翻到哪一页都能用 /s <序号> 绑到对应会话。
-      const items: { id: string; text: string }[] = []
+      const items: ListEntry[] = []
       for (let index = 0; index < active.length; index += 1) {
         const session = active[index]
         if (session === undefined) continue
         const marker = session.id === pinned ? '[← 当前] ' : ''
         const title = titles?.get(session)?.title || '(无标题)'
         const cwd = session.header?.cwd ?? '(未知目录)'
-        // 单条就超预算时（标题特别长）截断标题，**保住 id 行**——否则 replyCommand 在 1800 字节处
-        // 截断，正好把 id 行和页脚切掉，又回到「拿不到 id」的老问题（#372 review 轮 1）。
-        const idLine = `\n   id: ${session.id}`
-        let head = `${String(items.length + 1)}. ${marker}${title} · ${cwd}`
-        const room = budget - bytesOf(idLine)
-        if (bytesOf(head) > room) {
-          let cut = head
-          while (cut.length > 0 && bytesOf(cut) > room) cut = cut.slice(0, -1)
-          head = `${cut}…`
-        }
-        items.push({ id: session.id, text: `${head}${idLine}` })
+        // 单条就超预算时截断标题、**保住 id 行**：否则 replyCommand 在 1800 字节处截断，
+        // 正好切掉 id 行和页脚，又回到「拿不到 id」的老问题（#372 review 轮 1）。
+        const head = `${String(items.length + 1)}. ${marker}${title} · ${cwd}`
+        items.push({ id: session.id, text: fitEntry(head, `\n   id: ${session.id}`, budget) })
       }
-      // 按字节预算切页：整条放不下就翻页，绝不硬砍出半个 id。
-      const pages: { ids: string[]; lines: string[] }[] = []
-      let current: { ids: string[]; lines: string[]; used: number } = { ids: [], lines: [], used: 0 }
-      for (const item of items) {
-        const entryBytes = bytesOf(item.text)
-        if (current.ids.length > 0 && current.used + entryBytes > budget) {
-          pages.push({ ids: current.ids, lines: current.lines })
-          current = { ids: [], lines: [], used: 0 }
-        }
-        current.ids.push(item.id)
-        current.lines.push(...item.text.split('\n'))
-        current.used += entryBytes
-      }
-      if (current.ids.length > 0) pages.push({ ids: current.ids, lines: current.lines })
-      const total = Math.max(pages.length, 1)
-      const index = ((page % total) + total) % total
-      const chosen = pages[index] ?? { ids: [], lines: [] }
+      const { index, total, page: chosen } = pickPage(buildListPages(items, budget), page)
       const header = total > 1
         ? `📋 活跃会话（共 ${String(active.length)} 个，第 ${String(index + 1)}/${String(total)} 页）`
         : `📋 活跃会话（共 ${String(active.length)} 个）`
