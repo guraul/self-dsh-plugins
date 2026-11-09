@@ -43,7 +43,7 @@
 | 历史归档（已废弃的方案，仅存档） | [`docs/archive/`](./docs/archive/README.md) |
 | 某插件的安装 / 配置 / 已知限制（面向使用者） | 各插件目录的 `README.md` |
 | dsh 升级 / 回滚 / 恢复 | [`upgrade-dsh.sh`](./upgrade-dsh.sh) + dsh-auto-upgrade 插件 |
-| DSH 版本兼容与版本豁免 | [`docs/plugins/dsh-plugin-product-subagents.md`](./docs/plugins/dsh-plugin-product-subagents.md)（发版纪律）+ [pipeline 手册 §四红线 4](./docs/pipeline/README.md) |
+| DSH 版本兼容与版本豁免 | [`docs/plugins/dsh-plugin-product-subagents.md`](./docs/plugins/dsh-plugin-product-subagents.md)（发版纪律）+ [版本豁免](./docs/pipeline/README.md#版本豁免) |
 
 ## 插件索引
 

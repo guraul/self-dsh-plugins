@@ -46,3 +46,39 @@
 契约是唯一规范来源：[`docs/CONTRACT.md`](https://github.com/guraul/dsh-pipeline/blob/main/docs/CONTRACT.md)。
 本文件只写「怎么跑」，不重复参数与退出码——逐命令细节查契约 §3 / §4。
 <!-- <<< dsh-pipeline 生成区结束（以下可追加本仓自己的内容） -->
+
+## 五、本仓追加约定（生成区之外）
+
+本节由本仓自己维护，`init` 不比对、也不会被覆盖。旧版手写手册已整体归档到
+[`docs/archive/pipeline/docs-pipeline-README.md`](../archive/pipeline/docs-pipeline-README.md)（仅存档，不要照它操作）。
+
+### worktree 与分支命名契约
+
+| 项 | 契约 |
+|---|---|
+| 分支名 | `task/<issue号>-<slug>`（由 `new-task.sh` 生成，不要手搓） |
+| worktree 路径 | `.worktrees/<issue号>-<slug>`，相对仓库根；一律从主仓根执行 |
+| 基线 | 必须基于 `origin/main`（`new-task.sh` 内置） |
+| 位置 | worktree 绝不能嵌在插件子目录里（在子目录里跑 `git worktree add` 会嵌错层级） |
+| 清理 | issue / PR 关闭后立刻 `git worktree remove --force <path>` → `git branch -D task/<N>-<slug>` → `git worktree prune` → `git worktree list` 确认只剩主工作区 |
+| 为什么 `-D` | squash 合并后原提交不是 `main` 的祖先，`-d` 会拒绝删除 |
+
+**memx 例外**：memx 被宿主从主仓加载源码，worktree 不能建在仓内——它的 `new-task.sh` 固定传
+`task --worktrees-dir /Users/gubin/workspace/memx-worktrees`，worktree 落在仓外的
+`~/workspace/memx-worktrees/<号>-<slug>`，上表的 `.worktrees/` 契约不适用于它。
+
+### 刷新共享包（`tools/`）
+
+包源码改完后：在包仓跑 `pnpm run pack`（产出 `dist/pkg`），然后在本仓
+`rm -rf tools/node_modules tools/pnpm-lock.yaml && pnpm --dir tools install`，
+再用 `node tools/node_modules/dsh-pipeline/bin/cli.mjs --version` 确认拿到新构建（带 sha 与 builtAt，不是「源码运行」）。
+
+两条经验：**不要用 `pnpm update`**（会复用旧缓存，装出来还是旧包，见 issue #231）；
+重装后新生成的 `tools/pnpm-lock.yaml` **不要提交**（`.gitignore` 已覆盖）。
+
+### 版本豁免
+
+版本豁免是逃生舱，只在拿到用户对**具体版本组合**的明确同意后才用（CLI 需 `--accept-risk`），
+用完必须撤销——`dsh plugin --profile web version-exemptions` 应回到 `{}`。插件升版本或 DSH 升版本都会让它自动失效。
+完整顺序见本仓 [`AGENTS.md`](../../AGENTS.md) 强制规定第 6 条与
+[`docs/plugins/dsh-plugin-product-subagents.md`](../plugins/dsh-plugin-product-subagents.md)。
