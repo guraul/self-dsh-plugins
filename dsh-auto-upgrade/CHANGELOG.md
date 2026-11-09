@@ -3,6 +3,17 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.13] — 2026-11-09
+
+### 测试
+
+- **守住试装修复的那条用例在 CI 里从来没跑过**（#400）。`test/probe-profile.test.mjs` 的第 2 条依赖真实
+  `dsh`（`which dsh` 找不到就 `skip`），而 CI runner 没装 dsh——绿灯给的是假信心。
+  - 新增 `lib/host/probe-run.js` 的 `runProbeWithProfile()`：先建 profile 再跑探针，`ensure` 抛错就不跑；
+  - 新用例断言**顺序**与「建失败不跑探针」，**完全不碰 dsh**，CI 可跑；
+  - 变异验证：把两步顺序调换，用例立刻红；
+  - 原真机用例保留，标题写明「本机集成，CI 无 dsh 会 skip」。
+
 ## [0.9.12] — 2026-11-09
 
 ### 修复
