@@ -1281,21 +1281,38 @@ export function apply(ctx: Context, config: Config): void {
 
   void (async () => {
     const loader = ctx.get('loader') as LoaderTree | undefined
-    await loader?.await()
+    // 时间盒：loader 等待卡住时不能拖住 WebSocket 连接——先连企微，其余按需补齐。
+    // 超时不抛错：消息通路优先，loader 只影响工作区登记的时机，后续由按需重试收尾。
+    let loaderTimer: ReturnType<typeof setTimeout> | undefined
+    const loaderTimeout = new Promise<void>((done) => {
+      const timer = setTimeout(() => {
+        console.warn('[im-bridge] 等待 loader 超时（10s），先连企微，其余按需补齐')
+        done()
+      }, 10000)
+      timer.unref()
+      loaderTimer = timer
+    })
+    await Promise.race([loader?.await(), loaderTimeout])
+    // loader 先完成时清掉定时器，免得 10 秒后误报一条并不存在的超时。
+    if (loaderTimer !== undefined) clearTimeout(loaderTimer)
     // 时间盒：registry 启动卡住时不能拖住 WebSocket 连接——消息通路优先，
     // 未完成的工作区初始化由首条消息的按节流重试继续收尾。
     const workspaceInit = initWorkspaceBindings().catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error)
       console.warn(`[im-bridge] 工作区初始化异常: ${message}`)
     })
+    let workspaceTimer: ReturnType<typeof setTimeout> | undefined
     const workspaceInitTimeout = new Promise<void>((done) => {
       const timer = setTimeout(() => {
         console.warn('[im-bridge] 工作区初始化超时，改为按需完成（不阻塞消息收发）')
         done()
       }, 5000)
       timer.unref()
+      workspaceTimer = timer
     })
     await Promise.race([workspaceInit, workspaceInitTimeout])
+    // 工作区初始化先完成时清掉定时器，免得 5 秒后误报一条并不存在的超时。
+    if (workspaceTimer !== undefined) clearTimeout(workspaceTimer)
     if (abortIfInactive('工作区初始化后')) return
     const { botId, secret } = cfg()
     if (!botId || !secret) {

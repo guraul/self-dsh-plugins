@@ -9718,18 +9718,33 @@ function apply(ctx, config) {
 		}, { authority: "loopback" }), "im-bridge: wecomcli.installSkills");
 	});
 	(async () => {
-		await ctx.get("loader")?.await();
+		const loader = ctx.get("loader");
+		let loaderTimer;
+		const loaderTimeout = new Promise((done) => {
+			const timer = setTimeout(() => {
+				console.warn("[im-bridge] 等待 loader 超时（10s），先连企微，其余按需补齐");
+				done();
+			}, 1e4);
+			timer.unref();
+			loaderTimer = timer;
+		});
+		await Promise.race([loader?.await(), loaderTimeout]);
+		if (loaderTimer !== void 0) clearTimeout(loaderTimer);
 		const workspaceInit = initWorkspaceBindings().catch((error) => {
 			const message = error instanceof Error ? error.message : String(error);
 			console.warn(`[im-bridge] 工作区初始化异常: ${message}`);
 		});
+		let workspaceTimer;
 		const workspaceInitTimeout = new Promise((done) => {
-			setTimeout(() => {
+			const timer = setTimeout(() => {
 				console.warn("[im-bridge] 工作区初始化超时，改为按需完成（不阻塞消息收发）");
 				done();
-			}, 5e3).unref();
+			}, 5e3);
+			timer.unref();
+			workspaceTimer = timer;
 		});
 		await Promise.race([workspaceInit, workspaceInitTimeout]);
+		if (workspaceTimer !== void 0) clearTimeout(workspaceTimer);
 		if (abortIfInactive("工作区初始化后")) return;
 		const { botId, secret } = cfg();
 		if (!botId || !secret) {
