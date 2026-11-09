@@ -3,6 +3,17 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.12] — 2026-11-09
+
+### 修复
+
+- **试装仍然 9/10，第一个插件报「基线不可用」**（#392）。0.9.7 的「重试一次」基于**错误假设**：
+  真因不是「profile 还没建好」，而是**根本不存在**——全新 `DSH_HOME` 里没有 profile 时，
+  `dsh --profile probe --dump-config` 直接 `exit 1`（`profile "probe" does not exist`），重试也没人创建它。
+  - 建临时目录后先用 `ensureProbeProfile()` 建出空 profile（`profiles/probe/package.json`），基线 dump 就能返回空列表；
+  - 重试逻辑保留作为兜底。
+  - 单测同时钉住两件事：不建 profile 时 dump **必须**失败（证明这就是根因）、建了之后必须通过。
+
 ## [0.9.11] — 2026-11-08
 
 ### 修复
