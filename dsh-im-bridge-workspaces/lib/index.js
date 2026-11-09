@@ -9363,6 +9363,13 @@ function apply(ctx, config) {
 	const chats = /* @__PURE__ */ new Map();
 	/** 钉住会话的串行队列：按会话 id 归并，多个窗口钉同一会话时共用一条。 */
 	const sessionQueues = /* @__PURE__ */ new Map();
+	/**
+	* 只落在网页 GUI 的待审批：该会话没有对应的企微聊天窗口，卡片只在浏览器里弹。
+	* 钉住这种会话时企微消息会排在阻塞的回合后面，所以入队前先提示用户（issue #395）。
+	*/
+	const pendingGuiApprovals = /* @__PURE__ */ new Map();
+	/** 提示节流：同一窗口 60 秒内只提示一次，避免连续发消息刷屏。 */
+	const pendingHintAt = /* @__PURE__ */ new Map();
 	/** 每个企微窗口当前绑定的工作区，重启后从磁盘恢复。 */
 	const windowWorkspaces = /* @__PURE__ */ new Map();
 	/** 每个企微窗口 `/s` 钉住的会话，重启后从磁盘恢复。 */
@@ -10649,6 +10656,14 @@ function apply(ctx, config) {
 			const st = chats.get(sessionKey) ?? emptyChatState();
 			st.kind = ref.kind;
 			chats.set(sessionKey, st);
+			if (pin !== void 0) {
+				const pending = pendingGuiApprovals.get(pin.sessionId);
+				const lastHint = pendingHintAt.get(ref.key) ?? 0;
+				if (pending !== void 0 && Date.now() - lastHint >= 6e4) {
+					pendingHintAt.set(ref.key, Date.now());
+					ws.replyStream(frame, generateReqId("stream"), `⏳ 该会话正在网页 GUI 里等待审批（${pending.toolName}），消息已排队。请在 GUI 里处理，或发 /s reset 换回默认会话。`, true).catch(() => {});
+				}
+			}
 			const run = () => handle(frame, ref, content, binding, sessionKey, image, pin).catch((error) => {
 				const message = error instanceof Error ? error.message : String(error);
 				console.error(`[im-bridge] 任务异常: ${message}`);
@@ -10899,7 +10914,16 @@ function apply(ctx, config) {
 			const sessionId = approvalSessionId(request);
 			const window = st === void 0 ? "none" : chatKeyOf(st);
 			console.log(`[im-bridge] 审批请求 ${position} session=${sessionId ?? "none"} tool=${request.toolName} 窗口=${window}`);
-			if (st === void 0 || relayedApprovals.has(request)) return next();
+			if (st === void 0) {
+				if (sessionId !== void 0) pendingGuiApprovals.set(sessionId, {
+					toolName: request.toolName,
+					at: Date.now()
+				});
+				return next().finally(() => {
+					if (sessionId !== void 0) pendingGuiApprovals.delete(sessionId);
+				});
+			}
+			if (relayedApprovals.has(request)) return next();
 			relayedApprovals.add(request);
 			return handleApprovalRequest(request, next, st);
 		}
