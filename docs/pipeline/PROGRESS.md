@@ -161,6 +161,16 @@ GitHub Issue（任务入口）
       补时序用例时**当场抓到真 bug**：`previousToken` 原来在异步 IIFE 里读，抓取完成前的写请求拿到 `undefined`，
       旧页面照样 401——改成 `apply` 时同步读。
 
+- [x] **试装基线失败的真因**（issue #392 / PR #393，0.9.12）：`0.9.7` 的「重试一次」基于**错误假设**——
+      真因不是「profile 还没建好」，而是**根本不存在**：全新 `DSH_HOME` 里 `dsh --profile probe --dump-config`
+      直接 `exit 1`。改成跑之前先 `ensureProbeProfile()` 建出空 profile。真机 **10/10**。
+- [x] **`/s` 列表分页**（issue #372 / PR #389，im-bridge 0.5.0-ws.6）：活跃会话超过一屏时拿不到被省略条目的 id；
+      新增 `/s more` 翻页，序号保持全局；活跃列表变空时清掉序号记忆。
+- [x] **分页抽纯函数 + 单测**（issue #390 / PR #391，im-bridge 0.5.0-ws.7）：`sessionListText` 是闭包、无法单测；
+      抽出 `fitEntry` / `buildListPages` / `pickPage` 并补 11 条用例，顺带修「省略号未计入预算」。
+- [x] **loader 等待时间盒 + 重启自检企微**（issue #394 / PR #396，im-bridge）：启动阶段给 loader 等待加 10s 上限。
+- [x] **审批时企微先给提示**（issue #395 / PR #397，im-bridge）：钉住的会话在 GUI 等审批时不再静默排队。
+
 
 > 教训（#379）：**先确认宿主到底怎么认证，再设计鉴权**。前面三个 PR（#369/#376/#378）都在修「令牌怎么拿到」，
 > 而真实前提是「浏览器根本不用令牌」——一个 `curl -D -` 看响应头就能发现。
