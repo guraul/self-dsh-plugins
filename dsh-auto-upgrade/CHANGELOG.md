@@ -13,6 +13,7 @@
   - 建临时目录后先用 `ensureProbeProfile()` 建出空 profile（`profiles/probe/package.json`），基线 dump 就能返回空列表；
   - 重试逻辑保留作为兜底。
   - 单测同时钉住两件事：不建 profile 时 dump **必须**失败（证明这就是根因）、建了之后必须通过。
+  - `PROBE_CACHE_SCHEMA` 4 → 5：否则旧的那条「基线不可用」会在 24h TTL 内被原样回放，修复看不见（#346/#373 同型）。
 
 ## [0.9.11] — 2026-11-08
 
