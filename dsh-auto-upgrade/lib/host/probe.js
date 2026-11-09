@@ -248,7 +248,7 @@ export async function runProbes(options) {
     // 先 dump 一次记下现有的 id；装完再 dump 一次，差集就是「这次装进去的东西」。
     //
     // 基线失败的真因是**一次性 profile 不存在**（`--dump-config` 直接 exit 1，issue #392），
-    // 由 `ensureProbeProfile()` 在跑之前建好；这里的重试只是兜底（偶发失败再试一次）。
+    // 由调用方（`lib/index.js`）在跑之前用 `ensureProbeProfile()` 建好；这里的重试只是兜底（偶发失败再试一次）。
     let before = await options.run(commands.dump[0], commands.dump.slice(1), { env })
     let beforeExit = before.status ?? before.code ?? null
     if (beforeExit !== 0) {

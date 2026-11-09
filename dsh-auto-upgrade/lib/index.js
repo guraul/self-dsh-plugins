@@ -56,6 +56,8 @@ import {
   scheduleHelper as defaultScheduleHelper,
 } from './host/upgrade.js'
 
+/** 一次性试装用的 profile 名：建目录与跑探针两处必须一致（#392）。 */
+const PROBE_PROFILE_NAME = 'probe'
 const ownPackage = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const BIN_NAME = 'dsh'
 const RESTART_LOG_TAIL_BYTES = 16384
@@ -711,7 +713,7 @@ export function apply(ctx, config = {}) {
           try {
             home = await mkdtemp(join(tmpdir(), 'dsh-au-probe-'))
             // 基线 dump 要求 profile **存在**：不存在时 `--dump-config` 直接 exit 1（#392）。
-            await ensureProbeProfile(home, 'probe')
+            await ensureProbeProfile(home, PROBE_PROFILE_NAME)
             let cache = {}
             try {
               cache = JSON.parse(await readFile(probeCachePath, 'utf8'))
@@ -722,7 +724,7 @@ export function apply(ctx, config = {}) {
               targets,
               targetVersion: target,
               dshBin: installation.dshBin,
-              profileName: 'probe',
+              profileName: PROBE_PROFILE_NAME,
               dshHome: home,
               cache,
               now: Date.now(),
