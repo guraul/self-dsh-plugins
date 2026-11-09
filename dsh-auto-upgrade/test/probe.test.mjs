@@ -306,7 +306,7 @@ test('#361 idsFromDump 只收顶层 `- id:` 列表项，不吃嵌套 config 的 
   assert.equal(ids.has('nested-mcp-id'), false)
 })
 
-test('#373 基线 dump 第一次失败要重试：第一个插件的 profile 还没建好', async () => {
+test('#373 基线 dump 偶发失败要重试（真因是 profile 不存在，见 #392）', async () => {
   let dumps = 0
   let added = false
   const result = await runProbes({
@@ -318,7 +318,7 @@ test('#373 基线 dump 第一次失败要重试：第一个插件的 profile 还
         return { status: 0, stdout: '' }
       }
       dumps += 1
-      // 第 1 次（基线）失败 —— 真机上第一个插件就是这样；第 2 次重试成功；第 3 次是装后 dump。
+      // 第 1 次（基线）偶发失败 → 重试成功；第 3 次是装后 dump。
       if (dumps === 1) return { status: 1, stdout: '' }
       return { status: 0, stdout: added ? '- id: first\n' : '' }
     },
