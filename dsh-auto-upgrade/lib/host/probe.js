@@ -159,11 +159,11 @@ export function judgeProbe(result) {
 }
 
 /**
- * 缓存键：目标版本 + 插件名 + 插件目录 mtime。@param {{targetVersion: string, name: string, mtimeMs?: number}} options 输入。
+ * 缓存键：`<schema>|<目标版本>|<插件名>|<插件目录 mtime>`（首段是 schema，判定逻辑变了要 bump）。@param {{targetVersion: string, name: string, mtimeMs?: number}} options 输入。
  * @returns {string} 键。
  */
 export function probeKey(options) {
-  // 第三个字段是**缓存 schema 版本**：改了探针的判定逻辑就 +1，
+  // **第一个字段**是缓存 schema 版本：改了探针的判定逻辑就 +1，
   // 否则旧版本写进去的结论会被原样回放，修复在 TTL 内表现为「不生效」（#346 review 的 blocker）。
   return `${PROBE_CACHE_SCHEMA}|${options.targetVersion}|${options.name}|${options.mtimeMs ?? 0}`
 }
