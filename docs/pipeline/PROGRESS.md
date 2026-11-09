@@ -128,7 +128,7 @@ GitHub Issue（任务入口）
 
 `#300` P1–P4 全绿后关闭（外部状态，仓库内不可验证）。补记：同日合并的 PR #309（0.5.0，进度页 `progress-server.mjs` 首次落地）不在交接 §3 表内，此处一并记上，免得版本号从 0.4.0 跳到 0.5.1 看不出来历。
 
-### ✅ 阶段 9 · 探针真机修复 + 写接口鉴权（2026-11-06 ~ 11-08）
+### ✅ 阶段 9 · 探针真机修复 + 写接口鉴权（2026-11-06 ~ 11-09）
 
 - [x] **试装探针改用插件真 id 比对 dump**（issue #346 / PR #347，0.9.2）：原来拿**包名**比 dump 里的 **id**，
       真机 10 个插件全误报。改成从入口解析 `export const name`；缓存 key 加 `PROBE_CACHE_SCHEMA`（否则旧结论回放，修复等于没修）。
@@ -163,7 +163,7 @@ GitHub Issue（任务入口）
 
 - [x] **试装基线失败的真因**（issue #392 / PR #393，0.9.12）：`0.9.7` 的「重试一次」基于**错误假设**——
       真因不是「profile 还没建好」，而是**根本不存在**：全新 `DSH_HOME` 里 `dsh --profile probe --dump-config`
-      直接 `exit 1`。改成跑之前先 `ensureProbeProfile()` 建出空 profile。真机 **10/10**。
+      直接 `exit 1`。改成跑之前先 `ensureProbeProfile()` 建出空 profile。真机 **10/10**（probe-cache schema 5 里 10 条全 `ok:true`）。
 - [x] **`/s` 列表分页**（issue #372 / PR #389，im-bridge 0.5.0-ws.6）：活跃会话超过一屏时拿不到被省略条目的 id；
       新增 `/s more` 翻页，序号保持全局；活跃列表变空时清掉序号记忆。
 - [x] **分页抽纯函数 + 单测**（issue #390 / PR #391，im-bridge 0.5.0-ws.7）：`sessionListText` 是闭包、无法单测；
