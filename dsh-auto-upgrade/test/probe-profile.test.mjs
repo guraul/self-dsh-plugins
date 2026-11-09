@@ -85,3 +85,14 @@ test('#400 顺序：先建 profile 再跑探针；建失败就不跑（不依赖
   )
   assert.deepEqual(skipped, [], '建 profile 失败时不能跑探针')
 })
+
+test('#400 接线：index.js 必须真的调用 runProbeWithProfile（删掉就红）', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
+  // helper 单测测不到「调用方忘了用它」这类回归（#400 review 轮 1 实测：删掉接线仍全绿）。
+  assert.match(source, /runProbeWithProfile\(/, 'index.js 必须调用 runProbeWithProfile')
+  assert.match(source, /probes: \(\) => runProbes\(/, '探针必须作为 probes 回调传入')
+  // 默认实现必须留在 probe-run 里，别让调用方各自拼一遍
+  const helper = await readFile(new URL('../lib/host/probe-run.js', import.meta.url), 'utf8')
+  assert.match(helper, /options\.ensure \?\? ensureProbeProfile/, '默认 ensure 必须是真实实现')
+})

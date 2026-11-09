@@ -23,7 +23,6 @@ import { entryCandidates, linkTargets, pluginIdFromSource, probeCacheEntries, ru
 import { runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
-import { ensureProbeProfile } from './host/probe-profile.js'
 import { runProbeWithProfile } from './host/probe-run.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
 import { originDecision, tokenAccepted, tokenOf } from './host/token-url.js'
@@ -723,7 +722,6 @@ export function apply(ctx, config = {}) {
             const { cache: next } = await runProbeWithProfile({
               dshHome: home,
               profileName: PROBE_PROFILE_NAME,
-              ensure: ensureProbeProfile,
               probes: () => runProbes({
               targets,
               targetVersion: target,

@@ -5,6 +5,8 @@
  * CI 里没有 dsh 就 skip，等于修复没有回归保护。
  */
 
+import { ensureProbeProfile } from './probe-profile.js'
+
 /**
  * 先建一次性 profile，再跑探针。
  *
@@ -13,11 +15,13 @@
  * @param {object} options 依赖。
  * @param {string} options.dshHome 一次性 DSH_HOME。
  * @param {string} options.profileName profile 名。
- * @param {(home: string, name: string) => Promise<unknown>} options.ensure 建 profile。
+ * @param {(home: string, name: string) => Promise<unknown>} [options.ensure] 建 profile；
+ *   默认用真实的 `ensureProbeProfile`，测试可注入。
  * @param {() => Promise<unknown>} options.probes 跑探针。
  * @returns {Promise<unknown>} `probes()` 的结果。
  */
 export async function runProbeWithProfile(options) {
-  await options.ensure(options.dshHome, options.profileName)
+  const ensure = options.ensure ?? ensureProbeProfile
+  await ensure(options.dshHome, options.profileName)
   return options.probes()
 }
