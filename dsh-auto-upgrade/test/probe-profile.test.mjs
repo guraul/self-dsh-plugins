@@ -24,7 +24,7 @@ test('#392 建出可用的空 profile：package.json 形状对、目录在', asy
   }
 })
 
-test('#392 建完之后 dsh --dump-config 不再报「profile 不存在」', async (t) => {
+test('#392 建完之后 dsh --dump-config 不再报「profile 不存在」（本机集成，CI 无 dsh 会 skip）', async (t) => {
   let dshBin
   try {
     dshBin = (await run('which', ['dsh'])).stdout.trim()
@@ -56,4 +56,43 @@ test('#392 建完之后 dsh --dump-config 不再报「profile 不存在」', asy
   } finally {
     await rm(home, { recursive: true, force: true })
   }
+})
+
+test('#400 顺序：先建 profile 再跑探针；建失败就不跑（不依赖真实 dsh，CI 可跑）', async () => {
+  const { runProbeWithProfile } = await import('../lib/host/probe-run.js')
+
+  // 正常路径：ensure 必须先于 probes
+  const calls = []
+  const result = await runProbeWithProfile({
+    dshHome: '/tmp/h',
+    profileName: 'probe',
+    ensure: async (home, name) => { calls.push(`ensure:${home}:${name}`) },
+    probes: async () => { calls.push('probes'); return { ok: true } },
+  })
+  assert.deepEqual(calls, ['ensure:/tmp/h:probe', 'probes'], '建 profile 必须发生在跑探针之前')
+  assert.deepEqual(result, { ok: true })
+
+  // 建失败：probes 一次都不能跑（拿不存在的 profile 去 dump 只会误报「基线不可用」）
+  const skipped = []
+  await assert.rejects(
+    runProbeWithProfile({
+      dshHome: '/tmp/h',
+      profileName: 'probe',
+      ensure: async () => { throw new Error('mkdir 失败') },
+      probes: async () => { skipped.push('probes') },
+    }),
+    /mkdir 失败/,
+  )
+  assert.deepEqual(skipped, [], '建 profile 失败时不能跑探针')
+})
+
+test('#400 接线：index.js 必须真的调用 runProbeWithProfile（删掉就红）', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
+  // helper 单测测不到「调用方忘了用它」这类回归（#400 review 轮 1 实测：删掉接线仍全绿）。
+  assert.match(source, /runProbeWithProfile\(/, 'index.js 必须调用 runProbeWithProfile')
+  assert.match(source, /probes: \(\) => runProbes\(/, '探针必须作为 probes 回调传入')
+  // 默认实现必须留在 probe-run 里，别让调用方各自拼一遍
+  const helper = await readFile(new URL('../lib/host/probe-run.js', import.meta.url), 'utf8')
+  assert.match(helper, /options\.ensure \?\? ensureProbeProfile/, '默认 ensure 必须是真实实现')
 })
