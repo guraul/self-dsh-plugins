@@ -160,7 +160,6 @@ GitHub Issue（任务入口）
       「刷新前记 previousToken」的时序用例、来源判定三态的单测（抽成纯函数 `originDecision`）。
       补时序用例时**当场抓到真 bug**：`previousToken` 原来在异步 IIFE 里读，抓取完成前的写请求拿到 `undefined`，
       旧页面照样 401——改成 `apply` 时同步读。
-
 - [x] **试装基线失败的真因**（issue #392 / PR #393，0.9.12）：`0.9.7` 的「重试一次」基于**错误假设**——
       真因不是「profile 还没建好」，而是**根本不存在**：全新 `DSH_HOME` 里 `dsh --profile probe --dump-config`
       直接 `exit 1`。改成跑之前先 `ensureProbeProfile()` 建出空 profile。真机 **10/10**（probe-cache schema 5 里 10 条全 `ok:true`）。
@@ -170,7 +169,6 @@ GitHub Issue（任务入口）
       抽出 `fitEntry` / `buildListPages` / `pickPage` 并补 11 条用例，顺带修「省略号未计入预算」。
 - [x] **loader 等待时间盒 + 重启自检企微**（issue #394 / PR #396，im-bridge）：启动阶段给 loader 等待加 10s 上限。
 - [x] **审批时企微先给提示**（issue #395 / PR #397，im-bridge）：钉住的会话在 GUI 等审批时不再静默排队。
-
 
 > 教训（#379）：**先确认宿主到底怎么认证，再设计鉴权**。前面三个 PR（#369/#376/#378）都在修「令牌怎么拿到」，
 > 而真实前提是「浏览器根本不用令牌」——一个 `curl -D -` 看响应头就能发现。
