@@ -59,7 +59,6 @@
 | [`dsh-subagents/`](./dsh-subagents) | `dsh-plugin-subagents` | 角色化子代理层：角色（executor / reviewer）× 接入形态（A/B/C），共享判定契约 | **原创**（替代 fork `dsh-plugin-product-subagents`） |
 | [`dsh-prompt-optimizer/`](./dsh-prompt-optimizer) | `@y1x1n/dsh-prompt-optimizer` | 发送栏纯图标按钮，一键优化提示词并直接写回输入框（线性图标 + 内联 loading，无弹出面板） | **fork**（npm `@y1x1n/dsh-prompt-optimizer@0.6.1`，`0.6.1-fork.1`） |
 | [`dsh-usage-panel/`](./dsh-usage-panel) | `dsh-usage-panel` | 用量面板：设置页「消耗统计」展示 Token 用量 KPI、活跃热力图、按模型堆叠柱状图与模型环形图，只读聚合会话日志、不回写 | **fork**（`AlfredChaos/dsh-usage-panel` v0.2.3，本地 `0.2.3-fork.1`） |
-| [`dsh-zhihu-sidebar/`](./dsh-zhihu-sidebar) | `dsh-plugin-zhihu-sidebar` | 知乎热榜 / 搜索 / 我的创作挂进右侧栏；数据走官方 Zhihu CLI，密钥存系统凭证库、插件不接触明文 | **原创** |
 
 顶层其它文件：[`README.md`](./README.md)（对外说明）、[`upgrade-dsh.sh`](./upgrade-dsh.sh)（全局 dsh 升级/回滚/恢复）、
 [`dsh-web-stop.sh`](./dsh-web-stop.sh)（停服）、[`.dsh-web/`](./.dsh-web)（LaunchAgent 与重启脚本）、

@@ -20,7 +20,6 @@
       "dsh-prompt-optimizer",
       "dsh-subagents",
       "dsh-subagent-policy-fallback",
-      "dsh-zhihu-sidebar",
       "dsh-plugin-memx",
       "dsh-awake",
       "dsh-usage-panel"
