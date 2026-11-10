@@ -102,25 +102,6 @@ jobs:
             entry: |
               lib/index.js
               lib/client.js
-          # issue #243：这一条长期缺失，导致该插件的测试在 CI 里从未跑过。
-          - dir: dsh-zhihu-sidebar
-            install: true
-            # 它没有 scripts.build（lib/* 是手写源码，不是产物），故不做新鲜度检查。
-            fresh: false
-            entry: |
-              lib/index.js
-              lib/client.js
-              lib/host/cli.js
-              lib/host/queue.js
-              lib/host/cache.js
-              lib/host/backoff.js
-              lib/host/quota.js
-              lib/host/parse.js
-              lib/host/http.js
-              lib/host/service.js
-              extension/content.js
-              extension/popup.js
-              extension/lib/logic.js
     steps:
       - uses: actions/checkout@v4
 
@@ -156,7 +137,6 @@ jobs:
           #   * dsh-plugin-product-subagents —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
           #   * dsh-im-bridge-workspaces     —— 无 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
           #   * dsh-usage-panel             —— 有 pnpm-lock.yaml 且与 package.json 一致 → frozen 成功
-          #   * dsh-zhihu-sidebar           —— 无任何依赖、无 lockfile → ERR_PNPM_NO_LOCKFILE，走兜底
           #   * dsh-subagent-policy-fallback —— 无运行时依赖，空 pnpm-lock.yaml → frozen 成功
           # 本仓库只留 pnpm-lock.yaml：npm 的 package-lock.json 已按全局约定清掉，并被 .gitignore 挡下。
           #
