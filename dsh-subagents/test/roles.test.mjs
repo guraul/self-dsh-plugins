@@ -45,7 +45,11 @@ test('不传 model 调 reviewer → 下发角色钉的 codebuddy/deepseek-v4.1-f
   const out = await tools.get('product_delegate').execute({ role: 'reviewer', task: '审一下' }, exec)
   assert.equal(specs.length, 1)
   assert.equal(specs[0].provider, 'product-subagents:codebuddy')
-  assert.equal(specs[0].request.model, 'codebuddy/deepseek-v4.1-flash')
+  assert.equal(specs[0].model, 'codebuddy/deepseek-v4.1-flash', 'rc.2+ 读顶层 model')
+  assert.equal(specs[0].request.model, 'codebuddy/deepseek-v4.1-flash', '旧宿主读 request.model')
+  assert.equal(specs[0].parent, exec.agent)
+  assert.equal(specs[0].delivery, 'parent')
+  assert.equal(specs[0].request.parent, exec.agent)
   assert.equal(out.role, 'reviewer')
   assert.equal(out.provider, 'codebuddy')
 })
@@ -111,6 +115,8 @@ test('product_continue 续接同样吃角色钉的模型，冲突也报错', asy
     .get('product_continue')
     .execute({ role: 'reviewer', session: 's-abc', task: '补一条 finding' }, exec)
   assert.equal(specs.length, 1)
+  assert.equal(specs[0].model, 'codebuddy/deepseek-v4.1-flash')
+  assert.equal(specs[0].sessionId, 's-abc', '续接句柄也在顶层（rc.2+ 原样传给 provider）')
   assert.equal(specs[0].request.model, 'codebuddy/deepseek-v4.1-flash')
   assert.equal(specs[0].request.sessionId, 's-abc')
 
@@ -168,6 +174,7 @@ test('resolveRoute：调用方指定别的 provider 时，软默认 model 不跨
   const { tools, specs, exec } = await fakeHost()
   await tools.get('product_delegate').execute({ role: 'executor', provider: 'opencode', task: 't' }, exec)
   assert.equal('model' in specs[0].request, false, '跨产品时不带 model，交给那个 CLI 自己决定')
+  assert.equal('model' in specs[0], false, '顶层同理：别把 codebuddy 的默认模型塞给别的产品')
 })
 
 test('resolveRoute：reviewer 传不一致模型仍然抛错（硬钉回归）', async () => {
