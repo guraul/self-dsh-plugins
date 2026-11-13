@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-subagents",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "角色化的子代理层：角色（executor / reviewer）× 接入形态（A 原生 / B 委派 CLI / C 伪模型），三种形态共享同一份判定契约。",
   "type": "module",
   "main": "lib/index.js",
@@ -44,7 +44,13 @@
     },
     "compatibility": {
       "node": "^22.19.0 || >=24.0.0",
-      "dsh": "^0.2.1-alpha.5 || ^0.2.2-alpha.2"
+      "dsh": "^0.2.1-alpha.5 || ^0.2.2-alpha.2",
+      "dshReleases": {
+        "0.2.2-rc.2": "compatible"
+      },
+      "dshDepth": {
+        "0.2.2-rc.2": "L1"
+      }
     }
   },
   "peerDependencies": {

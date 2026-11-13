@@ -143,10 +143,57 @@ test('activationSpec 必须带 signal（PR8 事故回归）', async () => {
   })
   assert.equal(spec.provider, 'product-subagents:opencode')
   assert.equal(spec.signal, controller.signal)
+  // rc.2+ 读顶层（扁平）字段；缺了就是 `Cannot read properties of undefined (reading 'id')`
+  assert.equal(spec.parent.id, 'parent')
+  assert.equal(spec.maxDepth, 2)
+  assert.equal(spec.delivery, 'parent')
+  assert.equal(spec.permissionMode, 'default')
+  assert.deepEqual(spec.prompt.map((part) => part.type), ['text'])
+  assert.match(spec.prompt[0].text, /你是执行者[\s\S]*修一下/)
+  // ≤ 0.2.2-alpha.2 读嵌套 request：同一组字段，两代宿主都要能跑
   assert.equal(spec.request.parent.id, 'parent')
   assert.equal(spec.request.maxDepth, 2)
-  assert.deepEqual(spec.request.prompt.map((part) => part.type), ['text'])
-  assert.match(spec.request.prompt[0].text, /你是执行者[\s\S]*修一下/)
+  assert.equal(spec.request.prompt, spec.prompt)
+  assert.equal(spec.request.permissionMode, spec.permissionMode)
+})
+
+test('activationSpec 双形状：顶层扁平字段与嵌套 request 一致（0.2.2-rc.2 回归）', async () => {
+  const { activationSpec } = await import('../lib/tools/delegate.js')
+  const controller = new AbortController()
+  const agent = { id: 'parent' }
+  const spec = activationSpec({
+    provider: 'codebuddy',
+    role: { instructions: '你是执行者', permissionMode: 'readonly' },
+    task: '修一下',
+    agent,
+    signal: controller.signal,
+    model: 'codebuddy/glm-5.3',
+    sessionId: 'sid-1',
+    cwd: '/tmp/target-repo',
+    maxDepth: 2,
+  })
+
+  // rc.2+ 的 startActivation 直接读这些顶层字段
+  assert.equal(spec.parent, agent)
+  assert.equal(spec.maxDepth, 2)
+  assert.equal(spec.delivery, 'parent')
+  assert.deepEqual(Object.keys(spec.request).sort(), [
+    'cwd',
+    'maxDepth',
+    'model',
+    'parent',
+    'permissionMode',
+    'prompt',
+    'sessionId',
+  ])
+  // 嵌套 request 仍存在，且字段值逐个一致（旧宿主 ≤ 0.2.2-alpha.2 读它）
+  for (const key of Object.keys(spec.request)) {
+    assert.equal(spec[key], spec.request[key], `顶层 ${key} 必须与 request.${key} 一致`)
+  }
+  assert.equal(spec.request.cwd, '/tmp/target-repo')
+  assert.equal(spec.request.model, 'codebuddy/glm-5.3')
+  assert.equal(spec.request.sessionId, 'sid-1')
+  assert.equal(spec.request.permissionMode, 'readonly')
 })
 
 test('activationSpec 的 prompt 带执行前言（防反问确认）', async () => {
@@ -158,8 +205,9 @@ test('activationSpec 的 prompt 带执行前言（防反问确认）', async () 
     agent: { id: 'p' },
     signal: new AbortController().signal,
   })
-  assert.match(spec.request.prompt[0].text, new RegExp(DELEGATION_PREAMBLE.slice(0, 8)))
-  assert.match(spec.request.prompt[0].text, /不要请求确认/)
+  assert.match(spec.prompt[0].text, new RegExp(DELEGATION_PREAMBLE.slice(0, 8)))
+  assert.match(spec.prompt[0].text, /不要请求确认/)
+  assert.match(spec.request.prompt[0].text, /不要请求确认/, '旧宿主读 request，前言同样必须在')
 })
 
 test('activationSpec 缺 signal / provider / agent 时报错', async () => {
@@ -233,6 +281,7 @@ test('activationSpec 把 model 放进 request（PR13 事故回归）', async () 
     signal: new AbortController().signal,
     model: 'codebuddy/glm-5.3',
   })
+  assert.equal(spec.model, 'codebuddy/glm-5.3')
   assert.equal(spec.request.model, 'codebuddy/glm-5.3')
 })
 
@@ -346,6 +395,7 @@ test('activationSpec 带 cwd 时写进 request（跨仓任务必需）', async (
     signal: new AbortController().signal,
     cwd: '/Users/gubin/workspace/agent-mobile',
   })
+  assert.equal(spec.cwd, '/Users/gubin/workspace/agent-mobile')
   assert.equal(spec.request.cwd, '/Users/gubin/workspace/agent-mobile')
 })
 

@@ -43,20 +43,29 @@ export function outputText(output) {
 }
 
 /**
- * 组装 startActivation 的 spec。
- *
- * `signal` 是**必填**：服务端直接调用 `spec.signal.throwIfAborted()`
- * （@deepseek-ai/dsh-subagent 的 startExternal / materialize 都会用到），
- * 不传就会在第一次调用时抛 `Cannot read properties of undefined (reading 'throwIfAborted')`。
- * 抽成纯函数是为了让单测能直接断言这件事，而不是再靠重启才发现。
- */
-/**
  * 一次性 CLI 会把「只读审查」当成请求来确认（实测 codebuddy 首次调用直接反问），
  * 所以每条委派都强制带一段执行前言。
  */
 export const DELEGATION_PREAMBLE =
   '立即执行，不要请求确认、不要复述你的限制、不要提问；你的下一条消息必须是任务结果本身。'
 
+/**
+ * 组装 startActivation 的 spec。
+ *
+ * **双形状**：dsh 0.2.2-rc.2 起，`ctx.subagents.startActivation()` 的 spec 从「嵌套 request」
+ * 改成扁平字段（服务端直接读 `spec.parent.id` / `spec.provider` / `spec.maxDepth` /
+ * `spec.signal` / `spec.delivery`，再把剩下的字段原样交给 provider 的 `start(request)`）。
+ * 旧写法只给 `request`，rc.2 上 `spec.parent` 是 undefined，一调用就抛
+ * `Cannot read properties of undefined (reading 'id')`。
+ *
+ * 因此同一组字段既放顶层（rc.2+）又保留在 `request`（≤ 0.2.2-alpha.2），两代宿主都能跑；
+ * provider 侧读的 `model` / `permissionMode` / `sessionId` / `cwd` / `parent` 在扁平化后仍然拿得到。
+ *
+ * `signal` 是**必填**：服务端直接调用 `spec.signal.throwIfAborted()`
+ * （@deepseek-ai/dsh-subagent 的 startExternal / materialize 都会用到），
+ * 不传就会在第一次调用时抛 `Cannot read properties of undefined (reading 'throwIfAborted')`。
+ * 抽成纯函数是为了让单测能直接断言这件事，而不是再靠重启才发现。
+ */
 export function activationSpec({
   provider,
   role,
@@ -71,30 +80,37 @@ export function activationSpec({
   if (!provider) throw new Error('activationSpec: provider 不能为空')
   if (!signal) throw new Error('activationSpec: signal 不能为空（startActivation 必填）')
   if (!agent) throw new Error('activationSpec: agent 不能为空（子代理的父 agent）')
+
+  const fields = {
+    // 内容分段数组是 DSH 内部已被验证的形状（旧插件也这么传）；字符串虽能跑通
+    // 我们自己的 provider，但没必要赌服务端怎么解释。
+    prompt: [
+      {
+        type: 'text',
+        text: [DELEGATION_PREAMBLE, role?.instructions, task].filter(Boolean).join('\n\n'),
+      },
+    ],
+    parent: agent,
+    maxDepth,
+    // CLI 子进程的沙箱以 cwd 为界：跨仓任务必须显式给，否则看不到目标仓
+    ...(cwd ? { cwd } : {}),
+    // model 必须放进请求：provider 从请求里取，取不到就不会给 CLI 传 --model，
+    // 上一次 reviewer 就是这样静默跑到了 codebuddy 的默认模型。
+    ...(model ? { model } : {}),
+    // 续接：同一个远端会话再问一次（路线 a，复用 CLI 自己的会话）
+    ...(sessionId ? { sessionId } : {}),
+    // 角色权限交给 provider 映射成 CLI 参数（readonly → plan，full → auto）
+    permissionMode: role?.permissionMode ?? 'default',
+  }
+
   return {
     provider: providerName(provider),
     signal,
-    request: {
-      // 内容分段数组是 DSH 内部已被验证的形状（旧插件也这么传）；字符串虽能跑通
-      // 我们自己的 provider，但没必要赌服务端怎么解释。
-      prompt: [
-        {
-          type: 'text',
-          text: [DELEGATION_PREAMBLE, role?.instructions, task].filter(Boolean).join('\n\n'),
-        },
-      ],
-      parent: agent,
-      maxDepth,
-      // CLI 子进程的沙箱以 cwd 为界：跨仓任务必须显式给，否则看不到目标仓
-      ...(cwd ? { cwd } : {}),
-      // model 必须放进 request：provider 从请求里取，取不到就不会给 CLI 传 --model，
-      // 上一次 reviewer 就是这样静默跑到了 codebuddy 的默认模型。
-      ...(model ? { model } : {}),
-      // 续接：同一个远端会话再问一次（路线 a，复用 CLI 自己的会话）
-      ...(sessionId ? { sessionId } : {}),
-      // 角色权限交给 provider 映射成 CLI 参数（readonly → plan，full → auto）
-      permissionMode: role?.permissionMode ?? 'default',
-    },
+    // rc.2+ 读顶层字段；`delivery: 'parent'` 声明结果回流给父 agent
+    ...fields,
+    delivery: 'parent',
+    // ≤ 0.2.2-alpha.2 读嵌套 request。同一组字段，不另存副本。
+    request: fields,
   }
 }
 
