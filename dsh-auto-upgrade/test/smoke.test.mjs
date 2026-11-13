@@ -7,6 +7,7 @@ import { join } from 'node:path'
 
 import {
   SMOKE_TIMEOUT_MS,
+  collectLoaderNames,
   createInjectResolver,
   fallbackChecks,
   normalizeSmoke,
@@ -84,6 +85,76 @@ test('fallbackChecks：注入项解析不出时，种子表不可读只降级为
     resolvable: () => false,
   })
   assert.equal(missing[2].ok, false)
+})
+
+test('collectLoaderNames：函数形 entries（真实 dsh 0.2.2-rc.2 的 generator 形态）', () => {
+  // cordis-plugin-loader 的 EntryTree.*entries() 是 generator；对接线本身做单测。
+  const loader = {
+    entries() {
+      return (function* () {
+        yield { options: { name: 'a' } }
+        yield { options: { name: 'b' } }
+      })()
+    },
+  }
+  assert.deepEqual(collectLoaderNames(loader), ['a', 'b'])
+})
+
+test('collectLoaderNames：数组形 / 可迭代 entries 也能取（兼容性兜底）', () => {
+  assert.deepEqual(
+    collectLoaderNames({ entries: [{ options: { name: 'arr' } }] }),
+    ['arr'],
+  )
+  assert.deepEqual(
+    collectLoaderNames({ entries: new Set([{ options: { name: 'set' } }]) }),
+    ['set'],
+  )
+  assert.deepEqual(
+    collectLoaderNames({ entries: [{ options: { name: 'iter' } }][Symbol.iterator]() }),
+    ['iter'],
+  )
+})
+
+test('collectLoaderNames：缺 loader / 缺 entries / entries 抛错——都返回 undefined', () => {
+  assert.equal(collectLoaderNames(undefined), undefined)
+  assert.equal(collectLoaderNames(null), undefined)
+  assert.equal(collectLoaderNames('loader'), undefined)
+  assert.equal(collectLoaderNames({}), undefined)
+  assert.equal(collectLoaderNames({ entries: 42 }), undefined)
+  assert.equal(collectLoaderNames({
+    entries() {
+      throw new Error('loader 服务坏了')
+    },
+  }), undefined)
+  // 迭代到一半抛错也不能漏出来。
+  assert.equal(collectLoaderNames({
+    entries: {
+      [Symbol.iterator]() {
+        throw new Error('坏了')
+      },
+    },
+  }), undefined)
+})
+
+test('collectLoaderNames：空列表返回 undefined（回退 bundles，不能当成全部未启用）', () => {
+  assert.equal(collectLoaderNames({ entries: () => [] }), undefined)
+  assert.equal(collectLoaderNames({ entries: [] }), undefined)
+})
+
+test('collectLoaderNames：过滤 disabled 与没有 name 的条目', () => {
+  const loader = {
+    entries: [
+      { options: { name: 'on' } },
+      { options: { name: 'off' }, disabled: true },
+      { options: { name: 'also-on' }, disabled: false },
+      { options: {} },
+      { options: { name: '' } },
+      { options: { name: 42 } },
+      { },
+      null,
+    ],
+  }
+  assert.deepEqual(collectLoaderNames(loader), ['on', 'also-on'])
 })
 
 test('platformSeedsFromStaticModules：从 staticModules 表里取出平台内置模块名', () => {

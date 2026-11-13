@@ -71,6 +71,43 @@ export function fallbackChecks(input) {
 }
 
 /**
+ * 从运行中 Loader 里取未禁用的条目名。
+ *
+ * **事实依据**：本机 dsh `0.2.2-rc.2` 的
+ * `node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js` 里，`EntryTree` 的
+ * `*entries()` 是 generator（函数形）；所以「`entries` 是函数」是主路径。
+ * 双形状（数组 / 可迭代对象）只是兼容性兜底——Loader 服务被替换或别家实现时也能取到。
+ *
+ * 返回 `undefined` 一律表示「取不到」，调用方回退 `dsh.profile.bundles`；
+ * **空集合也算取不到**，否则会把「Loader 里恰好一条都没有」误判成「全部未启用」。
+ * @param {unknown} loader `ctx.get('loader')` 的返回值。
+ * @returns {string[] | undefined} 未禁用条目的 `options.name`；取不到 / 为空时 `undefined`。
+ */
+export function collectLoaderNames(loader) {
+  try {
+    if (loader === null || typeof loader !== 'object') return undefined
+    const entries = loader.entries
+    let iterable
+    if (typeof entries === 'function') {
+      iterable = entries.call(loader)
+    } else if (entries !== null && typeof entries === 'object' && typeof entries[Symbol.iterator] === 'function') {
+      iterable = entries
+    } else {
+      return undefined
+    }
+    const names = []
+    for (const entry of iterable) {
+      if (entry?.disabled === true) continue
+      const name = entry?.options?.name
+      if (typeof name === 'string' && name !== '') names.push(name)
+    }
+    return names.length === 0 ? undefined : names
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * 从 dsh web 前端构建产物（`dist/assets/index-*.js`）里解析平台模块表。
  *
  * 官方客户端包 `@deepseek-ai/dsh-client-ui-slots` / `...-primitives` 是**平台内置种子模块**：

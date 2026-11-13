@@ -20,7 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
 import { entryCandidates, linkTargets, pluginIdFromSource, probeCacheEntries, runProbes } from './host/probe.js'
-import { createInjectResolver, officialInjectSeeds, platformSeedsFromStaticModules, runSmokes } from './host/smoke.js'
+import { collectLoaderNames, createInjectResolver, officialInjectSeeds, platformSeedsFromStaticModules, runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { runProbeWithProfile } from './host/probe-run.js'
@@ -788,26 +788,6 @@ export function apply(ctx, config = {}) {
     }
 
     /**
-     * 运行中 Loader 里未禁用的条目名。
-     *
-     * `cordis.patch.yml` 用 insert 声明的行不在 profile 的 `dsh.profile.bundles` 里，
-     * 只看 bundles 会把它们误报成「没启用」（issue #413）。
-     * @returns {string[] | undefined} 条目名；服务不可用时 undefined（调用方回退 bundles）。
-     */
-    const collectEnabledEntries = () => {
-      try {
-        const loader = typeof ctx.get === 'function' ? ctx.get('loader') : undefined
-        if (loader === undefined || typeof loader.entries !== 'function') return undefined
-        return [...loader.entries()]
-          .filter((entry) => entry?.disabled !== true)
-          .map((entry) => entry?.options?.name)
-          .filter((entryName) => typeof entryName === 'string' && entryName !== '')
-      } catch {
-        return undefined
-      }
-    }
-
-    /**
      * 当前启动图的行（`clientModules.graph().entries`）；取不到按空数组处理。
      * @returns {{id?: string, inject?: string[]}[]} 启动图行。
      */
@@ -895,7 +875,7 @@ export function apply(ctx, config = {}) {
               const installTreeHas = (pkg) => dshDir !== undefined && existsSync(join(dshDir, 'node_modules', pkg))
               const packageExists = (pkg) => installTreeHas(pkg) || existsSync(join(profileDir, 'node_modules', pkg))
               const graphEntries = collectBootGraphEntries()
-              const enabled = collectEnabledEntries()
+              const enabled = collectLoaderNames(typeof ctx.get === 'function' ? ctx.get('loader') : undefined)
               const { seeds, seedsKnown } = await collectPlatformSeeds(dshDir, graphEntries, installTreeHas)
               const { results } = await runSmokes({
                 plugins,
