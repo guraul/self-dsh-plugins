@@ -35,18 +35,18 @@ test('normalizeRole 保留 model（与 provider）', () => {
 test('内置角色：reviewer 钉 provider + model，executor 不钉', () => {
   const { roles } = loadRoles()
   assert.equal(roles.get('reviewer').provider, 'codebuddy')
-  assert.equal(roles.get('reviewer').model, 'codebuddy/deepseek-v4.1-flash')
+  assert.equal(roles.get('reviewer').model, 'codebuddy/glm-5.3-flash')
   assert.equal(roles.get('executor').provider, '')
   assert.equal(roles.get('executor').model, '')
 })
 
-test('不传 model 调 reviewer → 下发角色钉的 codebuddy/deepseek-v4.1-flash', async () => {
+test('不传 model 调 reviewer → 下发角色钉的 codebuddy/glm-5.3-flash', async () => {
   const { tools, specs, exec } = await fakeHost()
   const out = await tools.get('product_delegate').execute({ role: 'reviewer', task: '审一下' }, exec)
   assert.equal(specs.length, 1)
   assert.equal(specs[0].provider, 'product-subagents:codebuddy')
-  assert.equal(specs[0].model, 'codebuddy/deepseek-v4.1-flash', 'rc.2+ 读顶层 model')
-  assert.equal(specs[0].request.model, 'codebuddy/deepseek-v4.1-flash', '旧宿主读 request.model')
+  assert.equal(specs[0].model, 'codebuddy/glm-5.3-flash', 'rc.2+ 读顶层 model')
+  assert.equal(specs[0].request.model, 'codebuddy/glm-5.3-flash', '旧宿主读 request.model')
   assert.equal(specs[0].parent, exec.agent)
   assert.equal(specs[0].delivery, 'parent')
   assert.equal(specs[0].request.parent, exec.agent)
@@ -58,11 +58,11 @@ test('传角色钉的 model（等价）→ 放行，下发角色钉的带前缀�
   const { tools, specs, exec } = await fakeHost()
   await tools
     .get('product_delegate')
-    .execute({ role: 'reviewer', model: 'codebuddy/deepseek-v4.1-flash', task: 't' }, exec)
-  assert.equal(specs[0].request.model, 'codebuddy/deepseek-v4.1-flash')
+    .execute({ role: 'reviewer', model: 'codebuddy/glm-5.3-flash', task: 't' }, exec)
+  assert.equal(specs[0].request.model, 'codebuddy/glm-5.3-flash')
 
-  await tools.get('product_delegate').execute({ role: 'reviewer', model: 'deepseek-v4.1-flash', task: 't' }, exec)
-  assert.equal(specs[1].request.model, 'codebuddy/deepseek-v4.1-flash', '去掉 codebuddy/ 前缀视为同一个模型')
+  await tools.get('product_delegate').execute({ role: 'reviewer', model: 'glm-5.3-flash', task: 't' }, exec)
+  assert.equal(specs[1].request.model, 'codebuddy/glm-5.3-flash', '去掉 codebuddy/ 前缀视为同一个模型')
 })
 
 test('传冲突模型直接报错，且不发起调用', async () => {
@@ -70,7 +70,7 @@ test('传冲突模型直接报错，且不发起调用', async () => {
   await assert.rejects(
     () => tools.get('product_delegate').execute({ role: 'reviewer', model: '别的模型', task: 't' }, exec),
     (error) => {
-      assert.ok(error.message.includes('角色 reviewer 钉的模型是 codebuddy/deepseek-v4.1-flash'))
+      assert.ok(error.message.includes('角色 reviewer 钉的模型是 codebuddy/glm-5.3-flash'))
       assert.ok(error.message.includes('本次请求 别的模型'))
       return true
     },
@@ -115,9 +115,9 @@ test('product_continue 续接同样吃角色钉的模型，冲突也报错', asy
     .get('product_continue')
     .execute({ role: 'reviewer', session: 's-abc', task: '补一条 finding' }, exec)
   assert.equal(specs.length, 1)
-  assert.equal(specs[0].model, 'codebuddy/deepseek-v4.1-flash')
+  assert.equal(specs[0].model, 'codebuddy/glm-5.3-flash')
   assert.equal(specs[0].sessionId, 's-abc', '续接句柄也在顶层（rc.2+ 原样传给 provider）')
-  assert.equal(specs[0].request.model, 'codebuddy/deepseek-v4.1-flash')
+  assert.equal(specs[0].request.model, 'codebuddy/glm-5.3-flash')
   assert.equal(specs[0].request.sessionId, 's-abc')
 
   await assert.rejects(
@@ -125,7 +125,7 @@ test('product_continue 续接同样吃角色钉的模型，冲突也报错', asy
       tools
         .get('product_continue')
         .execute({ role: 'reviewer', session: 's-abc', model: '别的模型', task: 't' }, exec),
-    (error) => error.message.includes('角色 reviewer 钉的模型是 codebuddy/deepseek-v4.1-flash'),
+    (error) => error.message.includes('角色 reviewer 钉的模型是 codebuddy/glm-5.3-flash'),
   )
   assert.equal(specs.length, 1, '冲突那次不发起调用')
 })
@@ -181,13 +181,13 @@ test('resolveRoute：reviewer 传不一致模型仍然抛错（硬钉回归）',
   const { roles } = loadRoles()
   assert.throws(
     () => resolveRoute(roles.get('reviewer'), { model: '别的模型' }),
-    /角色 reviewer 钉的模型是 codebuddy\/deepseek-v4\.1-flash，本次请求 别的模型/,
+    /角色 reviewer 钉的模型是 codebuddy\/glm-5\.3-flash，本次请求 别的模型/,
   )
 
   const { tools, specs, exec } = await fakeHost()
   await assert.rejects(
     () => tools.get('product_delegate').execute({ role: 'reviewer', model: '别的模型', task: 't' }, exec),
-    /钉的模型是 codebuddy\/deepseek-v4\.1-flash/,
+    /钉的模型是 codebuddy\/glm-5\.3-flash/,
   )
   assert.equal(specs.length, 0, '硬钉冲突必须在发起调用之前抛出')
 })
@@ -222,7 +222,7 @@ test('reviewer-tools：带工具审核，permissionMode=full 且非硬只读（�
   const role = roles.get('reviewer-tools')
   assert.ok(role, 'reviewer-tools 角色必须存在')
   assert.equal(role.provider, 'codebuddy')
-  assert.equal(role.model, 'codebuddy/deepseek-v4.1-flash')
+  assert.equal(role.model, 'codebuddy/glm-5.3-flash')
   assert.equal(
     role.permissionMode,
     'full',
