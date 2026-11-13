@@ -3,8 +3,11 @@ import assert from 'node:assert/strict'
 
 import {
   SMOKE_TIMEOUT_MS,
+  createInjectResolver,
   fallbackChecks,
   normalizeSmoke,
+  officialInjectSeeds,
+  platformSeedsFromStaticModules,
   runSmoke,
   runSmokes,
 } from '../lib/host/smoke.js'
@@ -32,6 +35,114 @@ test('fallbackChecks：没启用 / 目录没了 / 注入包缺——各自单独
   })
   assert.equal(missing[2].ok, false)
   assert.match(missing[2].detail, /gone/)
+})
+
+test('fallbackChecks：启用优先看运行中的 Loader，缺省回退 profile bundles', () => {
+  // cordis.patch.yml insert 的行不在 bundles 里，但 Loader 里活着——必须算通过。
+  const inserted = fallbackChecks({
+    name: 'p', bundles: [], enabled: ['p'], pluginDirExists: true, inject: [], resolvable: resolvableAll,
+  })
+  assert.equal(inserted[0].ok, true)
+  assert.match(inserted[0].detail, /运行中 Loader 里已启用/)
+
+  // Set 也接受。
+  const fromSet = fallbackChecks({
+    name: 'p', bundles: [], enabled: new Set(['p']), pluginDirExists: true, inject: [], resolvable: resolvableAll,
+  })
+  assert.equal(fromSet[0].ok, true)
+
+  // Loader 里没有 = 真没启用，即便 bundles 里写着也要红。
+  const disabled = fallbackChecks({
+    name: 'p', bundles: ['p'], enabled: [], pluginDirExists: true, inject: [], resolvable: resolvableAll,
+  })
+  assert.equal(disabled[0].ok, false)
+  assert.match(disabled[0].detail, /未在运行中的 Loader 里启用/)
+
+  // 没给 enabled 时行为与旧版一致。
+  const fallback = fallbackChecks({
+    name: 'p', bundles: ['p'], pluginDirExists: true, inject: [], resolvable: resolvableAll,
+  })
+  assert.equal(fallback[0].ok, true)
+  assert.match(fallback[0].detail, /dsh\.profile\.bundles 里启用/)
+})
+
+test('fallbackChecks：注入项解析不出时，种子表不可读只降级为「未判定」', () => {
+  const unknown = fallbackChecks({
+    name: 'p', bundles: ['p'], pluginDirExists: true, inject: ['ui-slots'],
+    resolvable: () => 'unknown',
+  })
+  assert.equal(unknown[2].ok, true)
+  assert.match(unknown[2].detail, /未解析到 ui-slots/)
+  assert.match(unknown[2].detail, /未判定/)
+
+  const missing = fallbackChecks({
+    name: 'p', bundles: ['p'], pluginDirExists: true, inject: ['gone'],
+    resolvable: () => false,
+  })
+  assert.equal(missing[2].ok, false)
+})
+
+test('platformSeedsFromStaticModules：从 staticModules 表里取出平台内置模块名', () => {
+  const fixture = [
+    'function WJ(){return{react:rS,"react/jsx-runtime":aS,"react-dom":fS,"react-dom/client":mS,',
+    '"@deepseek-ai/cordis":jC,zod:tN,"@tanstack/react-virtual":cN,',
+    '"@deepseek-ai/dsh-client-ui-slots":RN,"@deepseek-ai/dsh-client-ui-primitives":MK}}',
+  ].join('')
+  const seeds = platformSeedsFromStaticModules(fixture)
+  assert.deepEqual(seeds, [
+    'react',
+    'react/jsx-runtime',
+    'react-dom',
+    'react-dom/client',
+    '@deepseek-ai/cordis',
+    'zod',
+    '@tanstack/react-virtual',
+    '@deepseek-ai/dsh-client-ui-slots',
+    '@deepseek-ai/dsh-client-ui-primitives',
+  ])
+})
+
+test('platformSeedsFromStaticModules：锚点缺失 / 花括号不配对时返回 undefined，不抛错', () => {
+  assert.equal(platformSeedsFromStaticModules('const x = {"zod": z}'), undefined)
+  assert.equal(platformSeedsFromStaticModules('{ "react-dom/client": m '), undefined)
+  assert.equal(platformSeedsFromStaticModules(undefined), undefined)
+})
+
+test('officialInjectSeeds：只认官方行，自定义行自己 inject 的未知名字不能变种子', () => {
+  // 安装树里真实存在的包（ui-slots / ui-primitives 这类种子模块不在 npm 安装树里）。
+  const installTree = new Set([
+    '@deepseek-ai/dsh-client-ui-renderer',
+    '@deepseek-ai/dsh-client-modules',
+  ])
+  const official = (pkg) => installTree.has(pkg)
+  const graph = [
+    { id: '@deepseek-ai/dsh-client-ui-renderer', inject: ['@deepseek-ai/dsh-client-ui-slots', 'react', '@deepseek-ai/dsh-client-modules'] },
+    { id: 'my-plugin', inject: ['custom-internal-name'] },
+  ]
+  const seeds = officialInjectSeeds(graph, official)
+  assert.deepEqual(seeds, ['@deepseek-ai/dsh-client-ui-slots', 'react'])
+})
+
+test('createInjectResolver：图行 / 包 / 种子 / unknown / 真缺失', () => {
+  const packageExists = (pkg) => pkg === 'installed-pkg'
+  const resolver = createInjectResolver({
+    graphIds: ['graph-row'],
+    packageExists,
+    seeds: ['platform-seed'],
+    seedsKnown: false,
+  })
+  assert.equal(resolver('graph-row'), true)
+  assert.equal(resolver('installed-pkg'), true)
+  assert.equal(resolver('platform-seed'), true)
+  assert.equal(resolver('mystery'), 'unknown')
+
+  const known = createInjectResolver({
+    graphIds: [],
+    packageExists,
+    seeds: [],
+    seedsKnown: true,
+  })
+  assert.equal(known('mystery'), false)
 })
 
 test('normalizeSmoke：脏数据一律按失败处理，不许静默当通过', () => {

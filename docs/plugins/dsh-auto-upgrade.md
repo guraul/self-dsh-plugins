@@ -234,6 +234,17 @@ pnpm run check                                # node --check
 的插件只跑兜底三项并标 `partial`——不假装验过行为。`run(context)` 会收到宿主的
 `dshVersion` / `dshDir`：断言要验**宿主实际加载的那份**，别 import 到插件自己 node_modules 的旧副本。
 目前声明了 `dsh.smoke` 的有 `dsh-im-bridge-workspaces` 与 `dsh-subagents`。
+
+兜底三项的判据（#413 修正）：
+
+- **启用** = **运行中 Loader 的未禁用条目**（`loader.entries()` 的 `options.name`）；取不到 Loader
+  时才回退 profile 的 `dsh.profile.bundles`。`cordis.patch.yml` 用 insert 声明的行不在 bundles 里，
+  只看 bundles 会误报。
+- **注入包** = 启动图行 ∪ 安装树/profile 里能解析的包 ∪ **平台种子表**。平台种子表有两个来源：
+  dsh 安装树里 `dsh-web-frontend/dist/assets/index-*.js` 的 `staticModules` 表（`ui-slots` /
+  `ui-primitives` 这类平台内置模块只在这里），以及启动图里**官方行** inject 的、既非图行也非包名的名字。
+- **种子表不可读**时，解析不到的注入包降级为「未判定」（按通过算，detail 写明原因），
+  **只有确定缺失才判红**——升级工具自己不许因为读不到名单而制造假失败。
 冒烟失败会自动开 issue（按标题去重；开单失败只记日志）。`GET /refill` 是只读预览；`POST /refill/pr` 才动手：在**临时 git worktree**（从 `origin/main` 切）里改
 `package.json` → 提交 → 推分支 → 开 PR，跑完清场，**绝不碰你当前工作区**。`partial` 只在兜底三项全过时才算「通过」，兜底本身失败照样开单。
 
