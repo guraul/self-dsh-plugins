@@ -12,7 +12,7 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -20,7 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
 import { entryCandidates, linkTargets, pluginIdFromSource, probeCacheEntries, runProbes } from './host/probe.js'
-import { runSmokes } from './host/smoke.js'
+import { collectLoaderNames, createInjectResolver, officialInjectSeeds, platformSeedsFromStaticModules, runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { runProbeWithProfile } from './host/probe-run.js'
@@ -787,6 +787,58 @@ export function apply(ctx, config = {}) {
       return { plugins, bundles: profile.dsh?.profile?.bundles ?? [] }
     }
 
+    /**
+     * 当前启动图的行（`clientModules.graph().entries`）；取不到按空数组处理。
+     * @returns {{id?: string, inject?: string[]}[]} 启动图行。
+     */
+    const collectBootGraphEntries = () => {
+      try {
+        const graph = typeof ctx.get === 'function' ? ctx.get('clientModules')?.graph() : undefined
+        return Array.isArray(graph?.entries) ? graph.entries : []
+      } catch {
+        return []
+      }
+    }
+
+    /**
+     * 平台内置种子模块名单。
+     *
+     * 两个来源：官方 web 前端产物里的 `staticModules` 表（`ui-slots` / `ui-primitives` 只在这里），
+     * 以及启动图里官方行 inject 的、既非图行也非包名的名字。读不到就降级：`seedsKnown=false`
+     * 让冒烟把解析不到的注入包判成「未判定」，而不是判红（issue #413）。
+     * @param {string | undefined} dshDir 安装树根。
+     * @param {{id?: string, inject?: string[]}[]} graphEntries 启动图行。
+     * @param {(pkg: string) => boolean} installTreeHas 安装树里是否有该包。
+     * @returns {Promise<{seeds: string[], seedsKnown: boolean}>} 种子与「表是否可读」。
+     */
+    const collectPlatformSeeds = async (dshDir, graphEntries, installTreeHas) => {
+      const seeds = new Set()
+      let seedsKnown = false
+      if (dshDir !== undefined) {
+        try {
+          const assetsDir = join(dshDir, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist', 'assets')
+          const files = await readdir(assetsDir)
+          const scripts = files.filter((file) => file.endsWith('.js') && !file.endsWith('.map')).sort()
+          const pick = scripts.find((file) => /^index-.*\.js$/.test(file)) ?? scripts[0]
+          if (pick !== undefined) {
+            const parsed = platformSeedsFromStaticModules(await readFile(join(assetsDir, pick), 'utf8'))
+            if (parsed !== undefined) {
+              for (const seed of parsed) seeds.add(seed)
+              seedsKnown = true
+            }
+          }
+        } catch {
+          /* 前端产物读不到：保持 seedsKnown=false，冒烟照跑 */
+        }
+      }
+      try {
+        for (const seed of officialInjectSeeds(graphEntries, installTreeHas)) seeds.add(seed)
+      } catch {
+        /* 启动图畸形只是少一份补充，不影响冒烟 */
+      }
+      return { seeds: [...seeds], seedsKnown }
+    }
+
     route(API.smoke, {
       GET: async (_req, res) => {
         let cached = {}
@@ -819,15 +871,27 @@ export function apply(ctx, config = {}) {
           writeJson(res, 202, { ok: true, startedAt: smokeRun.startedAt, count: plugins.length })
           void (async () => {
             try {
+              const dshDir = installation?.dshDir
+              const installTreeHas = (pkg) => dshDir !== undefined && existsSync(join(dshDir, 'node_modules', pkg))
+              const packageExists = (pkg) => installTreeHas(pkg) || existsSync(join(profileDir, 'node_modules', pkg))
+              const graphEntries = collectBootGraphEntries()
+              const enabled = collectLoaderNames(typeof ctx.get === 'function' ? ctx.get('loader') : undefined)
+              const { seeds, seedsKnown } = await collectPlatformSeeds(dshDir, graphEntries, installTreeHas)
               const { results } = await runSmokes({
                 plugins,
                 bundles,
+                enabled,
                 // 宿主事实：插件的断言要对着**宿主实际加载的那份** dsh 验，而不是插件自己 node_modules 里的旧副本。
                 context: {
                   dshVersion: installation === undefined ? undefined : await readInstalledVersion(installation.manifestPath),
-                  dshDir: installation === undefined ? undefined : installation.dshDir,
+                  dshDir,
                 },
-                resolvable: (pkg) => existsSync(join(profileDir, 'node_modules', pkg)),
+                resolvable: createInjectResolver({
+                  graphIds: graphEntries.map((entry) => entry?.id).filter((id) => typeof id === 'string'),
+                  packageExists,
+                  seeds,
+                  seedsKnown,
+                }),
                 importModule: (plugin, modulePath) => import(pathToFileURL(join(plugin.dir, modulePath)).href),
               })
               const at = Date.now()
