@@ -83,8 +83,11 @@ cd dsh-subagents && node --test && node --check lib/cli.js
 
 基线（2026-10-31，PR2）：`node --test` **37 项全过**。
 
-`0.2.2-rc.2` 的 `startActivation` 扁平 spec 已按源码适配并有单测覆盖，真机 `product_delegate`
-验收待宿主重启后进行（尚未写进 [`docs/COMPATIBILITY.md`](../COMPATIBILITY.md) 的矩阵）。
+`0.2.2-rc.2` 的 `startActivation` 扁平 spec 已按源码适配并有单测覆盖；真机验收已完成（2026-11-13）：
+`product_delegate`（codebuddy / `codebuddy/deepseek-v4.1-flash`）返回 `subagents-ok: 0.2.2-rc.2`，
+同会话 `product_continue` 返回 `continue-ok`（session `01a1d5a0-cbfc-72f0-994f-88611826aec2`）。
+verdict 为 **L4**（该包无构建步骤，L3 编译期不适用），已写进
+[`docs/COMPATIBILITY.md`](../COMPATIBILITY.md) 的矩阵。
 
 真实调用形态 B 需要本机有 `opencode` 或 `codebuddy`，并且要用**完整权限**跑
 （受限沙盒下 `gh` 读不到系统钥匙串，会报「令牌无效」）。

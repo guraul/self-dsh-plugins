@@ -59,6 +59,7 @@
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.1` | `0.2.2-alpha.2` | **L3** | ❌ **不兼容（未放宽）**<br>装配/加载可过，但 `tsc` 报 `TS2554`，且 `reasoningEffort` 静默失效 | 2026-10-29 | 一次性 `DSH_HOME` 装配 + headless 启动均通过；**CI 解析到 alpha.2 类型后 `pnpm run typecheck` 失败** → 见文末「已知差异」 |
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.2` | `0.2.2-rc.1` | **L3** | ✅ 通过（**已放宽**） | 2026-11-05 | 按 rc.1 类型跑 `tsc` 通过（临时 `paths` 指向已装的 rc.1）；`pnpm test` 54/54；`build:host` 产物 `node --check` 通过；按 arity 分流 `installModelSelection`（issue #299） |
 | `dsh-im-bridge-workspaces` | `@mhfire/dsh-im-bridge@0.5.0-ws.2` | `0.2.2-alpha.2` | **L3** | ✅ 通过（**已放宽**） | 2026-11-05 | 同上，按 alpha.2 类型跑 `tsc` 通过（arity 同为 1，走同一条适配路径） |
+| `dsh-subagents` | `dsh-plugin-subagents@0.2.1` | `0.2.2-rc.2` | **L4** | ✅ 通过 | 2026-11-13 | 真机：`product_delegate` + `product_continue` 跑通（session `01a1d5a0-…`）；无构建步骤，L3 不适用 |
 
 > **显示口径（#300 P3）**：只有 **L2 及以上**的自述 `compatible` 才在界面上显示「兼容」；
 > 只到 **L1** 或没记深度 → 显示「**可装配 · 未验证行为**」。理由：声明覆盖 ≠ 行为验证过
