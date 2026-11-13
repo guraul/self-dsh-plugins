@@ -60,6 +60,7 @@ export const DELEGATION_PREAMBLE =
  *
  * 因此同一组字段既放顶层（rc.2+）又保留在 `request`（≤ 0.2.2-alpha.2），两代宿主都能跑；
  * provider 侧读的 `model` / `permissionMode` / `sessionId` / `cwd` / `parent` 在扁平化后仍然拿得到。
+ * `label` 只在顶层：官方 spec 的显示名 / 校验字段，旧宿主不读它，放进 request 没有意义。
  *
  * `signal` 是**必填**：服务端直接调用 `spec.signal.throwIfAborted()`
  * （@deepseek-ai/dsh-subagent 的 startExternal / materialize 都会用到），
@@ -105,6 +106,8 @@ export function activationSpec({
 
   return {
     provider: providerName(provider),
+    // 官方调用都带 label（显示名 / 校验用）；角色没有 id 时退回 provider，别留 undefined
+    label: role?.id ?? provider,
     signal,
     // rc.2+ 读顶层字段；`delivery: 'parent'` 声明结果回流给父 agent
     ...fields,

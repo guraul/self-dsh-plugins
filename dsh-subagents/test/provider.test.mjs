@@ -142,6 +142,8 @@ test('activationSpec 必须带 signal（PR8 事故回归）', async () => {
     maxDepth: 2,
   })
   assert.equal(spec.provider, 'product-subagents:opencode')
+  // 官方调用带 label；角色没 id 时退回 provider，不能是 undefined
+  assert.equal(spec.label, 'opencode')
   assert.equal(spec.signal, controller.signal)
   // rc.2+ 读顶层（扁平）字段；缺了就是 `Cannot read properties of undefined (reading 'id')`
   assert.equal(spec.parent.id, 'parent')
@@ -163,7 +165,7 @@ test('activationSpec 双形状：顶层扁平字段与嵌套 request 一致（0.
   const agent = { id: 'parent' }
   const spec = activationSpec({
     provider: 'codebuddy',
-    role: { instructions: '你是执行者', permissionMode: 'readonly' },
+    role: { id: 'executor', instructions: '你是执行者', permissionMode: 'readonly' },
     task: '修一下',
     agent,
     signal: controller.signal,
@@ -174,6 +176,7 @@ test('activationSpec 双形状：顶层扁平字段与嵌套 request 一致（0.
   })
 
   // rc.2+ 的 startActivation 直接读这些顶层字段
+  assert.equal(spec.label, 'executor')
   assert.equal(spec.parent, agent)
   assert.equal(spec.maxDepth, 2)
   assert.equal(spec.delivery, 'parent')
