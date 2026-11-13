@@ -1,5 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import {
   SMOKE_TIMEOUT_MS,
@@ -108,6 +112,12 @@ test('platformSeedsFromStaticModules：锚点缺失 / 花括号不配对时返�
   assert.equal(platformSeedsFromStaticModules(undefined), undefined)
 })
 
+test('platformSeedsFromStaticModules：锚点在、但缺 react / react-dom/client 时按没解析到处理', () => {
+  // 打包产物里 `"react-dom/client":` 不止一处；撞到别的对象时不能置 seedsKnown=true。
+  assert.equal(platformSeedsFromStaticModules('{"react-dom/client":mS,"zod":tN}'), undefined)
+  assert.equal(platformSeedsFromStaticModules('{"react":rS,"zod":tN}'), undefined)
+})
+
 test('officialInjectSeeds：只认官方行，自定义行自己 inject 的未知名字不能变种子', () => {
   // 安装树里真实存在的包（ui-slots / ui-primitives 这类种子模块不在 npm 安装树里）。
   const installTree = new Set([
@@ -143,6 +153,26 @@ test('createInjectResolver：图行 / 包 / 种子 / unknown / 真缺失', () =>
     seedsKnown: true,
   })
   assert.equal(known('mystery'), false)
+})
+
+test('createInjectResolver：安装树 ∪ profile 的组合谓词（真实临时目录）', async (t) => {
+  const installDir = await mkdtemp(join(tmpdir(), 'dsh-au-install-'))
+  const profileDir = await mkdtemp(join(tmpdir(), 'dsh-au-profile-'))
+  t.after(async () => {
+    await rm(installDir, { recursive: true, force: true })
+    await rm(profileDir, { recursive: true, force: true })
+  })
+  await mkdir(join(installDir, 'node_modules', 'only-in-install'), { recursive: true })
+  await mkdir(join(profileDir, 'node_modules', '@scope', 'only-in-profile'), { recursive: true })
+
+  // 与 lib/index.js 里的 packageExists 同形：安装树 ∪ profile。
+  const packageExists = (pkg) =>
+    existsSync(join(installDir, 'node_modules', pkg)) || existsSync(join(profileDir, 'node_modules', pkg))
+  const resolver = createInjectResolver({ graphIds: [], packageExists, seeds: [], seedsKnown: true })
+
+  assert.equal(resolver('only-in-install'), true, '只装在安装树的包必须能解析')
+  assert.equal(resolver('@scope/only-in-profile'), true, '只装在 profile 的包必须能解析')
+  assert.equal(resolver('nowhere'), false, '两处都没有的包在 seedsKnown=true 时判缺失')
 })
 
 test('normalizeSmoke：脏数据一律按失败处理，不许静默当通过', () => {

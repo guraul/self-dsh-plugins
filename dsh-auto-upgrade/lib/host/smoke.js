@@ -78,10 +78,11 @@ export function fallbackChecks(input) {
  * `staticModules` 表里，没有别的机器可读来源。
  *
  * 算法：以 `"react-dom/client":` 为锚点，往前找最近的 `{`（对象字面量起点），
- * 花括号配对到对象末尾，再用「字符串键或标识符键 + 冒号」收集键名。
+ * 花括号配对到对象末尾，再用「字符串键或标识符键 + 冒号」收集键名；最后自检结果里必须
+ * 同时有 `react` 与 `react-dom/client`，否则视为锚点撞到了别的对象。
  * 解析失败一律返回 `undefined`（调用方据此把该项降级为「未判定」，不许抛错）。
  * @param {string} source 构建产物文本。
- * @returns {string[] | undefined} 模块名；找不到锚点 / 花括号不配对时 `undefined`。
+ * @returns {string[] | undefined} 模块名；找不到锚点 / 花括号不配对 / 自检不过时 `undefined`。
  */
 export function platformSeedsFromStaticModules(source) {
   if (typeof source !== 'string') return undefined
@@ -114,6 +115,10 @@ export function platformSeedsFromStaticModules(source) {
     seen.add(name)
     names.push(name)
   }
+  // 自检：`"react-dom/client":` 在打包产物里不止一处，锚点可能撞到别的对象。
+  // 真正的 `staticModules` 表一定同时含这两个键；缺一个就按没解析到处理，
+  // 否则会把一张假表当成「种子表已知」，把真缺失洗成通过。
+  if (!seen.has('react') || !seen.has('react-dom/client')) return undefined
   return names
 }
 
