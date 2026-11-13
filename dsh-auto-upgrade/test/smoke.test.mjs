@@ -71,6 +71,22 @@ test('fallbackChecks：启用优先看运行中的 Loader，缺省回退 profile
   assert.match(fallback[0].detail, /dsh\.profile\.bundles 里启用/)
 })
 
+test('fallbackChecks：enabled 不可迭代时按取不到处理，回退 profile bundles', () => {
+  // `{}` 不是名单；若折成空 Set 会变成「全部未启用」，把 bundles 里好好启用的插件误报成红。
+  const nonIterable = fallbackChecks({
+    name: 'p', bundles: ['p'], enabled: {}, pluginDirExists: true, inject: [], resolvable: resolvableAll,
+  })
+  assert.equal(nonIterable[0].ok, true)
+  assert.match(nonIterable[0].detail, /dsh\.profile\.bundles 里启用/)
+
+  // 同一形状下 bundles 里没有也要红——回退的是 bundles 判据，不是无条件放行。
+  const notInBundles = fallbackChecks({
+    name: 'p', bundles: [], enabled: {}, pluginDirExists: true, inject: [], resolvable: resolvableAll,
+  })
+  assert.equal(notInBundles[0].ok, false)
+  assert.match(notInBundles[0].detail, /没被 profile 启用/)
+})
+
 test('fallbackChecks：注入项解析不出时，种子表不可读只降级为「未判定」', () => {
   const unknown = fallbackChecks({
     name: 'p', bundles: ['p'], pluginDirExists: true, inject: ['ui-slots'],

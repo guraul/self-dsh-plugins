@@ -25,7 +25,8 @@ export const SMOKE_TIMEOUT_MS = 5000
  * @param {object} input 输入。
  * @param {string} input.name 包名。
  * @param {string[]} input.bundles profile 的 `dsh.profile.bundles`。
- * @param {Iterable<string> | string[]} [input.enabled] 运行中 Loader 里未禁用的条目名。
+ * @param {Iterable<string> | string[]} [input.enabled] 运行中 Loader 里未禁用的条目名；
+ *   传了但不可迭代时按「取不到」处理（回退 bundles）。
  * @param {boolean} input.pluginDirExists 插件目录是否存在。
  * @param {string[]} input.inject `dsh.client.inject` 声明的包名。
  * @param {(pkg: string) => boolean | 'unknown'} input.resolvable 该客户端包能否解析到；
@@ -33,9 +34,11 @@ export const SMOKE_TIMEOUT_MS = 5000
  * @returns {{name: string, ok: boolean, detail: string}[]} 三项检查。
  */
 export function fallbackChecks(input) {
-  const enabled = input.enabled == null
+  // 只有真能迭代时才当「运行中 Loader 的启用名单」；传了但不可迭代（如 `{}`）说明取到的不是名单，
+  // 按 undefined 回退 bundles——折成空 Set 会被误读成「全部未启用」。
+  const enabled = input.enabled == null || typeof input.enabled[Symbol.iterator] !== 'function'
     ? undefined
-    : new Set(typeof input.enabled[Symbol.iterator] === 'function' ? input.enabled : [])
+    : new Set(input.enabled)
   const enabledNow = enabled === undefined ? input.bundles.includes(input.name) : enabled.has(input.name)
   const unknownInject = []
   const missingInject = []
