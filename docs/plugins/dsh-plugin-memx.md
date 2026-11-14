@@ -26,6 +26,8 @@ memx 记忆能力接进 DSH 的**薄壳**：注入 / 捕获 / 提炼 / 写盘这
 | `src/config.ts` → `lib/config.js` | 四个配置字段的 schemastery 声明（全 `.volatile()`） | esbuild 产物 |
 | `src/client/index.tsx`、`src/client/MemorySettings.tsx` → `lib/client.js` | 设置页「记忆」 | esbuild 产物 |
 | `scripts/build.mjs` | 打 `lib/config.js` + `lib/client.js`（`lib/index.js` 不在其中） | — |
+| `smoke.mjs` | 升级后冒烟（`dsh.smoke`）：load 钩子解析 memx 模块 / 四字段设置 schema / 记忆目录路径 | — |
+| `test/smoke.test.mjs` | 冒烟自测（2 条；需要 memx 仓的那条在无 memx 的机器上跳过） | — |
 | `cordis.patch.yml` | bundle patch：插 `memx` 那一行 | — |
 
 ## 改之前必须知道的六件事
@@ -57,11 +59,16 @@ memx 记忆能力接进 DSH 的**薄壳**：注入 / 捕获 / 提炼 / 写盘这
 cd dsh-plugin-memx
 pnpm install            # 本插件有 pnpm-lock.yaml，CI 走 frozen-lockfile
 pnpm run build          # lib/config.js + lib/client.js
+pnpm test               # 2 条 smoke 自测
 pnpm run typecheck      # tsc --noEmit
 ```
 
-本插件**没有** `scripts.test` / `scripts.lint`，CI matrix 条目（`dir: dsh-plugin-memx`）只做三件事：
-装依赖 → 重建并要求产物新鲜 → 确认 `lib/index.js` / `lib/client.js` / `lib/config.js` 存在。
+本插件**没有** `scripts.lint`；CI matrix 条目（`dir: dsh-plugin-memx`）会做：装依赖 → 重建并要求产物新鲜 →
+跑 `pnpm test`（2 条 smoke 自测）→ 确认 `lib/index.js` / `lib/client.js` / `lib/config.js` 存在。
+
+`smoke.mjs`（宿主 `dsh.smoke`）在真机上验三件事：`lib/index.js` 的 load 钩子能加载 memx 仓的 TS 适配器；
+`lib/config.js` 四字段仍全 `.volatile()` 且默认值口径未漂；记忆目录解析仍是 `<home>/.opencode/projects/<slug>/.mem`
+（memx 宿主无关，**不读 `DSH_HOME`**）。
 
 真机验收（**重启 dsh web 会终止当前会话**，注意时机）：profile 里 `link:` 到本目录后
 在 `~/.dsh/profiles/web` 跑一次 `pnpm install`（否则 `node_modules/<包名>` 软链悬空、插件不加载），

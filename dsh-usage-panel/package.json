@@ -18,6 +18,10 @@
     "engines": {
       "dsh": ">=0.1.5-rc.1"
     },
+    "smoke": {
+      "module": "./smoke.mjs",
+      "timeoutMs": 5000
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     },

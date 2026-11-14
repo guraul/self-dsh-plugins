@@ -19,9 +19,14 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
     "typecheck": "tsc --noEmit"
   },
   "dsh": {
+    "smoke": {
+      "module": "./smoke.mjs",
+      "timeoutMs": 5000
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
