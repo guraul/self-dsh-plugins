@@ -3,6 +3,21 @@
 记录 `dsh-plugin-auto-upgrade` 的变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **重启进度页加入「冒烟检查」阶段**（#423）。`/state` 新增 `check` 字段，读本轮
+  `$STATE_DIR/boot-check.json`（契约 `{schema:1, at, problems, disabled:[], unverified:[], results:[]}`），
+  返回 `{state:'pending'|'done'|'timeout', problems, disabled, unverified}`：
+  - 新地址可达**且**结果文件落盘才算 `done`；缺失时最多再等 20s（从首次可达起算）；
+  - 超时标 `timeout` 并**照常跳转**，不阻塞；
+  - 进度页在跳转前渲染一行 `冒烟检查：N 个问题 / 已临时禁用 X 个 / M 个未验证`，超时显示「检查未完成」；
+  - 只监听 `127.0.0.1` / 完成后 15s 自退 / 总上限 20 分钟 / 现有阶段条均不变。
+  - 结果文件由后续 PR 落盘；`schema !== 1` 或上一轮遗留文件按「还没有结果」处理。
+  - 单测覆盖：缺失 → pending / 到 20s → timeout（注入时钟，不真等）、问题与禁用计数、无问题全 0、
+    超时仍返回地址、文案。
+
 ## [0.9.13] — 2026-11-09
 
 ### 测试

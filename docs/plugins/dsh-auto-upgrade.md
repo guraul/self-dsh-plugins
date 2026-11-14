@@ -395,6 +395,14 @@ pnpm run check                                # node --check
 前端跳过去、完成后自动跳新令牌地址。只监听 `127.0.0.1`、只读本机、完成 15s / 最多 20 分钟后自退；
 起不来退回 watchdog。**它在 done 阶段返回带令牌的地址（仅本机回环），别把这个端口转发到外网。**
 
+冒烟检查一行（#423）：新地址可达**且**本轮 `$STATE_DIR/boot-check.json` 落盘才算 `done`；
+结果文件缺失时最多再等 **20s**（从首次观察到新地址可达起算），到点标 `check.state='timeout'`，
+**照常跳转**、不阻塞。`/state` 的 `check` 字段为
+`{state:'pending'|'done'|'timeout', problems, disabled, unverified}`（后三者为计数），
+`boot-check.json` 契约为 `{schema:1, at, problems, disabled:[], unverified:[], results:[]}`；
+`schema !== 1` 或 mtime 早于本轮启动的文件都当「还没有结果」。结果文件由后续 PR 落盘。
+进度页在跳转前渲染 `冒烟检查：N 个问题 / 已临时禁用 X 个 / M 个未验证`，超时显示「检查未完成」。
+
 ## 另需注意的两条设计约束
 
 - **本包故意不声明 `@deepseek-ai/dsh*` peerDependencies**（只声明 `react`）：否则升级之后，平台闸门会把
