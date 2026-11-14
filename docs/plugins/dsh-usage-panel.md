@@ -53,12 +53,15 @@ Host 半只读重算会话日志 + RPC 投影，**永不写回会话**。
 | `src/client/components/*` | KpiCards / Heatmap / BarChart / ModelDonut / SessionsCard / ProvidersCard / ExportMenu |
 | `src/shared/` | 契约（`contract.ts`）、格式化（`format.ts`）、用量模型（`usage.ts`） |
 | `lib/` | 构建产物（esbuild host ESM + client CJS factory + tsc d.ts），**已入库** |
+| `smoke.mjs` | 升级后冒烟（`dsh.smoke`）：`usagePanel-fold` 纯函数 + 用宿主真实 `coldSnapshot` 冷读 fixture |
+| `tests/smoke.test.ts` | 冒烟自测（2 条；需要宿主 dsh 的那条在无 dsh 的机器上跳过） |
 
 ## 注意
 
 - 构建脚本里 `scripts/build.mjs` 用 `npx tsc`、`scripts/check-pack.mjs` 用 `npm pack --dry-run`：
   都是**上游脚本原文**，只调用本地 `node_modules/.bin`、不安装任何东西。要彻底 pnpm 化得改脚本（属功能改动，另开 issue）。
-- 本插件目录**尚未**进 CI matrix（`.github/workflows/ci.yml` 的 `dir:` 列表）与根 `README.md` 插件索引，
-  加进去之前 CI 会以 `::warning::` 跳过。
+- 冒烟断言必须对着**宿主安装的那份** `@deepseek-ai/dsh-session-projection[-cache]`（`ctx.dshDir`），
+  不能用本包 devDependencies 里的 `0.1.5-rc.*`；后者只能证明旧契约，抓不到宿主升级后的漂移。
+- 本插件目录已进 CI matrix（`.github/workflows/ci.yml`），但尚未进根 `README.md` 插件索引。
 - 上游 `AGENTS.md`（现 `UPSTREAM-AGENTS.md`）里写的 `npm version` / `npm publish` 流程在本仓**不适用**：
   本仓通过 profile `link:` 挂载，没有发布流程。

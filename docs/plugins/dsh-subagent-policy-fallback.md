@@ -24,6 +24,8 @@
 | `lib/policy.js` | 纯逻辑：幂等检查、读设置、追加事件、审计日志、批量回填 |
 | `lib/status.js` | 只读自检：`describeStatus(ctx)` 返回 `{ mounted, serviceAvailable, allowedRoutes, backfilledSessions }`，不做 CLI |
 | `test/policy.test.mjs` | 假 ctx / 假 session 的单测（17 条） |
+| `smoke.mjs` | 升级后冒烟（`dsh.smoke`）：payload / dedup 纯行为 + 用宿主 cordis 实际加载插件 |
+| `test/smoke.test.mjs` | 冒烟自测（2 条；需要宿主 dsh 的那条在无 dsh 的机器上跳过） |
 | `scripts/lint.js` | 对 `lib/**`、`test/**` 逐个 `node --check` |
 | `cordis.patch.yml` | 把本插件插进宿主组合 |
 
@@ -63,13 +65,18 @@ describeStatus(ctx)            ──► { mounted, serviceAvailable, allowedRou
 
 ```sh
 cd dsh-subagent-policy-fallback
-pnpm test        # 17 条：注入 / 已有事件 / 子会话 / 服务缺失 / enabled=false / apply 回填 / 幂等 / 三种挂载日志 / 审计日志抛错仍计数 / describeStatus
+pnpm test        # 19 条：17 条行为单测 + 2 条 smoke 自测（注入 / 已有事件 / 子会话 / 服务缺失 / enabled=false / apply 回填 / 幂等 / 三种挂载日志 / 审计日志抛错仍计数 / describeStatus）
 pnpm run lint    # lib/ + test/ 全量 node --check
 ```
 
 单测不引入 cordis、不启动宿主：`createCtx` 只实现 `on` / `sessions.list` / `get` / `logger`，
 `createSession` 把 `append` 写回 `snapshotEvents()`，所以「回填后再触发一次」能直接验证幂等。
 挂载行与补齐行都进 `ctx.infos`，断言时用 `backfillInfos()` 只数「补齐」行，别混着数。
+
+`smoke.mjs` 是宿主升级后 `/api/dsh-auto-upgrade/smoke` 跑的行为断言：`payload` / `dedup` 在
+fixture 上验事件体与幂等；`host-load` 从 `ctx.dshDir` 取**宿主实际的 cordis** 真加载一次本插件，
+再 emit `agent/created` 验监听器确实挂上。改 `lib/index.js` 的导出面或 `lib/policy.js` 的事件形状时，
+这两条会立刻红——**不要靠改 smoke 让它变绿，先确认是代码退化了还是上游契约变了**。
 
 真机验收（**重启 dsh web 会终止当前会话**，注意时机）：
 

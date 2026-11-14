@@ -36,6 +36,10 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "dsh": {
+    "smoke": {
+      "module": "./smoke.mjs",
+      "timeoutMs": 5000
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
