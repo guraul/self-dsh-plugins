@@ -86,6 +86,7 @@ export class JsonStore {
 export const STATE_DEFAULTS = {
   lastCheckDate: null,
   lastCheck: null,
+  lastBootCheckVersion: null,
   installed: null,
   pendingRestart: null,
   updatedAt: null,

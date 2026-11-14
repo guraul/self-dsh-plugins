@@ -245,7 +245,7 @@ export function normalizeSmoke(result) {
  * @param {(plugin: object, modulePath: string) => Promise<unknown>} options.importModule 动态导入（测试可注入）。
  * @param {object} [options.context] 宿主事实（版本 / 安装目录等），原样交给插件的 `run()`。
  * @param {number} [options.timeoutMs] 覆盖默认超时。
- * @returns {Promise<object>} `{name, ok, partial, checks, detail?}`。
+ * @returns {Promise<object>} `{name, ok, partial, hasSmoke, selfOk?, checks, detail?}`。
  */
 export async function runSmoke(options) {
   const { plugin } = options
@@ -262,6 +262,7 @@ export async function runSmoke(options) {
       name: plugin.name,
       ok: checks.every((check) => check.ok),
       partial: true,
+      hasSmoke: false,
       checks,
       detail: '插件的 package.json 里没有 dsh.smoke：只验了兜底三项，行为未验证',
     }
@@ -284,6 +285,10 @@ export async function runSmoke(options) {
     name: plugin.name,
     ok: all.every((check) => check.ok) && self.ok,
     partial: false,
+    // `selfOk` 单独留一份：启动冒烟要靠它区分「插件自报失败」（可运行时摘掉）
+    // 与「兜底三项失败」（只报不摘，issue #429）。
+    hasSmoke: true,
+    selfOk: self.ok,
     checks: all,
     ...(self.detail === undefined ? {} : { detail: self.detail }),
   }
