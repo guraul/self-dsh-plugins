@@ -23,9 +23,6 @@ window.__ModuleLoader__.load({
       checkAuto: '/api/dsh-auto-upgrade/check/auto',
       checkRun: '/api/dsh-auto-upgrade/check/run',
       preflight: '/api/dsh-auto-upgrade/preflight',
-      probe: '/api/dsh-auto-upgrade/probe',
-      smoke: '/api/dsh-auto-upgrade/smoke',
-      plugins: '/api/dsh-auto-upgrade/plugins',
       pluginAction: '/api/dsh-auto-upgrade/plugins/action',
       policy: '/api/dsh-auto-upgrade/policy',
       settings: '/api/dsh-auto-upgrade/settings',
@@ -40,10 +37,10 @@ window.__ModuleLoader__.load({
 
     const RESULT_FRESH_MS = 10 * 60 * 1000
 
-    /** 试装 / 冒烟结论的轮询节奏：`POST` 只负责开跑，结论要等后台写盘。 */
-    const CONCLUSION_POLL_MS = 2000
-    /** 轮询上限（4 分钟）：耗尽就停在最后一次结论上，重新进设置页会再取一次。 */
-    const CONCLUSION_POLL_MAX = 120
+    /** 预检轮询节奏：`POST` 只负责开跑（202），结论要等后台把 `preflight.json` 写完。 */
+    const PREFLIGHT_POLL_MS = 1000
+    /** 轮询上限（5 分钟）：耗尽就停在最后一次快照上，用户可以再点「重新预检」。 */
+    const PREFLIGHT_POLL_MAX = 300
 
     const ZH = {
       'settings.label': '自动升级',
@@ -78,11 +75,11 @@ window.__ModuleLoader__.load({
       'overlay.upgrade': '升级',
       'overlay.dismiss': '不再提示',
       'overlay.close': '关闭',
-      'overlay.preflightTitle': '升级落点',
+      'overlay.preflightTitle': '升级确认',
+      'overlay.planTarget': '目标 {target}（当前 {installed}）',
       'overlay.releaseNotes': '更新说明',
       'overlay.noReleaseNotes': '拿不到更新说明（{reason}）',
       'overlay.openOnGithub': '在 GitHub 上查看完整说明',
-      'overlay.confirm': '确认升级',
       'overlay.cancel': '取消',
       'overlay.backup': '升级前备份 {path}',
       'overlay.sessionsWarning': '{count} 个会话正在执行，升级会中断它们。仍要继续？',
@@ -107,40 +104,7 @@ window.__ModuleLoader__.load({
       'settings.saved': '已保存',
       'settings.checkNow': '立即检查',
       'settings.preflight': '本机体检',
-      'settings.probeTitle': '试装结论（升级前逐个真装一遍）',
-      'settings.probeRun': '跑一次试装',
-      'settings.probeEmpty': '还没有试装结论，点「跑一次试装」看每个插件装不装得上',
-      'settings.probeRunning': '试装正在跑，跑完自动刷新…',
-      'settings.probeFailed': '试装没跑起来：{error}',
-      'settings.probeOk': '● 装配通过',
-      'settings.probeBad': '● 装配失败',
-      'settings.probeMore': '明细',
-      'settings.probeForVersion': '按 {version} 试装',
-      'settings.probeAt': '结论时间 {at}',
-      'settings.probeStale': '结论已过期（插件或渠道可能已变）',
-      'settings.smokeTitle': '冒烟结论（升级后逐插件验证行为）',
-      'settings.smokeRun': '跑一次冒烟',
-      'settings.smokeEmpty': '还没有冒烟结论，点「跑一次冒烟」看每个插件行为过没过',
-      'settings.smokeRunning': '冒烟正在跑，跑完自动刷新…',
-      'settings.smokeFailed': '冒烟没跑起来：{error}',
-      'settings.smokeOk': '● 通过',
-      'settings.smokeBad': '● 失败',
-      'settings.smokePartial': '只验了兜底三项，行为未验证',
-      'settings.smokeAllOk': '全部 {count} 项检查通过',
-      'settings.smokeSomeBad': '{count} 项检查未通过',
-      'settings.smokeChecks': '检查明细',
-      'settings.plugins': '已装插件兼容性',
-      'settings.pluginsFor': '已装插件兼容性（按 {target} 评估）',
-      'settings.pluginsForInstalled': '已装插件兼容性（按本机已装版本评估）',
-      'settings.pluginOk': '兼容',
-      'settings.pluginAssembled': '可装配 · 未验证行为（L1）',
-      'settings.pluginBad': '不兼容',
-      'settings.pluginExempt': '已豁免',
-      'settings.pluginUnknown': '信息不足',
       'settings.tokenRotated': '启动令牌已更换（重启会换）：请用 .dsh-web/url.txt 里的新地址重新打开本页',
-      'settings.pluginUnverified': '未验证',
-      'settings.detail': '不兼容详情',
-      'settings.noPlugins': '没有第三方插件',
       'settings.restartLog': '重启/升级日志',
       'settings.result': '上次交接结果',
       'settings.rollback': '回滚到 {version}',
@@ -148,6 +112,28 @@ window.__ModuleLoader__.load({
       'settings.empty': '（暂无）',
       'settings.pendingRestart': '上次交接：{mode} {from} → {to}',
       'settings.updateAvailable': '发现新版本 {target}（当前 {installed}）',
+      'preflight.compatLine': '兼容判定 {ok}/{total}',
+      'preflight.pending': ' · {count} 个待处理',
+      'preflight.probeLine': '试装 {ok}/{total}',
+      'preflight.probeNone': '试装 无 link:/file: 项',
+      'preflight.probeRunning': '预检正在跑，跑完自动刷新…',
+      'preflight.p3': '启动预演 未接入（P3）',
+      'preflight.missing': '还没有预检结果：先点「重新预检」，或直接「仍要升级」（留痕）',
+      'preflight.rerun': '重新预检',
+      'preflight.start': '开始升级',
+      'preflight.force': '仍要升级',
+      'preflight.forceHint': '跳过预检门禁，并写入 force-audit 留痕',
+      'preflight.unverified': '未验证',
+      'preflight.unverifiedReason': '插件没有记录该版本的验证结论',
+      'preflight.cannotInstall': '装不上',
+      'preflight.assembleFailed': '装配失败',
+      'preflight.requirementsUnknown': '要求未满足（宿主没给出明细）',
+      'preflight.summary': '最近一次预检：{issues} 个问题 · {total} 个插件（{unverified} 个未验证）',
+      'preflight.summaryNone': '最近一次预检：还没有跑过',
+      'preflight.summaryNoneHint': '升级卡里的「重新预检」会生成结论，之后再回来看这里。',
+      'preflight.summaryAt': '目标 {target} · 结论时间 {at}',
+      'preflight.noIssues': '没有待处理项',
+      'preflight.inventoryWarning': '清单读取失败：{reason}',
     }
 
     const EN = {
@@ -183,11 +169,11 @@ window.__ModuleLoader__.load({
       'overlay.upgrade': 'Upgrade',
       'overlay.dismiss': 'Do not show again',
       'overlay.close': 'Close',
-      'overlay.preflightTitle': 'Upgrade plan',
+      'overlay.preflightTitle': 'Confirm upgrade',
+      'overlay.planTarget': 'Target {target} (current {installed})',
       'overlay.releaseNotes': 'Release notes',
       'overlay.noReleaseNotes': 'Release notes unavailable ({reason})',
       'overlay.openOnGithub': 'View full notes on GitHub',
-      'overlay.confirm': 'Confirm upgrade',
       'overlay.cancel': 'Cancel',
       'overlay.backup': 'Backup before upgrading: {path}',
       'overlay.sessionsWarning': '{count} sessions are running; upgrading interrupts them. Continue anyway?',
@@ -212,40 +198,7 @@ window.__ModuleLoader__.load({
       'settings.saved': 'Saved',
       'settings.checkNow': 'Check now',
       'settings.preflight': 'Local preflight',
-      'settings.probeTitle': 'Trial-install results (really installs each plugin before upgrading)',
-      'settings.probeRun': 'Run trial install',
-      'settings.probeEmpty': 'No trial-install result yet — run it to see which plugins still install',
-      'settings.probeRunning': 'Trial install is running; this refreshes itself when it finishes…',
-      'settings.probeFailed': 'Trial install did not start: {error}',
-      'settings.probeOk': '● installs',
-      'settings.probeBad': '● fails to install',
-      'settings.probeMore': 'Details',
-      'settings.probeForVersion': 'trial-installed for {version}',
-      'settings.probeAt': 'result at {at}',
-      'settings.probeStale': 'stale result (plugins or channel may have changed)',
-      'settings.smokeTitle': 'Smoke results (verify behaviour after upgrading)',
-      'settings.smokeRun': 'Run smoke',
-      'settings.smokeEmpty': 'No smoke result yet — run it to see which plugins behave',
-      'settings.smokeRunning': 'Smoke is running; this refreshes itself when it finishes…',
-      'settings.smokeFailed': 'Smoke did not start: {error}',
-      'settings.smokeOk': '● pass',
-      'settings.smokeBad': '● fail',
-      'settings.smokePartial': 'fallback checks only, behaviour unverified',
-      'settings.smokeAllOk': 'all {count} checks passed',
-      'settings.smokeSomeBad': '{count} checks failed',
-      'settings.smokeChecks': 'Check details',
-      'settings.plugins': 'Installed plugin compatibility',
-      'settings.pluginsFor': 'Installed plugin compatibility (evaluated against {target})',
-      'settings.pluginsForInstalled': 'Installed plugin compatibility (evaluated against the installed version)',
-      'settings.pluginOk': 'compatible',
-      'settings.pluginAssembled': 'installable · behaviour unverified (L1)',
-      'settings.pluginBad': 'incompatible',
-      'settings.pluginExempt': 'exempted',
-      'settings.pluginUnknown': 'unknown',
       'settings.tokenRotated': 'Launch token rotated (it changes on every restart): reopen this page with the URL in .dsh-web/url.txt',
-      'settings.pluginUnverified': 'unverified',
-      'settings.detail': 'Incompatibility details',
-      'settings.noPlugins': 'No third-party plugins',
       'settings.restartLog': 'Restart / upgrade log',
       'settings.result': 'Last handoff result',
       'settings.rollback': 'Roll back to {version}',
@@ -253,6 +206,28 @@ window.__ModuleLoader__.load({
       'settings.empty': '(none)',
       'settings.pendingRestart': 'Last handoff: {mode} {from} → {to}',
       'settings.updateAvailable': 'New version {target} (current {installed})',
+      'preflight.compatLine': 'Compatibility {ok}/{total}',
+      'preflight.pending': ' · {count} pending',
+      'preflight.probeLine': 'Trial install {ok}/{total}',
+      'preflight.probeNone': 'Trial install: no link:/file: plugins',
+      'preflight.probeRunning': 'Preflight is running; this refreshes itself when it finishes…',
+      'preflight.p3': 'Boot rehearsal not wired yet (P3)',
+      'preflight.missing': 'No preflight result yet: run "Re-run preflight", or "Upgrade anyway" (audited)',
+      'preflight.rerun': 'Re-run preflight',
+      'preflight.start': 'Start upgrade',
+      'preflight.force': 'Upgrade anyway',
+      'preflight.forceHint': 'Skips the preflight gate and appends a force-audit record',
+      'preflight.unverified': 'unverified',
+      'preflight.unverifiedReason': 'The plugin has no verification record for this version',
+      'preflight.cannotInstall': 'cannot install',
+      'preflight.assembleFailed': 'assembly failed',
+      'preflight.requirementsUnknown': 'unmet requirements (host gave no detail)',
+      'preflight.summary': 'Last preflight: {issues} issues · {total} plugins ({unverified} unverified)',
+      'preflight.summaryNone': 'Last preflight: never run',
+      'preflight.summaryNoneHint': 'Use "Re-run preflight" in the upgrade card; the result shows up here.',
+      'preflight.summaryAt': 'Target {target} · result at {at}',
+      'preflight.noIssues': 'Nothing pending',
+      'preflight.inventoryWarning': 'Could not read the inventory: {reason}',
     }
 
     /**
@@ -568,31 +543,6 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 自述「兼容」但深度只到 L1（或根本没记深度）→ 只能叫「可装配，未验证行为」。
-     *
-     * 依据 #300：L1 = 装配通过（试装），L2 = 启动 + 冒烟通过。声明覆盖不等于行为验过
-     * ——2026-11-05 的 `installModelSelection` 签名变更就是声明覆盖、行为坏了。
-     * @param {any} plugin 插件判定项。
-     * @returns {boolean} 是否需要降级显示文案。
-     */
-    function behaviourUnverified(plugin) {
-      if (plugin?.declared?.verdict !== 'compatible') return false
-      return plugin.depth !== 'L2' && plugin.depth !== 'L3' && plugin.depth !== 'L4'
-    }
-
-    /**
-     * 门禁放行时该显示哪种状态：没写自述 → 「未验证」；只到 L1 → 「可装配」；L2+ → 「兼容」。
-     *
-     * 否则会出现「从没验过的插件显示兼容」——这正是 #300 要堵的口径漏洞。
-     * @param {any} plugin 插件判定项。
-     * @returns {'ok'|'assembled'|'unverified'} 状态。
-     */
-    function passState(plugin) {
-      if (plugin?.declared?.verdict !== 'compatible') return 'unverified'
-      return behaviourUnverified(plugin) ? 'assembled' : 'ok'
-    }
-
-    /**
      * 升级交接后的重连 watchdog：轮询 /status，等新宿主应答就重载页面。
      * token 是进程级的（issue #293）：连续失败约 30s（15 × 2s）后切到
      * 「令牌已更换」状态，不再让页面承诺「会自动重新连接」。
@@ -655,16 +605,133 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 预检结果分项计数：P1 通过数 / 总数、P2 实际试装数（跳过的不算）/ 通过数、未验证数。
+     * @param {any} result `GET /preflight` 的 `result`（`preflight.json` 内容），缺失时传 `null`。
+     * @returns {{total:number, compat:number, probeTotal:number, probeOk:number, unverified:number}} 计数。
+     */
+    function preflightCounts(result) {
+      const plugins = (Array.isArray(result?.plugins) ? result.plugins : [])
+        .filter((plugin) => plugin?.enabled !== false)
+      const probed = plugins.filter((plugin) => plugin?.p2?.skipped !== true)
+      return {
+        total: plugins.length,
+        compat: plugins.filter((plugin) => plugin?.p1?.ok === true).length,
+        probeTotal: probed.length,
+        probeOk: probed.filter((plugin) => plugin?.p2?.ok === true).length,
+        unverified: plugins.filter((plugin) => plugin?.p1?.verdict === 'unverified').length,
+      }
+    }
+
+    /**
+     * 预检结果 → 逐插件待处理行。一个插件只出一行，优先级：装不上（P1 未满足）→
+     * 装配失败（P2 装不上）→ 未验证（P1 没有该版本的结论）。
+     * @param {any} result 预检结果。
+     * @param {Function} t 翻译函数。
+     * @returns {{name:string, status:string, reason:string}[]} 待处理行。
+     */
+    function preflightIssues(result, t) {
+      const rows = []
+      for (const plugin of Array.isArray(result?.plugins) ? result.plugins : []) {
+        if (plugin?.enabled === false) continue
+        const p1 = plugin?.p1 ?? {}
+        const p2 = plugin?.p2 ?? {}
+        if (p1.verdict === 'requirements') {
+          const requirements = Object.entries(p1.requirements ?? {})
+          rows.push({
+            name: plugin.name,
+            status: t('preflight.cannotInstall'),
+            reason: requirements.length === 0
+              ? (typeof p1.detail === 'string' && p1.detail !== '' ? p1.detail : t('preflight.requirementsUnknown'))
+              : requirements.slice(0, 3).map((entry) => formatRequirement(t, entry)).join(' · '),
+          })
+          continue
+        }
+        if (p2.ok === false && p2.skipped !== true) {
+          rows.push({
+            name: plugin.name,
+            status: t('preflight.assembleFailed'),
+            reason: typeof p2.reason === 'string' ? p2.reason : '',
+          })
+          continue
+        }
+        if (p1.verdict === 'unverified') {
+          rows.push({
+            name: plugin.name,
+            status: t('preflight.unverified'),
+            reason: typeof p1.detail === 'string' && p1.detail !== '' ? p1.detail : t('preflight.unverifiedReason'),
+          })
+        }
+      }
+      return rows
+    }
+
+    /**
+     * 设置页底部的一行预检摘要（`<details>` 折叠，展开是逐插件原因）。
+     *
+     * TODO(#422/boot-check): 启动检查（`stateDir/boot-check.json`）还没有端点。宿主提供后在这里
+     * 追加「本次已临时禁用 X 个（修复后重启自动恢复）」与「上次 issue」两行，并把标题换成
+     * 「最近一次启动检查」；**不要**现在编造这两个数字。
+     * @param {{t:Function, snapshot:any}} props 输入：`snapshot` 是 `GET /preflight` 的响应。
+     * @returns {any} React 元素。
+     */
+    function renderPreflightSummary({ t, snapshot }) {
+      const result = snapshot?.result ?? null
+      const counts = preflightCounts(result)
+      const issues = preflightIssues(result, t)
+      const inventory = (Array.isArray(result?.warnings) ? result.warnings : [])
+        .filter((warning) => warning?.plugin == null)
+      const total = issues.length + inventory.length
+      const summary = result === null
+        ? t('preflight.summaryNone')
+        : t('preflight.summary', { issues: total, total: counts.total, unverified: counts.unverified })
+      const body = result === null
+        ? [h('div', { key: 'none', className: 'dsh-au-muted' }, t('preflight.summaryNoneHint'))]
+        : [
+          h('div', { key: 'at', className: 'dsh-au-muted' }, t('preflight.summaryAt', {
+            target: result.target ?? '?',
+            at: result.at == null ? '?' : new Date(result.at).toLocaleString(),
+          })),
+          issues.length === 0
+            ? h('div', { key: 'ok', className: 'dsh-au-ok' }, t('preflight.noIssues'))
+            : h('div', { key: 'rows' }, issues.map((row) => h('div', { key: row.name },
+              `⚠ ${row.name} ${row.status}${row.reason === '' ? '' : `：${row.reason}`}`))),
+          ...inventory.map((warning, index) => h('div', { key: `inv${index}`, className: 'dsh-au-warn' },
+            t('preflight.inventoryWarning', { reason: warning?.reason ?? '?' }))),
+        ]
+      return h('details', { key: 'preflight-summary', className: 'dsh-au-details' }, [
+        h('summary', { key: 's' }, summary),
+        h('div', { key: 'b', className: 'dsh-au-detail-body' }, body),
+      ])
+    }
+
+    /**
      * 升级流程控制器：预检 → 更新说明 → 提交 → 两条门禁 → 交接 watchdog。
      * 浮层与设置页各自造一个，但跑的是**同一份代码**（只注入各自的 state），避免两处漂移。
      * @param {object} io 界面接口：`t` / `watchRef` / `getTarget` 与各自的 state setter。
-     * @returns {{openPlan:(target:string|null)=>Promise<void>, submit:(force:boolean)=>Promise<void>, switchChannel:(channel:string)=>Promise<void>}} 控制器。
+     * @returns {{openPlan:(target:string|null)=>Promise<void>, rerun:(target:string|null)=>Promise<void>, submit:(force:boolean)=>Promise<void>, switchChannel:(channel:string)=>Promise<void>}} 控制器。
      */
     function createUpgradeFlow(io) {
       const followTask = makeTaskFollower(io.setHandoff)
 
       /**
-       * 打开升级确认卡：先看落点，再交给用户点头。
+       * 把一次 `GET /preflight` 快照写进计划卡（工具链体检 / 预检结果 / runner 三件套）。
+       * 设置页底部摘要也吃这同一份快照（`onPreflight` 可选，浮层不传）。
+       * @param {any} snapshot `GET /preflight` 的响应。
+       * @returns {void}
+       */
+      const applyPreflight = (snapshot) => {
+        if (typeof io.onPreflight === 'function') io.onPreflight(snapshot)
+        io.setPlan((previous) => previous === null ? previous : {
+          ...previous,
+          facts: snapshot.preflight ?? previous.facts,
+          result: snapshot.result ?? null,
+          runner: snapshot.runner ?? {},
+        })
+      }
+
+      /**
+       * 打开升级确认卡：先看落点与**已有**预检结果，再交给用户点头。
+       * 结果缺失 / blocked 时「开始升级」是禁用的，用户必须「重新预检」或「仍要升级」。
        * @param {string|null} target 目标版本。
        * @returns {Promise<void>} 完成后刷新界面。
        */
@@ -674,11 +741,56 @@ window.__ModuleLoader__.load({
           io.setNotice(result.error ?? 'preflight failed')
           return
         }
-        io.setPlan({ facts: result.preflight, target, notes: undefined })
+        io.setPlan({
+          facts: result.preflight,
+          result: result.result ?? null,
+          runner: result.runner ?? {},
+          target,
+          notes: undefined,
+        })
+        if (typeof io.onPreflight === 'function') io.onPreflight(result)
         if (target === null || target === undefined) return
         // 更新说明是「锦上添花」：拿不到就如实显示拿不到，绝不影响能不能升级
         const notes = await request(`${API.notes}?version=${encodeURIComponent(target)}`)
         io.setPlan((previous) => (previous === null ? previous : { ...previous, notes }))
+      }
+
+      /**
+       * 重新预检：`POST` 只负责开跑（202），结论要等后台写完 `preflight.json`，
+       * 所以按 `PREFLIGHT_POLL_MS` 轮询 `GET` 直到 runner 停下，再把新快照铺回卡片。
+       * @param {string|null} target 目标版本（空则让宿主按当前渠道解析）。
+       * @returns {Promise<void>} 完成。
+       */
+      const rerun = async (target) => {
+        io.setBusy(true)
+        const started = await request(API.preflight, {
+          method: 'POST',
+          body: target === null || target === undefined ? {} : { version: target },
+        })
+        if (started.ok !== true) {
+          io.setBusy(false)
+          io.setNotice(started.error ?? 'preflight failed')
+          return
+        }
+        // 202 只表示开跑：先把卡片切到「正在跑」，否则旧结果会一直挂在按钮旁边。
+        io.setPlan((previous) => previous === null ? previous : {
+          ...previous,
+          runner: { ...(previous.runner ?? {}), running: true },
+        })
+        let snapshot = await request(API.preflight)
+        for (let i = 0; i < PREFLIGHT_POLL_MAX && snapshot.runner?.running === true; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, PREFLIGHT_POLL_MS))
+          snapshot = await request(API.preflight)
+        }
+        io.setBusy(false)
+        if (snapshot.ok !== true) {
+          io.setNotice(snapshot.error ?? 'preflight failed')
+          return
+        }
+        applyPreflight(snapshot)
+        if (typeof snapshot.runner?.error === 'string' && snapshot.runner.error !== '') {
+          io.setNotice(snapshot.runner.error)
+        }
       }
 
       /**
@@ -745,24 +857,53 @@ window.__ModuleLoader__.load({
         }
       }
 
-      return { openPlan, submit, switchChannel }
+      return { openPlan, rerun, submit, switchChannel }
     }
 
     /**
-     * 升级计划卡：版本对比 / npm 路径 / 备份路径 + 更新说明 + 确认/取消。
+     * 升级确认卡（两段式）：目标版本 + 预检分项（兼容判定 / 试装 / P3 未接入）+ 逐插件待处理，
+     * 再给 `[取消] [重新预检] [开始升级] [仍要升级]`。
+     *
+     * 「开始升级」只在**结果存在且未 blocked** 时可用；「仍要升级」走 `/update` 的 `force:true`
+     * （宿主跳过预检门禁并写 `force-audit.jsonl`）。
      * 浮层与设置页共用同一份渲染（按钮各自传自己的类名，尺寸才跟各自界面一致）。
-     * @param {{t:Function, plan:any, busy:boolean, confirmClass:string, cancelClass:string, onConfirm:Function, onCancel:Function}} props 输入。
+     * @param {{t:Function, plan:any, busy:boolean, confirmClass:string, cancelClass:string, onConfirm:Function, onCancel:Function, onRerun:Function, onForce:Function}} props 输入。
      * @returns {any} React 元素。
      */
-    function renderPlanPanel({ t, plan, busy, confirmClass, cancelClass, onConfirm, onCancel }) {
+    function renderPlanPanel({ t, plan, busy, confirmClass, cancelClass, onConfirm, onCancel, onRerun, onForce }) {
       const facts = plan.facts ?? {}
+      const result = plan.result ?? null
+      const runner = plan.runner ?? {}
+      const running = runner.running === true
+      const counts = preflightCounts(result)
+      const issues = result === null ? [] : preflightIssues(result, t)
+      const blockedNow = result?.blocked === true
+      // 结果缺失 / 未通过 / 正在重跑时都不许「开始升级」——门禁在宿主侧也会 409，别让用户白点。
+      const cannotStart = busy || running || result === null || blockedNow
+      const lines = [
+        h('li', { key: 'v' }, t('overlay.planTarget', { target: plan.target ?? '?', installed: facts.dsh?.version ?? '?' })),
+        h('li', { key: 'b' }, t('overlay.backup', { path: facts.paths?.backupBase ?? '?' })),
+      ]
+      if (result === null) {
+        lines.push(h('li', { key: 'missing', className: 'dsh-au-warn' }, t('preflight.missing')))
+      } else {
+        lines.push(h('li', { key: 'compat', className: blockedNow ? 'dsh-au-warn' : 'dsh-au-ok' },
+          `${t('preflight.compatLine', { ok: counts.compat, total: counts.total })}${counts.total - counts.compat === 0 ? '' : t('preflight.pending', { count: counts.total - counts.compat })}`))
+        lines.push(h('li', { key: 'probe', className: counts.probeOk === counts.probeTotal ? 'dsh-au-ok' : 'dsh-au-warn' },
+          counts.probeTotal === 0
+            ? t('preflight.probeNone')
+            : t('preflight.probeLine', { ok: counts.probeOk, total: counts.probeTotal })))
+        lines.push(h('li', { key: 'p3', className: 'dsh-au-muted' }, t('preflight.p3')))
+      }
+      if (running) lines.push(h('li', { key: 'running', className: 'dsh-au-warn' }, t('preflight.probeRunning')))
       return h('div', { key: 'plan', className: 'dsh-au-panel' }, [
         h('div', { key: 'l', className: 'dsh-au-title' }, t('overlay.preflightTitle')),
-        h('ul', { key: 'ul', className: 'dsh-au-list' }, [
-          h('li', { key: 'v' }, `${facts.dsh?.version ?? '?'} → ${plan.target ?? '?'}`),
-          h('li', { key: 'n' }, `npm: ${facts.npm?.command ?? '?'}${facts.npm?.matchesInstall === false ? ' ⚠' : ''}`),
-          h('li', { key: 'b' }, t('overlay.backup', { path: facts.paths?.backupBase ?? '?' })),
-        ]),
+        h('ul', { key: 'ul', className: 'dsh-au-list' }, lines),
+        // 逐插件待处理：一个插件一行 `⚠ 名字 状态：原因`，不把通过的插件铺满卡片。
+        issues.length === 0
+          ? null
+          : h('div', { key: 'issues' }, issues.map((row) => h('div', { key: row.name, className: 'dsh-au-warn' },
+            `⚠ ${row.name} ${row.status}${row.reason === '' ? '' : `：${row.reason}`}`))),
         plan.notes === undefined || plan.notes === null
           ? null
           : plan.notes.available === true
@@ -783,8 +924,16 @@ window.__ModuleLoader__.load({
             ])
             : h('div', { key: 'notes', className: 'dsh-au-caption' }, t('overlay.noReleaseNotes', { reason: plan.notes.reason ?? plan.notes.error ?? '?' })),
         h('div', { key: 'actions', className: 'dsh-au-row' }, [
-          h('button', { key: 'go', className: confirmClass, disabled: busy, onClick: onConfirm }, t('overlay.confirm')),
-          h('button', { key: 'no', className: cancelClass, onClick: onCancel }, t('overlay.cancel')),
+          h('button', { key: 'no', className: cancelClass, disabled: busy, onClick: onCancel }, t('overlay.cancel')),
+          h('button', { key: 're', className: cancelClass, disabled: busy, onClick: onRerun }, t('preflight.rerun')),
+          h('button', { key: 'go', className: confirmClass, disabled: cannotStart, onClick: onConfirm }, t('preflight.start')),
+          h('button', {
+            key: 'force',
+            className: cancelClass,
+            disabled: busy,
+            title: t('preflight.forceHint'),
+            onClick: onForce,
+          }, t('preflight.force')),
         ]),
       ])
     }
@@ -1291,6 +1440,8 @@ window.__ModuleLoader__.load({
           cancelClass: 'dsh-au-btn',
           onConfirm: () => flow.submit(false),
           onCancel: () => setPlan(null),
+          onRerun: () => flow.rerun(plan.target ?? null),
+          onForce: () => flow.submit(true),
         }))
       } else {
         if (decision === 'update-available' || decision === 'update-with-plugin-risk') {
@@ -1329,7 +1480,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 设置页：渠道、当日检测、体检详情、试装 / 冒烟结论、插件兼容表、交接结果、回滚与重启。
+     * 设置页：渠道、当日检测、体检详情、预检摘要、交接结果、回滚与重启。
      * @param {{t?:Function}} props 框架注入的属性。
      * @returns {any} React 元素。
      */
@@ -1338,8 +1489,7 @@ window.__ModuleLoader__.load({
       const t = typeof props.t === 'function' ? props.t : makeT(ZH)
       const [state, setState] = react.useState(null)
       const [preflightFacts, setPreflightFacts] = react.useState(null)
-      const [plugins, setPlugins] = react.useState([])
-      const [pluginsTarget, setPluginsTarget] = react.useState(null)
+      const [preflight, setPreflight] = react.useState(null)
       const [diagnostics, setDiagnostics] = react.useState({ log: [], result: null, payload: null })
       const [saved, setSaved] = react.useState(false)
       const [busy, setBusy] = react.useState(false)
@@ -1349,19 +1499,11 @@ window.__ModuleLoader__.load({
       const [report, setReport] = react.useState(null)
       const [progress, setProgress] = react.useState(null)
       const [recheck, setRecheck] = react.useState(null)
-      // 试装 / 冒烟的结论（issue #329）：进设置页各 GET 一次就铺出来，不逼用户先点一次。
-      const [probe, setProbe] = react.useState(null)
-      const [smoke, setSmoke] = react.useState(null)
       const watchRef = react.useRef(null)
 
       const refresh = react.useCallback(async () => {
         const snapshot = await request(API.status)
         if (snapshot.ok === true) setState(snapshot)
-        // 插件表必须按**判定目标版本**取数：宿主默认用已装版本，会和这次的升级结论自相矛盾。
-        const judged = snapshot.ok === true ? (snapshot.lastCheck?.target ?? null) : null
-        setPluginsTarget(judged)
-        const inventory = await request(judged === null ? API.plugins : `${API.plugins}?version=${encodeURIComponent(judged)}`)
-        if (inventory.ok === true) setPlugins(inventory.plugins ?? [])
         const result = await request(API.restartDiagnostics)
         if (result.ok === true) {
           setDiagnostics({ log: result.log ?? [], result: result.result ?? null, payload: result.payload ?? null })
@@ -1395,26 +1537,13 @@ window.__ModuleLoader__.load({
         }
       }, [refresh])
 
-      // 试装 / 冒烟结论各 GET 一次：进设置页就把已缓存的结论铺出来，不让用户先点一次才看得到。
-      // 进页时若那一轮还在跑，就**接着轮询到结束**——面板写着「跑完自动刷新」，就必须真的会刷新（别假承诺）。
+      // 进设置页先取一次预检快照（工具链体检 / 结果 / runner）：底部摘要与升级卡都吃这一份。
+      // 后续「重新预检」成功后由 `flow.rerun` 的 `onPreflight` 写回同一个 state。
       react.useEffect(() => {
         let cancelled = false
         ;(async () => {
-          const [probeSnapshot, smokeSnapshot] = await Promise.all([request(API.probe), request(API.smoke)])
-          if (cancelled) return
-          // 两条互不阻塞：试装还在跑时冒烟结论也要先铺出来。
-          const settle = (snapshot, url, setter) => {
-            if (snapshot.ok !== true) return Promise.resolve()
-            if (snapshot.running !== true) {
-              setter(snapshot)
-              return Promise.resolve()
-            }
-            return loadConclusion(url, setter)
-          }
-          await Promise.all([
-            settle(probeSnapshot, API.probe, setProbe),
-            settle(smokeSnapshot, API.smoke, setSmoke),
-          ])
+          const snapshot = await request(API.preflight)
+          if (!cancelled && snapshot.ok === true) setPreflight(snapshot)
         })()
         return () => {
           cancelled = true
@@ -1458,6 +1587,7 @@ window.__ModuleLoader__.load({
         setPlan,
         setBlocked,
         setHandoff: setProgress,
+        onPreflight: (snapshot) => setPreflight(snapshot),
         onChecked: () => { void refresh() },
       })
       const reportIssue = makeIssueReporter(setReport)
@@ -1484,58 +1614,12 @@ window.__ModuleLoader__.load({
         setBusy(true)
         const result = await request(API.preflight)
         setBusy(false)
-        if (result.ok === true) setPreflightFacts(result.preflight)
+        if (result.ok === true) {
+          setPreflightFacts(result.preflight)
+          setPreflight(result)
+        }
       }
 
-      /**
-       * 取一次试装 / 冒烟结论：`POST` 开跑后立刻 `GET` 铺出「正在跑 / 已有旧结论」，
-       * 仍在跑就按 `CONCLUSION_POLL_MS` 轮询到这一轮结束。
-       * @param {string} url 端点。
-       * @param {(value:any)=>void} setter 结论写入。
-       * @returns {Promise<any>} 最后一次 `GET` 的结果。
-       */
-      const loadConclusion = async (url, setter) => {
-        let snapshot = await request(url)
-        if (snapshot.ok === true) setter(snapshot)
-        for (let i = 0; i < CONCLUSION_POLL_MAX && snapshot.running === true; i += 1) {
-          await new Promise((resolve) => setTimeout(resolve, CONCLUSION_POLL_MS))
-          snapshot = await request(url)
-        }
-        if (snapshot.ok === true) setter(snapshot)
-        return snapshot
-      }
-
-      /**
-       * 跑一次试装（`POST` 触发 → `GET` 取结论）。
-       * @returns {Promise<void>} 完成。
-       */
-      const runProbe = async () => {
-        setBusy(true)
-        const started = await request(API.probe, { method: 'POST', body: {} })
-        setBusy(false)
-        if (started.ok !== true) {
-          setNotice(t('settings.probeFailed', { error: started.error ?? String(started.httpStatus ?? '') }))
-          return
-        }
-        if (started.skipped === true) setNotice(started.detail)
-        await loadConclusion(API.probe, setProbe)
-      }
-
-      /**
-       * 跑一次逐插件冒烟（`POST` 触发 → `GET` 取结论）。
-       * @returns {Promise<void>} 完成。
-       */
-      const runSmoke = async () => {
-        setBusy(true)
-        const started = await request(API.smoke, { method: 'POST', body: {} })
-        setBusy(false)
-        if (started.ok !== true) {
-          setNotice(t('settings.smokeFailed', { error: started.error ?? String(started.httpStatus ?? '') }))
-          return
-        }
-        if (started.skipped === true) setNotice(started.detail)
-        await loadConclusion(API.smoke, setSmoke)
-      }
       const checkNow = async () => {
         setBusy(true)
         await request(API.checkRun, { method: 'POST', body: { force: true } })
@@ -1601,77 +1685,6 @@ window.__ModuleLoader__.load({
         onClick: onToggle,
       }, h('span', { key: 't', className: 'dsh-au-thumb' }))
 
-      const pluginRows = plugins.map((plugin) => settingRow(
-        plugin.name,
-        `${plugin.name}@${plugin.version}`,
-        h('span', {
-          key: 's',
-          className: plugin.compatible === false
-            ? (plugin.exempted === true ? 'dsh-au-warn' : 'dsh-au-bad')
-            : (plugin.known === false
-              ? 'dsh-au-muted'
-              : (passState(plugin) === 'ok' ? 'dsh-au-ok' : (passState(plugin) === 'assembled' ? 'dsh-au-warn' : 'dsh-au-muted'))),
-        }, plugin.compatible === false
-          ? (plugin.exempted === true ? t('settings.pluginExempt') : t('settings.pluginBad'))
-          : (plugin.known === false
-            ? t('settings.pluginUnknown')
-            : (passState(plugin) === 'ok'
-              ? t('settings.pluginOk')
-              : (passState(plugin) === 'assembled' ? t('settings.pluginAssembled') : t('settings.pluginUnverified'))))),
-        plugin.detail === undefined ? undefined : h('details', { key: 'd', className: 'dsh-au-details' }, [
-          h('summary', { key: 's' }, t('settings.detail')),
-          h('div', { key: 'b', className: 'dsh-au-detail-body' }, plugin.detail),
-        ]),
-      ))
-
-      // 试装结论：逐插件一行（红/绿点 + 插件名 + 结论摘要），明细折叠复用 `dsh-au-details`。
-      const probeRows = (Array.isArray(probe?.entries) ? probe.entries : []).map((entry) => settingRow(
-        entry.name,
-        entry.name,
-        h('span', { key: 's', className: entry.ok === true ? 'dsh-au-ok' : 'dsh-au-bad' },
-          entry.ok === true ? t('settings.probeOk') : t('settings.probeBad')),
-        [
-          h('span', { key: 'sum' }, [
-            typeof entry.detail === 'string' && entry.detail !== '' ? entry.detail : null,
-            entry.stale === true ? ` ${t('settings.probeStale')}` : '',
-          ]),
-          h('details', { key: 'more', className: 'dsh-au-details' }, [
-            h('summary', { key: 's' }, t('settings.probeMore')),
-            h('div', { key: 'b', className: 'dsh-au-detail-body' }, [
-              t('settings.probeForVersion', { version: entry.version ?? '?' }),
-              entry.at == null ? '' : ` · ${t('settings.probeAt', { at: new Date(entry.at).toLocaleString() })}`,
-            ]),
-          ]),
-        ],
-      ))
-
-      // 冒烟结论：同样逐插件一行；明细折叠里列每一项检查（✓ / ✗ + 检查名 + 说明）。
-      const smokeRows = (Array.isArray(smoke?.results) ? smoke.results : []).map((item) => {
-        const checks = Array.isArray(item.checks) ? item.checks : []
-        const failed = checks.filter((check) => check.ok !== true).length
-        const summary = item.partial === true
-          ? t('settings.smokePartial')
-          : (typeof item.detail === 'string' && item.detail !== ''
-            ? item.detail
-            : (item.ok === true
-              ? t('settings.smokeAllOk', { count: checks.length })
-              : t('settings.smokeSomeBad', { count: failed })))
-        return settingRow(
-          item.name,
-          item.name,
-          h('span', { key: 's', className: item.ok === true ? 'dsh-au-ok' : 'dsh-au-bad' },
-            item.ok === true ? t('settings.smokeOk') : t('settings.smokeBad')),
-          [
-            h('span', { key: 'sum' }, summary),
-            checks.length === 0 ? null : h('details', { key: 'more', className: 'dsh-au-details' }, [
-              h('summary', { key: 's' }, t('settings.smokeChecks')),
-              h('div', { key: 'b', className: 'dsh-au-detail-body' }, checks.map((check, index) => h('div', { key: `c${index}` },
-                `${check.ok === true ? '✓' : '✗'} ${check.name ?? ''}${typeof check.detail === 'string' && check.detail !== '' ? `：${check.detail}` : ''}`))),
-            ]),
-          ],
-        )
-      })
-
       const pending = state?.pendingRestart ?? null
       const resultLine = diagnostics.result === null
         ? t('settings.empty')
@@ -1725,6 +1738,8 @@ window.__ModuleLoader__.load({
           cancelClass: 'dsh-au-selectbtn',
           onConfirm: () => flow.submit(false),
           onCancel: () => setPlan(null),
+          onRerun: () => flow.rerun(plan.target ?? null),
+          onForce: () => flow.submit(true),
         }) : null,
         // 降级护栏的出路：本机 / 渠道最新版 + 「切到 <建议渠道>」。
         decision === 'downgrade-guard' ? h('div', { key: 'downgrade', className: 'dsh-au-panel' }, [
@@ -1798,45 +1813,6 @@ window.__ModuleLoader__.load({
           h('div', { key: 'l', className: 'dsh-au-title' }, t('settings.preflight')),
           h('div', { key: 'pre', className: 'dsh-au-pre' }, JSON.stringify(preflightFacts, null, 2)),
         ]),
-        // 试装 / 冒烟结论（issue #329）：没数据也留面板 + 占位文案，不留空白面板。
-        h('div', { key: 'probe', className: 'dsh-au-panel' }, [
-          h('div', { key: 'l', className: 'dsh-au-title' }, t('settings.probeTitle')),
-          h('div', { key: 'row', className: 'dsh-au-row' }, [
-            h('button', { key: 'run', className: 'dsh-au-selectbtn', disabled: busy, onClick: runProbe }, t('settings.probeRun')),
-            probe?.running === true
-              ? h('span', { key: 'running', className: 'dsh-au-muted' }, t('settings.probeRunning'))
-              : null,
-            probe?.error == null
-              ? null
-              : h('span', { key: 'err', className: 'dsh-au-warn' }, t('settings.probeFailed', { error: probe.error })),
-          ]),
-          probeRows.length === 0
-            ? h('div', { key: 'empty', className: 'dsh-au-muted' }, t('settings.probeEmpty'))
-            : h('div', { key: 'rows' }, probeRows),
-        ]),
-        h('div', { key: 'smoke', className: 'dsh-au-panel' }, [
-          h('div', { key: 'l', className: 'dsh-au-title' }, t('settings.smokeTitle')),
-          h('div', { key: 'row', className: 'dsh-au-row' }, [
-            h('button', { key: 'run', className: 'dsh-au-selectbtn', disabled: busy, onClick: runSmoke }, t('settings.smokeRun')),
-            smoke?.running === true
-              ? h('span', { key: 'running', className: 'dsh-au-muted' }, t('settings.smokeRunning'))
-              : null,
-            smoke?.error == null
-              ? null
-              : h('span', { key: 'err', className: 'dsh-au-warn' }, t('settings.smokeFailed', { error: smoke.error })),
-          ]),
-          smokeRows.length === 0
-            ? h('div', { key: 'empty', className: 'dsh-au-muted' }, t('settings.smokeEmpty'))
-            : h('div', { key: 'rows' }, smokeRows),
-        ]),
-        h('div', { key: 'plugins', className: 'dsh-au-panel' }, [
-          h('div', { key: 'l', className: 'dsh-au-title' }, pluginsTarget === null
-            ? t('settings.pluginsForInstalled')
-            : t('settings.pluginsFor', { target: pluginsTarget })),
-          pluginRows.length === 0
-            ? h('div', { key: 'e', className: 'dsh-au-muted' }, t('settings.noPlugins'))
-            : h('div', { key: 'rows' }, pluginRows),
-        ]),
         h('div', { key: 'handoff', className: 'dsh-au-panel' }, [
           h('div', { key: 'l', className: 'dsh-au-title' }, t('settings.result')),
           settingRow('result', resultLine, null),
@@ -1850,6 +1826,9 @@ window.__ModuleLoader__.load({
           h('div', { key: 'l', className: 'dsh-au-title' }, t('settings.restartLog')),
           h('div', { key: 'pre', className: 'dsh-au-pre' }, diagnostics.log.length === 0 ? t('settings.empty') : diagnostics.log.join('\n')),
         ]),
+        // 页底一行摘要（可展开）：先只铺预检结果；启动检查（boot-check.json）还没有端点，
+        // 见 `renderPreflightSummary` 里的 TODO(#422/boot-check)，别在这里编数字。
+        h('div', { key: 'summary', className: 'dsh-au-panel' }, [renderPreflightSummary({ t, snapshot: preflight })]),
       ])
     }
 
@@ -1890,10 +1869,11 @@ window.__ModuleLoader__.load({
     // 导出给单测（`test/client-watchdog.test.mjs`）：watchdog 的相位推进与相位 → 文案映射。
     exports.startWatchdog = startWatchdog
     exports.phaseText = phaseText
-    exports.behaviourUnverified = behaviourUnverified
     exports.pickToken = pickToken
     exports.request = request
-    exports.passState = passState
+    // 导出给单测（`test/client-upgrade-entry.test.mjs`）：预检分项计数与逐插件待处理行的纯函数。
+    exports.preflightCounts = preflightCounts
+    exports.preflightIssues = preflightIssues
     return module.exports
   },
 })

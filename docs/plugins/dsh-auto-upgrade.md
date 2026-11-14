@@ -8,7 +8,8 @@
 ## 是什么
 
 给 dsh Web UI 加「自升级」入口的双面插件：宿主半边注册路由族，浏览器半边注册浮层与设置页。
-设置页里能直接看到升级前试装与升级后逐插件冒烟的结论，并各触发一次（issue #329）。
+设置页里能直接看到升级确认卡的**预检分项与逐插件待处理**，页底还有一行可展开的预检摘要
+（#422 起把试装 / 冒烟 / 兼容性三块独立面板收进这两处）。
 **无构建步骤**——浏览器半边手写在 `lib/client.js` 里，包在
 `window.__ModuleLoader__.load({ id, factory })`。
 
@@ -17,7 +18,7 @@
 | 路径 | 作用 |
 |---|---|
 | `lib/index.js` | 宿主入口：15 条路由、三条门禁、交接调度、一键开 issue |
-| `lib/client.js` | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页（含常驻升级入口与降级护栏出路）+ 重连 watchdog（连续失败约 30s 后切「令牌已更换」指引，不再承诺「会自动重新连接」，issue #293） |
+| `lib/client.js` | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页（含常驻升级入口、两段式升级确认卡与页底预检摘要）+ 重连 watchdog（连续失败约 30s 后切「令牌已更换」指引，不再承诺「会自动重新连接」，issue #293） |
 | `lib/host/*.js` | 纯逻辑：协议常量 / loopback 围栏 / HTTP 管道 / SemVer / 工具链 / registry / 兼容性 / 会话 / 状态 / 任务 / 备份 / helper |
 | `docs/design/` | T1 设计：接口清单 + 数据流图 + 用户拍板结论 |
 | `docs/acceptance/` | 验收报告：逐条证据 + **明确没验证什么** |
@@ -193,7 +194,38 @@ pnpm run check                                # node --check
   - 端口从 stdout 的 `dsh web: http://127.0.0.1:<port>/?token=…` 解析（只取 origin + port，
     **token 不落日志、不进错误文案**），轮询 `/` 直到有响应（401 也算起来）。
   - 插件自身的外部连接不由预演拦截。
-- **未实现**：逐插件处置动作（升级 / 应用声明 / 临时禁用 / 自愈）与 GUI / 进度页接入留给后续 PR。
+- **未实现**：逐插件处置动作（升级 / 应用声明 / 临时禁用 / 自愈）与进度页接入留给后续 PR；
+  GUI 的升级卡已在 #422 接入，但**尚未展示 P3 结论**（界面仍写「启动预演 未接入（P3）」，见下节）。
+
+## GUI 收口：两段式升级卡 + 页底预检摘要（#422）
+
+只动浏览器半边（`lib/client.js`），宿主路由与门禁不变。
+
+- **删掉三块独立面板**：「试装结论」+「跑一次试装」、「冒烟结论」+「跑一次冒烟」、
+  「已装插件兼容性」清单。对应的字典键、`API.probe` / `API.smoke` / `API.plugins` 常量、
+  `passState` / `behaviourUnverified` 一并删除；路由仍在宿主侧（`test/client-protocol.test.mjs`
+  把它们列进 `HOST_ONLY`）。
+- **保留**：发布渠道、当天首次自动检测、显示浮层、重新启用提示、立即检查、本机体检、重启服务、回滚。
+- **升级确认卡（两段式）**：`renderPlanPanel` 第一段是目标版本（含当前版本）与备份路径；第二段读
+  `GET /preflight` 的 `result`：
+  - `兼容判定 N/M · K 个待处理`（N = `p1.ok === true`，pending 含未验证）；
+  - `试装 N/M`（分母只算 `p2.skipped !== true` 的插件；没有可试装项时显示「无 link:/file: 项」）；
+  - `启动预演 未接入（P3）`——宿主侧的 P3 已由 #425 实现并写进 `result.p3`，但 GUI 还没展示；
+    **没接入就写没接入**，不拿试装冒充启动检查。
+  - 逐插件一行 `⚠ <name> <未验证|装不上|装配失败>：<原因>`，一个插件只出一行（优先级：P1 要求未满足
+    → P2 装不上 → P1 未验证）。
+  - 按钮 `[取消] [重新预检] [开始升级] [仍要升级]`。`开始升级` 在 `result === null`、
+    `result.blocked === true`、预检正在跑或 `busy` 时禁用；`仍要升级` 调 `POST /update` 带
+    `force: true`（宿主跳过预检门禁并写 `force-audit.jsonl`）。`重新预检` = `POST /preflight`
+    （202）→ 按 `PREFLIGHT_POLL_MS` 轮询 `GET` 到 `runner.running === false`，再用新快照替换卡片；
+    轮询间隔与上限见 `PREFLIGHT_POLL_MS` / `PREFLIGHT_POLL_MAX`。
+- **页底摘要**：`<details>` 一行
+  `最近一次预检：N 个问题 · M 个插件（K 个未验证）`，展开是目标/结论时间、逐插件原因与清单读取告警。
+  进设置页时 GET 一次，`重新预检` 成功后通过 `onPreflight` 写回同一份 state。
+  ⚠️ **boot-check 仍是占位**：`stateDir/boot-check.json` 还没有端点，`renderPreflightSummary` 里留了
+  `TODO(#422/boot-check)`；在宿主提供接口前**不要**编「本次已临时禁用 X 个」这类数字。
+- **稳定口径**：分项计数与逐插件行是纯函数 `preflightCounts()` / `preflightIssues()`（已导出给单测）；
+  浮层与设置页仍共用同一份 `renderPlanPanel`，`test/client-upgrade-entry.test.mjs` 有计数守卫。
 
 ## 过期缓存不算结论（0.2.4，issue #100）
 
@@ -227,8 +259,9 @@ pnpm run check                                # node --check
 本插件对外的字段名**仍是 `peers`**（客户端契约不变）；改这里要同步 `test/official-compat.test.mjs`
 的「映射保真」守卫——官方将来再改字段名，那条用例会红。
 
-`?version=<精确版本>` 决定判定目标；缺省时宿主退回**已装版本**。设置页**必须**带 `version=<check.target>`，
-否则表里会按已装版本判成全「兼容」，与同屏的升级结论自相矛盾（0.2.3 就是这么修的）。
+`?version=<精确版本>` 决定判定目标；缺省时宿主退回**已装版本**。#422 起设置页**不再消费**这条路由
+（兼容性清单已删，结论统一走预检）；脚本 / 后续 PR 要用它时必须带 `version=<check.target>`，
+否则会按已装版本判成全「兼容」，与同屏的升级结论自相矛盾（0.2.3 就是这么修的）。
 
 ## 门禁拒绝时点名 + 一键开 issue（0.2.3）
 
