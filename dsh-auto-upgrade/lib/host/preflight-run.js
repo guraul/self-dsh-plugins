@@ -292,6 +292,8 @@ export async function collectProbeTargets(profileDir) {
  * @param {number} [options.now] 当前时间。
  * @param {string} [options.home] 复用的一次性 `DSH_HOME`（P3 要在同一个 HOME 里启动；不传则自建并清理）。
  * @param {(home:string, name:string) => Promise<unknown>} [options.ensure] 建 profile（测试缝）。
+ * @param {boolean} [options.useCache] 是否复用 `/probe` 的结论缓存（默认 true）。预检传 false：
+ *   缓存对应的是别的一次性 HOME，命中就跳过 `plugin add`，P3 会在空 profile 上误报全 `inactive`。
  * @returns {Promise<{results:object[], cache:object}>} 结论与更新后的缓存。
  */
 export async function runProbePass(options) {
@@ -317,6 +319,7 @@ export async function runProbePass(options) {
         cache,
         now: options.now ?? Date.now(),
         run: options.run,
+        useCache: options.useCache !== false,
       }),
     })
     await writeFile(options.cachePath, `${JSON.stringify(next, null, 2)}\n`)

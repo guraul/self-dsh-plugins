@@ -98,6 +98,7 @@ test('judgeRehearsal：某条目 inactive 只影响 p3.ok，不抛错', () => {
   const log = [
     `${REHEARSAL_MARKER} plugin-a active`,
     `${REHEARSAL_MARKER} plugin-b inactive`,
+    REHEARSAL_DONE,
   ].join('\n')
   const p3 = judgeRehearsal({ exitCode: 0, log, entries: ['plugin-a', 'plugin-b'] })
   assert.equal(p3.launch, 'ok')
@@ -110,6 +111,7 @@ test('judgeRehearsal：全部 active → ok=true；没有标记的条目按 inac
   const log = [
     `${REHEARSAL_MARKER} plugin-a active`,
     `${REHEARSAL_MARKER} plugin-b active`,
+    REHEARSAL_DONE,
   ].join('\n')
   const p3 = judgeRehearsal({ exitCode: 0, log, entries: ['plugin-a', 'plugin-b'] })
   assert.equal(p3.ok, true)
@@ -145,6 +147,19 @@ test('judgeRehearsal：收到 done 时忽略被 kill 的退出码', () => {
   const p3 = judgeRehearsal({ exitCode: null, ready: true, log: successfulLog(), entries: ['plugin-a'] })
   assert.equal(p3.launch, 'ok')
   assert.equal(p3.ok, true)
+})
+
+test('judgeRehearsal：自己以 0 退出但探针没 done → 不许报 launch=ok', () => {
+  const p3 = judgeRehearsal({
+    exitCode: 0,
+    ready: true,
+    log: 'dsh web: http://127.0.0.1:43210/?token=x',
+    entries: ['plugin-a'],
+  })
+  assert.equal(p3.ok, false)
+  assert.equal(p3.launch, 'failed')
+  assert.match(p3.error, /探针完成前退出/)
+  assert.deepEqual(p3.entries, { 'plugin-a': 'inactive' })
 })
 
 test('探针与 overlay：标记前缀稳定，overlay 指向探针文件，探针不依赖 appExit', () => {

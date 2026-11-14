@@ -19,9 +19,11 @@
  *   `dsh --profile <probe> --patch <file> --port 0 --no-open`。
  *
  * 判定口径：
- * - 装目标版本失败 / 启动器抛错 / 90s 内没有可访问的 web 端口 / 日志出现 `StartupError`
- *   → `launch: 'failed'`；
+ * - 装目标版本失败 / 启动器抛错 / 90s 内没有可访问的 web 端口 / 日志出现 `StartupError` /
+ *   进程自行以 0 退出但探针没打印 `done` → `launch: 'failed'`；
  * - 否则 `launch: 'ok'`，逐插件看探针标记：`[dsh-rehearsal] <包名> active|inactive`。
+ * - 调用方没有 `link:` / `file:` 目标时直接给 `launch: 'skipped'`：没有 profile 可预演，
+ *   不能冒充「启动通过」。
  *
  * 探针是一个只在预演时通过 `--patch` 注入的极小插件：它等 `appReady` 提交后遍历
  * Loader 条目（`entry.fiber.state === 2` 即 ACTIVE），把包名与状态写到 stdout，再写一行
@@ -440,6 +442,16 @@ export function judgeRehearsal(options = {}) {
       launch: 'failed',
       entries: allInactive,
       error: `启动后没有可访问的 web 端口（${timeoutMs}ms 内未就绪）`,
+    }
+  }
+  // 进程自己以 0 退出、探针却没打印 done：没有「条目遍历完」的证据，不能按 `launch: 'ok'` 放行。
+  // 否则会把「探针没跑完」伪装成「启动通过」（#426 review 的 minor）。
+  if (!finished) {
+    return {
+      ok: false,
+      launch: 'failed',
+      entries: allInactive,
+      error: 'dsh 在探针完成前退出（退出码 0），无法确认条目状态',
     }
   }
   const observed = parseRehearsalMarkers(log)

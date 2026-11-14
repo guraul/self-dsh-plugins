@@ -150,15 +150,18 @@ pnpm run check                                # node --check
     `evaluatePluginCompatibility()` 的未满足项；`p1.declared` 是自述矩阵三态，不改变门禁结论。
     `enabled: false` 的插件不阻断。
   - `p2`：只对 `link:` / `file:` 依赖做一次性 `DSH_HOME` 真装；装不上即 `ok: false` 并阻断。
-    其余插件为 `{ok: true, skipped: true, reason}`。
+    其余插件为 `{ok: true, skipped: true, reason}`。**预检的 P2 不复用 `/probe` 的结论缓存**
+    （`useCache: false` 强制真装）：缓存对应的是别的一次性 HOME，`plugin add` 被跳过时当前
+    HOME 的 profile 仍是空的，P3 会把所有预期条目误报成 `inactive`。
   - `p3`：P3 启动预演结果，**永远不参与 `blocked`**。
-    - `launch`：`'ok'`（目标版本 dsh 的 web 真的起来、探针跑完且日志无 `StartupError`）或
-      `'failed'`（目标版本装不上 / 启动器抛错 / 退出码非 0 / 90s 内 web 端口不可访问或探针没跑完 /
-      日志出现 `StartupError`，原因在 `error` 里）。
+    - `launch`：`'ok'`（目标版本 dsh 的 web 真的起来、探针跑完且日志无 `StartupError`）、
+      `'skipped'`（没有 `link:` / `file:` 目标，没有 profile 可预演；`entries` 为空对象）
+      或 `'failed'`（目标版本装不上 / 启动器抛错 / 退出码非 0 / 进程以 0 退出但探针没打印 `done` /
+      90s 内 web 端口不可访问或探针没跑完 / 日志出现 `StartupError`，原因在 `error` 里）。
     - `entries`：`{插件包名: 'active' | 'inactive'}`。`active` 来自真实启动后 Loader 条目状态
       （预演时通过 `--patch` 注入一个极小探针，等 `appReady` 后遍历 `ctx.loader.entries()`）；
-      启动失败时所有预期条目均为 `inactive`。预检没有 `link:` / `file:` 目标时为空对象。
-    - `ok`：`launch === 'ok'` 且所有条目 `active`；仅供界面展示，**不是门禁**。
+      启动失败时所有预期条目均为 `inactive`；`launch: 'skipped'` 时为空对象。
+    - `ok`：`launch !== 'failed'` 且所有条目 `active`（`launch: 'skipped'` 时为 `true`）；仅供界面展示，**不是门禁**。
     - `error?`：仅在 `launch === 'failed'` 时出现。
   - `blocked`：任一启用插件 P1=`requirements` 或 P2 失败时为 `true`；P3 不改变它。
   - `warnings[]`：`kind` ∈ `inventory`（清单读取失败）/ `p1-unverified` / `declared-incompatible` /

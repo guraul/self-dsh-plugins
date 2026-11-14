@@ -221,11 +221,17 @@ export function cacheHit(entry, now, ttlMs = PROBE_TTL_MS) {
 
 /**
  * 跑一批探针：命中缓存就直接用，否则真装一遍。
+ *
+ * `useCache: false` 让调用方强制真装（预检的 P2 必须用这个）：缓存结论对应的是**别的**
+ * 一次性 `DSH_HOME`，那里装没装过插件与当前 HOME 无关；预检的 P3 又要在当前 HOME 上启动，
+ * 跳过 `plugin add` 会让 P3 在空 profile 上把所有条目录成 `inactive`（#426 review）。
  * @param {object} options 输入：`targets` / `targetVersion` / `dshBin` / `profileName` /
- *   `dshHome`（一次性）/ `cache`（就地更新）/ `now` / `run`（执行器，生产是 `toolchain.run`）。
+ *   `dshHome`（一次性）/ `cache`（就地更新）/ `now` / `run`（执行器，生产是 `toolchain.run`）/
+ *   `useCache`（默认 true；false = 不读缓存，重新试装并回写）。
  * @returns {Promise<{results: object[], cache: object}>} 每个插件的结论与更新后的缓存。
  */
 export async function runProbes(options) {
+  const useCache = options.useCache !== false
   const cache = { ...options.cache }
   /** @type {object[]} */
   const results = []
@@ -235,7 +241,7 @@ export async function runProbes(options) {
     const idFallback = target.id === undefined
     const key = probeKey({ targetVersion: options.targetVersion, name: target.name, mtimeMs: target.mtimeMs })
     const cached = cache[key]
-    if (cacheHit(cached, options.now)) {
+    if (useCache && cacheHit(cached, options.now)) {
       results.push({ name: target.name, id, idFallback, ok: cached.ok === true, detail: cached.detail, cached: true })
       continue
     }
