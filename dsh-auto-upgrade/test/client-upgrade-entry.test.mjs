@@ -999,6 +999,33 @@ test('设置页底部：预检摘要一行可展开，逐插件原因与目标/�
   assert.match(textOf(panels[panels.length - 1]), /最近一次预检/)
 })
 
+test('设置页底部：只有 inventory 警告算「清单读取失败」，p3-failed 不被误标', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: CALM_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: {
+        ...PREFLIGHT_BLOCKED,
+        warnings: [
+          { plugin: null, kind: 'inventory', reason: 'ENOENT: preflight.json' },
+          { plugin: null, kind: 'p3-failed', reason: '启动预演超时' },
+        ],
+      },
+    },
+  })
+  const tree = await react.mount(Settings, {})
+  const summary = collect(tree, (node) => node.type === 'details' && textOf(node).includes('最近一次预检'))
+  assert.equal(summary.length, 1, '摘要必须是一个可展开的 details')
+  const body = textOf(summary[0])
+  // 3 个逐插件待处理 + 1 条 inventory 警告；p3-failed 不计入、也不渲染成清单读取失败。
+  assert.match(body, /最近一次预检：4 个问题 · 4 个插件（1 个未验证）/)
+  assert.match(body, /清单读取失败：ENOENT: preflight\.json/)
+  assert.doesNotMatch(body, /启动预演超时/, 'p3-failed 与清单读取无关，不能被误标')
+})
+
 test('设置页底部：还没有预检结果时摘要如实说「还没跑过」，不编数字', async () => {
   stubFetch({
     ...pluginRoutes,

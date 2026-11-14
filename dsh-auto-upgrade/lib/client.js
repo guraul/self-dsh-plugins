@@ -697,8 +697,9 @@ window.__ModuleLoader__.load({
       const result = snapshot?.result ?? null
       const counts = preflightCounts(result)
       const issues = preflightIssues(result, t)
+      // 只认 `kind === 'inventory'`：`p3-failed` 同样 `plugin: null`，按 plugin 判空会把它误标成清单读取失败。
       const inventory = (Array.isArray(result?.warnings) ? result.warnings : [])
-        .filter((warning) => warning?.plugin == null)
+        .filter((warning) => warning?.kind === 'inventory')
       const total = issues.length + inventory.length
       const summary = result === null
         ? t('preflight.summaryNone')
