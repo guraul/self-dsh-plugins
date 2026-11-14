@@ -85,8 +85,8 @@ test('#300 重启进度服务：就绪时 /state 报 done 并给出可直接打�
     assert.equal(page.status, 200)
     const html = await page.text()
     assert.match(html, /dsh web 正在重启/, '进度页要能直接打开（宿主已死时它仍在）')
-    assert.match(html, /id=smoke/, '跳转前要有一行冒烟检查')
-    assert.match(html, /冒烟检查：/, '页面文案与服务端同一份实现')
+    assert.match(html, /id=smoke/, '跳转前要有一行启动检查')
+    assert.match(html, /启动检查/, '页面文案与服务端同一份实现')
     // 内联脚本必须能编译：`checkLine` 是以源码形式注入的，写坏了页面会整段不动。
     assert.doesNotThrow(() => new Function(/<script>([\s\S]+)<\/script>/.exec(html)[1]))
     assert.equal(page.headers.get('access-control-allow-origin'), null, '同源轮询，不该开 CORS（免得任意网页探到带令牌的地址）')
@@ -135,11 +135,15 @@ test('#423 进度页：内联的 checkLine 在页面上下文里真跑三态，�
     assert.doesNotThrow(() => runInContext(script, sandbox))
     const line = (check) => runInContext(`checkLine(${JSON.stringify(check)})`, sandbox)
     assert.equal(
-      line({ state: 'done', problems: 3, disabled: 2, unverified: 1 }),
-      '冒烟检查：3 个问题 / 已临时禁用 2 个 / 1 个未验证',
+      line({ state: 'done', skipped: false, problems: 3, disabled: 2, unverified: 1 }),
+      '启动检查：3 个问题 / 已临时禁用 2 个 / 1 个未验证',
     )
-    assert.equal(line({ state: 'timeout', problems: 0, disabled: 0, unverified: 0 }), '冒烟检查：检查未完成')
-    assert.equal(line({ state: 'pending', problems: 0, disabled: 0, unverified: 0 }), '冒烟检查：进行中…')
+    assert.equal(
+      line({ state: 'done', skipped: true, problems: 3, disabled: 2, unverified: 1 }),
+      '本版本已检查：3 个问题',
+    )
+    assert.equal(line({ state: 'timeout', skipped: false, problems: 0, disabled: 0, unverified: 0 }), '没有拿到本次启动检查结果')
+    assert.equal(line({ state: 'pending', skipped: false, problems: 0, disabled: 0, unverified: 0 }), '', '等待中文案由阶段行负责，不再重复')
     assert.equal(line(null), '', '没有摘要时不能把 undefined 渲染进页面')
   } finally {
     progress.kill()
@@ -267,7 +271,34 @@ test('#423 冒烟检查：新地址可达但结果文件没落盘 → 先等，�
     const later = await (await fetch(`${progress.base}/state`)).json()
     assert.equal(later.phase, 'done')
     assert.equal(later.url, url)
-    assert.deepEqual(later.check, { state: 'done', problems: 2, disabled: 1, unverified: 2 })
+    assert.deepEqual(later.check, { state: 'done', skipped: false, problems: 2, disabled: 1, unverified: 2 })
+  } finally {
+    progress.kill()
+    await host.close()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('#436 冒烟检查：跳过时写的新文件也能让进度页立刻 done，不算超时', async () => {
+  const host = await fakeHost()
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  const urlFile = join(stateDir, 'url.txt')
+  const url = `${host.origin}/?token=NEW_TOKEN_SKIPPED_01`
+  const progress = await startProgress(stateDir, urlFile)
+  try {
+    await writeFile(urlFile, `${url}\n`)
+    // 模拟同版本重启：boot-check 不重跑，但仍写一份 skipped:true + 上次摘要的新文件。
+    await writeFile(join(stateDir, 'boot-check.json'), bootCheck({
+      skipped: true,
+      problems: 2,
+      disabled: ['dsh-awake'],
+      unverified: ['dsh-usage-panel'],
+    }))
+    const state = await (await fetch(`${progress.base}/state`)).json()
+    assert.equal(state.phase, 'done')
+    assert.equal(state.url, url)
+    assert.deepEqual(state.check, { state: 'done', skipped: true, problems: 2, disabled: 1, unverified: 1 })
+    assert.equal(checkLine(state.check), '本版本已检查：2 个问题')
   } finally {
     progress.kill()
     await host.close()
@@ -293,7 +324,7 @@ test('#423 冒烟检查：超过等待上限标 timeout，但照常 done 并给�
     assert.equal(state.check?.state, 'timeout', '结果文件始终缺失 → timeout')
     assert.equal(state.phase, 'done', '超时不能把用户卡在进度页')
     assert.equal(state.url, url, '超时也照常跳转')
-    assert.match(state.detail, /冒烟检查未完成/)
+    assert.match(state.detail, /没有拿到本次启动检查结果/)
   } finally {
     progress.kill()
     await host.close()
@@ -304,7 +335,7 @@ test('#423 冒烟检查：超过等待上限标 timeout，但照常 done 并给�
 test('#423 冒烟检查：结果文件缺失 → 先 pending，到 20s 才 timeout（注入时钟，不真等）', () => {
   const liveSince = 1_000_000
   const before = resolveCheck({ raw: '', fresh: false, now: liveSince + CHECK_GRACE_MS - 1, liveSinceMs: liveSince })
-  assert.deepEqual(before, { state: 'pending', problems: 0, disabled: 0, unverified: 0 })
+  assert.deepEqual(before, { state: 'pending', skipped: false, problems: 0, disabled: 0, unverified: 0 })
   const atDeadline = resolveCheck({ raw: '', fresh: false, now: liveSince + CHECK_GRACE_MS, liveSinceMs: liveSince })
   assert.equal(atDeadline.state, 'timeout')
   // 地址还没就绪（liveSince 为 null）时，等多久都不算超时——等待只在「新地址可达」后开始。
@@ -318,12 +349,12 @@ test('#423 冒烟检查：结果文件缺失 → 先 pending，到 20s 才 timeo
 test('#423 冒烟检查：problems / disabled / unverified 计数正确', () => {
   const raw = bootCheck({ problems: 3, disabled: ['a', 'b'], unverified: ['c'] })
   const check = resolveCheck({ raw, fresh: true, now: 10, liveSinceMs: 0 })
-  assert.deepEqual(check, { state: 'done', problems: 3, disabled: 2, unverified: 1 })
+  assert.deepEqual(check, { state: 'done', skipped: false, problems: 3, disabled: 2, unverified: 1 })
 })
 
 test('#423 冒烟检查：无问题时三个计数都是 0', () => {
   const check = resolveCheck({ raw: bootCheck(), fresh: true, now: 10, liveSinceMs: 0 })
-  assert.deepEqual(check, { state: 'done', problems: 0, disabled: 0, unverified: 0 })
+  assert.deepEqual(check, { state: 'done', skipped: false, problems: 0, disabled: 0, unverified: 0 })
 })
 
 test('#423 冒烟检查：未知 schema 当「还没有结果」，不拿读不懂的文件下结论', () => {
@@ -331,11 +362,16 @@ test('#423 冒烟检查：未知 schema 当「还没有结果」，不拿读不�
   assert.equal(resolveCheck({ raw, fresh: true, now: 0, liveSinceMs: null }).state, 'pending')
 })
 
-test('#423 冒烟检查文案：disabled 非空时照实说「已临时禁用 X 个」', () => {
+test('#436 冒烟检查文案：三种结局各自一句话，不叠加矛盾描述', () => {
   assert.equal(
-    checkLine({ state: 'done', problems: 3, disabled: 2, unverified: 1 }),
-    '冒烟检查：3 个问题 / 已临时禁用 2 个 / 1 个未验证',
+    checkLine({ state: 'done', skipped: false, problems: 3, disabled: 2, unverified: 1 }),
+    '启动检查：3 个问题 / 已临时禁用 2 个 / 1 个未验证',
   )
-  assert.equal(checkLine({ state: 'timeout', problems: 0, disabled: 0, unverified: 0 }), '冒烟检查：检查未完成')
-  assert.equal(checkLine({ state: 'pending', problems: 0, disabled: 0, unverified: 0 }), '冒烟检查：进行中…')
+  assert.equal(
+    checkLine({ state: 'done', skipped: true, problems: 3, disabled: 2, unverified: 1 }),
+    '本版本已检查：3 个问题',
+    '跳过时不能说「0 个问题 / 已临时禁用 0 个」',
+  )
+  assert.equal(checkLine({ state: 'timeout', skipped: false, problems: 0, disabled: 0, unverified: 0 }), '没有拿到本次启动检查结果')
+  assert.equal(checkLine({ state: 'pending', skipped: false, problems: 0, disabled: 0, unverified: 0 }), '')
 })

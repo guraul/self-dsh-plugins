@@ -66,7 +66,7 @@ function resolveUrlFile(args) {
  * 只认 `schema === 1`：未知大版本说明判定口径变了，宁可当「还没有结果」走等待 / 超时，
  * 也不拿一份读不懂的文件下结论。
  * @param {string} raw 文件内容。
- * @returns {{problems: number, disabled: string[], unverified: string[]} | null} 解析成功给摘要，否则 null。
+ * @returns {{skipped: boolean, problems: number, disabled: string[], unverified: string[]} | null} 解析成功给摘要，否则 null。
  */
 export function parseBootCheck(raw) {
   if (typeof raw !== 'string' || raw.trim() === '') return null
@@ -78,7 +78,12 @@ export function parseBootCheck(raw) {
     const problems = Number.isFinite(value.problems)
       ? Math.max(0, Math.trunc(value.problems))
       : list(value.problems).length
-    return { problems, disabled: list(value.disabled), unverified: list(value.unverified) }
+    return {
+      skipped: value.skipped === true,
+      problems,
+      disabled: list(value.disabled),
+      unverified: list(value.unverified),
+    }
   } catch {
     return null
   }
@@ -92,32 +97,40 @@ export function parseBootCheck(raw) {
  * @param {number} input.now 当前时间戳。
  * @param {number | null} input.liveSinceMs 首次观察到「新地址可达」的时刻；还没到这一步给 null。
  * @param {number} [input.graceMs] 等待上限，默认 20 秒。
- * @returns {{state: 'pending'|'done'|'timeout', problems: number, disabled: number, unverified: number}} 摘要。
+ * @returns {{state: 'pending'|'done'|'timeout', skipped: boolean, problems: number, disabled: number, unverified: number}} 摘要。
  */
 export function resolveCheck({ raw, fresh, now, liveSinceMs, graceMs = CHECK_GRACE_MS }) {
   const parsed = fresh ? parseBootCheck(raw) : null
   if (parsed !== null) {
     return {
       state: 'done',
+      skipped: parsed.skipped,
       problems: parsed.problems,
       disabled: parsed.disabled.length,
       unverified: parsed.unverified.length,
     }
   }
   const timedOut = liveSinceMs !== null && now - liveSinceMs >= graceMs
-  return { state: timedOut ? 'timeout' : 'pending', problems: 0, disabled: 0, unverified: 0 }
+  return { state: timedOut ? 'timeout' : 'pending', skipped: false, problems: 0, disabled: 0, unverified: 0 }
 }
 
 /**
- * 进度页上那一行冒烟检查文案（服务端与页面共用同一份实现，页面侧由 `toString()` 内联）。
- * @param {{state: 'pending'|'done'|'timeout', problems: number, disabled: number, unverified: number} | null | undefined} check 检查摘要。
- * @returns {string} 展示文案；没有摘要时给空串。
+ * 进度页上那一行启动检查文案（服务端与页面共用同一份实现，页面侧由 `toString()` 内联）。
+ *
+ * 三种结局各自只有一句话，不叠加矛盾描述（issue #436）：
+ * - 跳过（本版本已检查过）→ 「本版本已检查：N 个问题」；
+ * - 超时 → 「没有拿到本次启动检查结果」；
+ * - 正常完成 → 计数。
+ * 等待中返回空串：阶段行已经写着「正在做启动检查…」，不必再重复一遍。
+ * @param {{state: 'pending'|'done'|'timeout', skipped?: boolean, problems: number, disabled: number, unverified: number} | null | undefined} check 检查摘要。
+ * @returns {string} 展示文案；没有摘要 / 等待中给空串。
  */
 export function checkLine(check) {
   if (check === null || check === undefined) return ''
-  if (check.state === 'timeout') return '冒烟检查：检查未完成'
-  if (check.state !== 'done') return '冒烟检查：进行中…'
-  return '冒烟检查：' + String(check.problems) + ' 个问题 / 已临时禁用 ' + String(check.disabled)
+  if (check.state === 'timeout') return '没有拿到本次启动检查结果'
+  if (check.state !== 'done') return ''
+  if (check.skipped === true) return '本版本已检查：' + String(check.problems) + ' 个问题'
+  return '启动检查：' + String(check.problems) + ' 个问题 / 已临时禁用 ' + String(check.disabled)
     + ' 个 / ' + String(check.unverified) + ' 个未验证'
 }
 
@@ -304,12 +317,12 @@ async function main() {
     // 不会发生；真发生了宁可等超时，也不把用户送回即将死掉的页面。
     if (live && candidate !== baseline) {
       if (check.state === 'pending') {
-        // 地址已就绪，但冒烟结果还没落盘：留在「校验新地址」，不提前跳转。
-        return { phase: 'verifying', detail: '新进程已就绪，正在等待冒烟检查…', check, elapsedMs }
+        // 地址已就绪，但启动检查结果还没落盘：留在「校验新地址」，不提前跳转。
+        return { phase: 'verifying', detail: '新进程已就绪，正在做启动检查…', check, elapsedMs }
       }
       return {
         phase: 'done',
-        detail: check.state === 'timeout' ? '冒烟检查未完成，照常打开界面' : '新进程已就绪',
+        detail: check.state === 'timeout' ? '没有拿到本次启动检查结果，照常打开界面' : '新进程已就绪',
         url: candidate,
         check,
         elapsedMs,

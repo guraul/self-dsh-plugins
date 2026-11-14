@@ -14,6 +14,7 @@
  * 核心插件（升级器自己与 subagents）永不摘：升级器被摘掉就没有后续的检测/回滚入口了。
  * @module dsh-plugin-auto-upgrade/host/boot-check
  */
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -36,14 +37,40 @@ export function isCorePlugin(name) {
 }
 
 /**
- * 版本没变且已有结果就跳过——「升级后的第一次启动」只跑一次。
- * @param {{lastBootCheckVersion?: unknown, dshVersion?: unknown, hasResult: boolean}} input 输入。
+ * 启动检查指纹：`dshVersion` + 每个插件的 `name@version` + manifest mtime（issue #436）。
+ *
+ * 只按 dsh 版本去重会漏掉「同版本下补了 `dsh.smoke` / 升了插件」，所以把插件也纳入指纹：
+ * 任一插件换版本或 package.json 被改（mtime 变），指纹就变，下次启动重跑。
+ * 插件按名字排序后再拼，保证 profile 依赖顺序变化不算「变了」。
+ * @param {{dshVersion?: unknown, plugins?: Array<{name?: unknown, version?: unknown, manifestMtimeMs?: unknown}>}} input 输入。
+ * @returns {string} sha256 十六进制指纹。
+ */
+export function buildBootCheckKey(input) {
+  const dshVersion = typeof input?.dshVersion === 'string' && input.dshVersion !== '' ? input.dshVersion : 'unknown'
+  const plugins = Array.isArray(input?.plugins) ? input.plugins : []
+  const parts = plugins
+    .filter((plugin) => plugin !== null && typeof plugin === 'object' && typeof plugin.name === 'string' && plugin.name !== '')
+    .map((plugin) => {
+      const version = typeof plugin.version === 'string' && plugin.version !== '' ? plugin.version : 'unknown'
+      const mtime = Number.isFinite(plugin.manifestMtimeMs) ? String(Math.trunc(plugin.manifestMtimeMs)) : 'unknown'
+      return `${plugin.name}@${version}#${mtime}`
+    })
+    .sort()
+  return createHash('sha256').update(`${dshVersion}\n${parts.join('\n')}`).digest('hex')
+}
+
+/**
+ * 指纹没变且已有结果就跳过——「同一套 dsh + 插件」的启动检查只跑一次。
+ *
+ * 跳过时也必须写一份新的 `boot-check.json`（`writeSkippedBootCheck`），否则进度页只认
+ * 本轮新文件的判据会一直等到超时（issue #436）。
+ * @param {{lastBootCheckKey?: unknown, key?: unknown, hasResult: boolean}} input 输入。
  * @returns {boolean} 该跳过返回 true。
  */
 export function shouldSkipBootCheck(input) {
   if (input.hasResult !== true) return false
-  if (typeof input.dshVersion !== 'string' || input.dshVersion === '') return false
-  return input.lastBootCheckVersion === input.dshVersion
+  if (typeof input.key !== 'string' || input.key === '') return false
+  return input.lastBootCheckKey === input.key
 }
 
 /**
@@ -135,6 +162,38 @@ export async function writeBootCheck(stateDir, report) {
   await writeFile(tmp, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
   await rename(tmp, path)
   return path
+}
+
+/**
+ * 跳过本次检查时也写一份结果文件（issue #436）。
+ *
+ * 进度页只认「mtime 晚于本次启动」的文件；跳过不写就会干等 20 秒直到超时。这里带上一次
+ * 的摘要，让进度页能立刻显示「本版本已检查：N 个问题」。
+ * @param {object} options 输入。
+ * @param {string} options.stateDir 状态目录。
+ * @param {string} [options.dshVersion] 当前 dsh 版本（`to`）。
+ * @param {string} [options.from] 升级前版本。
+ * @param {number} [options.at] 时间戳（测试可注入）。
+ * @returns {Promise<object>} 写入的结果（`skipped: true`）。
+ */
+export async function writeSkippedBootCheck(options) {
+  const previous = await readBootCheck(options.stateDir)
+  const at = typeof options.at === 'number' ? options.at : Date.now()
+  const to = typeof options.dshVersion === 'string' && options.dshVersion !== '' ? options.dshVersion : 'unknown'
+  const from = typeof options.from === 'string' && options.from !== '' ? options.from : 'unknown'
+  const report = {
+    schema: BOOT_CHECK_SCHEMA,
+    skipped: true,
+    at,
+    from,
+    to,
+    problems: Number.isFinite(previous?.problems) ? Math.max(0, Math.trunc(previous.problems)) : 0,
+    disabled: Array.isArray(previous?.disabled) ? previous.disabled : [],
+    unverified: Array.isArray(previous?.unverified) ? previous.unverified : [],
+    results: Array.isArray(previous?.results) ? previous.results : [],
+  }
+  await writeBootCheck(options.stateDir, report)
+  return report
 }
 
 /**

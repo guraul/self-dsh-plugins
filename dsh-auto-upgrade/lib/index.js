@@ -11,7 +11,7 @@
  * @module dsh-plugin-auto-upgrade
  */
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { readdir, readFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
@@ -33,7 +33,14 @@ import {
 } from './host/preflight-run.js'
 import { runRehearsal } from './host/rehearse.js'
 import { collectLoaderNames, createInjectResolver, officialInjectSeeds, platformSeedsFromStaticModules, runSmokes } from './host/smoke.js'
-import { disableLoadedPlugin, readBootCheck, runBootCheck, shouldSkipBootCheck } from './host/boot-check.js'
+import {
+  buildBootCheckKey,
+  disableLoadedPlugin,
+  readBootCheck,
+  runBootCheck,
+  shouldSkipBootCheck,
+  writeSkippedBootCheck,
+} from './host/boot-check.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
@@ -923,15 +930,20 @@ export function apply(ctx, config = {}) {
         const matched = /^(?:link|file):(.+)$/.exec(String(spec))
         if (matched === null) continue
         const dir = matched[1]
+        const manifestPath = join(dir, 'package.json')
         let manifest = {}
+        let manifestMtimeMs
         try {
-          manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
+          manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+          manifestMtimeMs = statSync(manifestPath).mtimeMs
         } catch {
           manifest = {}
         }
         plugins.push({
           name,
           dirExists: existsSync(dir),
+          version: typeof manifest.version === 'string' ? manifest.version : undefined,
+          manifestMtimeMs,
           inject: Array.isArray(manifest.dsh?.client?.inject) ? manifest.dsh.client.inject : [],
           ...(manifest.dsh?.smoke === undefined ? {} : { smoke: manifest.dsh.smoke }),
           dir,
@@ -1584,7 +1596,7 @@ export function apply(ctx, config = {}) {
 
     // —— 升级后第一次启动的冒烟（issue #429）——
     // 启动完成（webServer 绑好端口）后在后台跑一次：不阻塞启动、不 delay ready。
-    // 版本没变且已有结果就跳过（`state.lastBootCheckVersion` 去重）。
+    // 指纹（dsh + 插件版本 + manifest mtime）没变且已有结果就跳过；跳过也写文件（#436）。
     if (bootCheckEnabled) {
       void (async () => {
         try {
@@ -1593,19 +1605,26 @@ export function apply(ctx, config = {}) {
             console.warn('[dsh-auto-upgrade] 启动冒烟跳过：拿不到已装 dsh 版本')
             return
           }
-          const state = await stores.state.read()
-          const hasResult = (await readBootCheck(stateDir)) !== undefined
-          if (shouldSkipBootCheck({ lastBootCheckVersion: state.lastBootCheckVersion, dshVersion, hasResult })) return
           if (profileDir === undefined) {
             console.warn('[dsh-auto-upgrade] 启动冒烟跳过：profile 信息不可用')
+            return
+          }
+          const { plugins, bundles } = await collectSmokePlugins()
+          if (plugins.length === 0) return
+          const state = await stores.state.read()
+          const hasResult = (await readBootCheck(stateDir)) !== undefined
+          const key = buildBootCheckKey({ dshVersion, plugins })
+          const from = state.pendingRestart?.from ?? state.installed ?? dshVersion
+          if (shouldSkipBootCheck({ lastBootCheckKey: state.lastBootCheckKey, key, hasResult })) {
+            // 指纹没变：不重跑，但必须写一份新文件——进度页只认本轮 mtime，否则干等 20 秒。
+            const skipped = await writeSkippedBootCheck({ stateDir, dshVersion, from, at: Date.now() })
+            console.log(`[dsh-auto-upgrade] 启动冒烟跳过（本版本已检查）：${String(skipped.problems)} 个问题`)
             return
           }
           // 就绪信号只有 `port` 可观察（WebServer 没有 ready 事件）：等到绑定为止，最多 ~30 秒。
           for (let attempt = 0; attempt < 60 && typeof webServer.port !== 'number'; attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 500))
           }
-          const { plugins, bundles } = await collectSmokePlugins()
-          if (plugins.length === 0) return
           const dshDir = installation?.dshDir
           const installTreeHas = (pkg) => dshDir !== undefined && existsSync(join(dshDir, 'node_modules', pkg))
           const packageExists = (pkg) => installTreeHas(pkg) || existsSync(join(profileDir, 'node_modules', pkg))
@@ -1616,7 +1635,7 @@ export function apply(ctx, config = {}) {
           const report = await runBootCheck({
             stateDir,
             dshVersion,
-            from: state.pendingRestart?.from ?? state.installed ?? dshVersion,
+            from,
             smoke: () => runSmokes({
               plugins,
               bundles,
@@ -1635,7 +1654,7 @@ export function apply(ctx, config = {}) {
             slug: repositorySlug(ownPackage),
             report: (input) => createIssue({ ...input, runGh: runGhSeam }),
           })
-          await stores.state.patch({ lastBootCheckVersion: dshVersion })
+          await stores.state.patch({ lastBootCheckKey: key })
           console.log(`[dsh-auto-upgrade] 启动冒烟完成：${String(report.problems)} 个问题，禁用 ${String(report.disabled.length)} 个，未验证 ${String(report.unverified.length)} 个`)
         } catch (error) {
           // 启动冒烟是旁路：失败只记日志，绝不能影响宿主启动。
