@@ -18,6 +18,7 @@
  *   node progress-server.mjs --state <stateDir> --url-file <url.txt> --base http://127.0.0.1:3080
  */
 import { execFileSync } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
@@ -366,7 +367,27 @@ async function main() {
   })
 }
 
+/**
+ * 入口判定：是不是「直接执行本文件」。
+ *
+ * 必须两边都取 realpath 再比——经软链（profile 的 `link:`、`node_modules` 里的软链）启动时，
+ * `process.argv[1]` 是软链路径，而 `import.meta.url` 已被 Node 解析成真实路径，直接比会失配，
+ * 表现是进程秒退、连 `progress-port.json` 都不写（#423 review ESCALATE）。
+ * realpath 取不到（文件被删 / 权限）时退回字面比较，不要静默不启动。
+ * @param {string | undefined} entry `process.argv[1]`。
+ * @param {string} self 本文件（`fileURLToPath(import.meta.url)`）。
+ * @returns {boolean} 是入口返回 true。
+ */
+function isDirectRun(entry, self) {
+  if (entry === undefined) return false
+  try {
+    return realpathSync(entry) === realpathSync(self)
+  } catch {
+    return entry === self
+  }
+}
+
 // 只有直接执行才起服务；被测试 import 时保持纯函数可用（不要有监听端口等副作用）。
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isDirectRun(process.argv[1], fileURLToPath(import.meta.url))) {
   await main()
 }

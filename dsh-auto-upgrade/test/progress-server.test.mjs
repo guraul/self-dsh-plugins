@@ -1,10 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { symlinkSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createContext, runInContext } from 'node:vm'
 import { CHECK_GRACE_MS, checkLine, resolveCheck } from '../lib/host/progress-server.mjs'
 
 const SERVER = new URL('../lib/host/progress-server.mjs', import.meta.url).pathname
@@ -35,9 +37,16 @@ async function fakeHost() {
   }
 }
 
-/** 起进度服务并等它写出端口。 */
-async function startProgress(stateDir, urlFile, base, extra = []) {
-  const child = spawn(process.execPath, [SERVER, '--state', stateDir, '--url-file', urlFile, '--port', '0',
+/**
+ * 起进度服务并等它写出端口。
+ * @param {string} stateDir 状态目录。
+ * @param {string} urlFile `url.txt` 路径。
+ * @param {string} [base] 宿主地址。
+ * @param {string[]} [extra] 额外参数。
+ * @param {string} [entry] 要执行的脚本路径（默认真实路径；软链用例传软链）。
+ */
+async function startProgress(stateDir, urlFile, base, extra = [], entry = SERVER) {
+  const child = spawn(process.execPath, [entry, '--state', stateDir, '--url-file', urlFile, '--port', '0',
     ...(base === undefined ? [] : ['--base', base]), ...extra], {
     stdio: 'ignore',
   })
@@ -84,6 +93,56 @@ test('#300 重启进度服务：就绪时 /state 报 done 并给出可直接打�
   } finally {
     progress.kill()
     await host.close()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('#423 入口守卫：经软链启动也要起服务并写 progress-port.json', async () => {
+  // 复现现场：profile 用 link: 挂包，脚本路径是软链，`argv[1]` 与 `import.meta.url` 的 realpath 不同。
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  const linkDir = await mkdtemp(join(tmpdir(), 'dsh-au-link-'))
+  const entry = join(linkDir, 'progress-server.mjs')
+  symlinkSync(SERVER, entry)
+  let progress
+  try {
+    // 起得来 = 入口守卫认出了软链，写端口文件是 main() 跑过的直接证据。
+    // `--base` 指一个必然没人听的端口，保证判定与「本机是否真在跑 dsh web」无关。
+    progress = await startProgress(stateDir, join(stateDir, 'url.txt'), 'http://127.0.0.1:1',
+      ['--check-grace-ms', '100'], entry)
+    const state = await (await fetch(`${progress.base}/state`)).json()
+    assert.equal(state.phase, 'stopping', '软链启动的进度服务要能正常答话')
+  } finally {
+    progress?.kill()
+    await rm(stateDir, { recursive: true, force: true })
+    await rm(linkDir, { recursive: true, force: true })
+  }
+})
+
+test('#423 进度页：内联的 checkLine 在页面上下文里真跑三态，且整段脚本无 ReferenceError', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  const progress = await startProgress(stateDir, join(stateDir, 'url.txt'))
+  try {
+    const html = await (await fetch(`${progress.base}/`)).text()
+    const script = /<script>([\s\S]+)<\/script>/.exec(html)[1]
+    // 最小 DOM / fetch 桩：只要脚本能整段执行完、不炸 ReferenceError，就说明内联没写坏。
+    const node = () => ({ textContent: '', className: '', dataset: {}, style: {} })
+    const sandbox = createContext({
+      document: { getElementById: node, querySelectorAll: () => [] },
+      fetch: async () => ({ json: async () => ({ phase: 'stopping' }) }),
+      setTimeout: () => 0,
+      location: { replace: () => {} },
+    })
+    assert.doesNotThrow(() => runInContext(script, sandbox))
+    const line = (check) => runInContext(`checkLine(${JSON.stringify(check)})`, sandbox)
+    assert.equal(
+      line({ state: 'done', problems: 3, disabled: 2, unverified: 1 }),
+      '冒烟检查：3 个问题 / 已临时禁用 2 个 / 1 个未验证',
+    )
+    assert.equal(line({ state: 'timeout', problems: 0, disabled: 0, unverified: 0 }), '冒烟检查：检查未完成')
+    assert.equal(line({ state: 'pending', problems: 0, disabled: 0, unverified: 0 }), '冒烟检查：进行中…')
+    assert.equal(line(null), '', '没有摘要时不能把 undefined 渲染进页面')
+  } finally {
+    progress.kill()
     await rm(stateDir, { recursive: true, force: true })
   }
 })
