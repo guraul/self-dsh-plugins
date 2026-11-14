@@ -15,8 +15,11 @@ import {
   decidePreflightGate,
   judgeP1,
   readPreflight,
+  runProbePass,
   writePreflight,
 } from '../lib/host/preflight-run.js'
+import { probeKey } from '../lib/host/probe.js'
+import { REHEARSAL_DONE, REHEARSAL_MARKER, runRehearsal } from '../lib/host/rehearse.js'
 
 /** 一个 `evaluatePlugins()` 形状的插件条目。 */
 function plugin(over = {}) {
@@ -210,4 +213,78 @@ test('force-audit.jsonl：一行一条 JSON，含 at / from / to / blocked / rea
   assert.equal(second.from, null)
   assert.deepEqual(second.blocked, [])
   assert.equal(second.reason, 'missing')
+})
+
+test('#425 预检 P2 不吃 /probe 缓存：缓存命中也要真装，P3 才不是全 inactive', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-au-preflight-cache-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const now = 1_700_000_000_000
+  const cachePath = join(home, 'probe-cache.json')
+  // 预置一条**新鲜**的命中记录：旧实现会让 runProbes 直接回放它、跳过 plugin add。
+  const key = probeKey({ targetVersion: '9.9.9', name: 'plugin-a', mtimeMs: 42 })
+  await writeFile(cachePath, `${JSON.stringify({ [key]: { at: now, ok: false, detail: '缓存里的旧结论' } })}\n`)
+
+  let adds = 0
+  let installed = false
+  const run = async (_command, args) => {
+    if (args.includes('--dump-config')) {
+      return { status: 0, stdout: installed ? '- id: plugin-a\n' : '' }
+    }
+    adds += 1
+    installed = true
+    return { status: 0, stdout: '' }
+  }
+
+  const { results } = await runProbePass({
+    targets: [{ name: 'plugin-a', id: 'plugin-a', path: '/x/plugin-a', mtimeMs: 42 }],
+    targetVersion: '9.9.9',
+    dshBin: '/fake/dsh',
+    profileName: 'probe',
+    cachePath,
+    run,
+    now,
+    home,
+    ensure: async () => {},
+    useCache: false,
+  })
+  assert.equal(adds, 1, '缓存命中也不能跳过 plugin add：一次性 HOME 的 profile 是空的')
+  assert.equal(results[0].cached, false, '预检结论不能标成 cached')
+  assert.equal(results[0].ok, true, '真装之后差集判据应通过')
+
+  // P3 在同一个 HOME 上启动：只有真装过，条目才会 active；全 inactive 正是 review 抓到的误报。
+  const log = installed
+    ? [
+      'dsh web: http://127.0.0.1:43210/?token=x',
+      `${REHEARSAL_MARKER} plugin-a active`,
+      REHEARSAL_DONE,
+    ].join('\n')
+    : ''
+  const handle = {
+    output: () => log,
+    exited: Promise.resolve({ code: 0, signal: null }),
+    kill: () => {},
+  }
+  const p3 = await runRehearsal({
+    targetVersion: '9.9.9',
+    dshHome: home,
+    profileName: 'probe',
+    entries: ['plugin-a'],
+    install: async () => ({ ok: true, dshBin: '/fake/dsh' }),
+    launch: async () => handle,
+    checkReady: async () => ({ ok: true }),
+  })
+  assert.equal(p3.launch, 'ok')
+  assert.equal(p3.ok, true)
+  assert.deepEqual(p3.entries, { 'plugin-a': 'active' })
+})
+
+test('#425 接线：预检 P2 显式禁用缓存；没有 link:/file: 目标时 P3 是 skipped 不是 ok', async () => {
+  const source = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
+  assert.match(
+    source,
+    /executeProbeTargets\(targets, target, home \?\? undefined, \{ useCache: false \}\)/,
+    '预检 P2 必须传 useCache:false（命中缓存会跳过真装，P3 在空 profile 上全 inactive）',
+  )
+  assert.match(source, /launch: 'skipped'/, '无 link:/file: 目标时不能把 P3 报成 launch:ok')
 })

@@ -9,7 +9,8 @@
  * - **P1** 用 `compat.js` 的 `evaluatePlugins()` 按**目标版本**逐插件判定：门禁要求未满足 =
  *   `requirements`（阻断）；manifest 读不到或插件自述从未验证 = `unverified`（只警告，不阻断）。
  * - **P2** 复用一次性 `DSH_HOME` 试装执行器：只覆盖 `link:` / `file:` 插件，装不上 = 阻断。
- * - P3（启动预演）不在本 PR 范围。
+ * - **P3** 启动预演（`rehearse.js`）：在同一个一次性 `DSH_HOME` 里真启动一次，条目没起来
+ *   只写 warning，**不改 `blocked`**。
  * @module dsh-plugin-auto-upgrade/host/preflight-run
  */
 import { appendFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -24,7 +25,7 @@ export const PREFLIGHT_FILE = 'preflight.json'
 /** 强制升级留痕文件名（状态目录内，一行一条 JSON）。 */
 export const FORCE_AUDIT_FILE = 'force-audit.jsonl'
 /** 结果文件 schema；判定口径变了就 +1，旧结果仍然可读但要标明版本。 */
-export const PREFLIGHT_SCHEMA = 1
+export const PREFLIGHT_SCHEMA = 2
 
 /**
  * 把 `evaluatePlugins()` 的单插件判定折成 P1 三态。
@@ -72,6 +73,7 @@ export function judgeP1(plugin) {
  * @param {string} options.target 目标 dsh 版本。
  * @param {object} options.evaluated `evaluatePlugins()` 的返回（或同形状）。
  * @param {{name:string, ok:boolean, detail?:string}[]} [options.probes] P2 的逐插件结论。
+ * @param {object|null} [options.p3] P3 启动预演结论（`rehearse.js` 的 `judgeRehearsal`）。
  * @param {number} [options.at] 时间戳（毫秒）。
  * @param {string} [options.inventoryError] 读取 profile 清单的错误（若有）。
  * @returns {object} 预检结果。
@@ -111,13 +113,41 @@ export function aggregatePreflight(options) {
   })
 
   const blocked = blockedPluginNames({ plugins })
+  appendP3Warnings(warnings, options.p3)
   return {
     schema: PREFLIGHT_SCHEMA,
     at,
     target: options.target,
     plugins,
+    p3: options.p3 ?? null,
     blocked: blocked.length > 0,
     warnings,
+  }
+}
+
+/**
+ * 把 P3 的失败 / 未激活条目折成 **只警告** 的条目。
+ *
+ * P3 刻意不进 `blocked`：启动失败可能来自环境（端口、权限、外部服务），
+ * 把它当阻断会让「预检通过」变成看运气。
+ * @param {{plugin:string|null, kind:string, reason:string}[]} warnings 可变数组。
+ * @param {object|null|undefined} p3 P3 结论。
+ * @returns {void}
+ */
+export function appendP3Warnings(warnings, p3) {
+  if (p3 === null || p3 === undefined || typeof p3 !== 'object') return
+  if (p3.launch === 'failed') {
+    warnings.push({
+      plugin: null,
+      kind: 'p3-failed',
+      reason: typeof p3.error === 'string' && p3.error !== '' ? p3.error : '启动预演失败',
+    })
+    return
+  }
+  for (const [plugin, state] of Object.entries(p3.entries ?? {})) {
+    if (state !== 'active') {
+      warnings.push({ plugin, kind: 'p3-inactive', reason: '启动预演中条目未激活' })
+    }
   }
 }
 
@@ -260,11 +290,15 @@ export async function collectProbeTargets(profileDir) {
  * @param {string} options.cachePath 探针缓存文件。
  * @param {(command:string, args:string[], options?:object) => Promise<{status:number|null, stdout:string}>} options.run 执行器。
  * @param {number} [options.now] 当前时间。
+ * @param {string} [options.home] 复用的一次性 `DSH_HOME`（P3 要在同一个 HOME 里启动；不传则自建并清理）。
  * @param {(home:string, name:string) => Promise<unknown>} [options.ensure] 建 profile（测试缝）。
+ * @param {boolean} [options.useCache] 是否复用 `/probe` 的结论缓存（默认 true）。预检传 false：
+ *   缓存对应的是别的一次性 HOME，命中就跳过 `plugin add`，P3 会在空 profile 上误报全 `inactive`。
  * @returns {Promise<{results:object[], cache:object}>} 结论与更新后的缓存。
  */
 export async function runProbePass(options) {
-  const home = await mkdtemp(join(tmpdir(), 'dsh-au-probe-'))
+  const ownsHome = options.home === undefined
+  const home = options.home ?? await mkdtemp(join(tmpdir(), 'dsh-au-probe-'))
   try {
     let cache = {}
     try {
@@ -285,11 +319,12 @@ export async function runProbePass(options) {
         cache,
         now: options.now ?? Date.now(),
         run: options.run,
+        useCache: options.useCache !== false,
       }),
     })
     await writeFile(options.cachePath, `${JSON.stringify(next, null, 2)}\n`)
     return { results, cache: next }
   } finally {
-    await rm(home, { recursive: true, force: true }).catch(() => {})
+    if (ownsHome) await rm(home, { recursive: true, force: true }).catch(() => {})
   }
 }

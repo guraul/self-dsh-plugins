@@ -106,21 +106,22 @@ pnpm run check                                # node --check
 | 已装插件与**目标版本**不兼容 | `409 E_PLUGIN_INCOMPATIBLE`，`detail.bypassable = false` —— 不可绕过 |
 | 预检结果缺失或 `blocked` | `409 E_PREFLIGHT`，`detail.bypassable = true` —— `force` 跳过并写 `force-audit.jsonl` 留痕 |
 
-## 升级预检管线（P1 兼容 + P2 试装，#421 PR-1）
+## 升级预检管线（P1 兼容 + P2 试装 + P3 启动预演，#421 / #425）
 
-把「P1 兼容性判定 + P2 试装」收进一次可落盘的预检，`/update` 以结果文件为前置门禁。
+把「P1 兼容性判定 + P2 试装 + P3 启动预演」收进一次可落盘的预检，`/update` 以结果文件为前置门禁
+（门禁只看 P1 / P2；P3 只警告）。
 
 - **`POST /api/dsh-auto-upgrade/preflight`**：body 可带 `{version}`（精确版本号）。
   不给时依次取 `state.lastCheck.target` → `policy.channel === 'exact'` 的 `exactVersion` →
   当前渠道的 registry `dist-tag`；都取不到回 `400`。后台跑，**`202` + `{startedAt, target, taskId}`**；
-  phase 走 `TaskRegistry` 的 `preflight`。并发 `409 E_BUSY`。
+  phase 先 `preflight`，P3 阶段切到 `rehearse`。并发 `409 E_BUSY`。
 - **`GET /api/dsh-auto-upgrade/preflight`**：`{ok, preflight: <既有工具链体检>, runner: {running, startedAt, target, error}, result}`。
   `preflight` 键名保持不变（浏览器半边一直读它）；`result` 是落盘的预检结果，缺失时为 `null`。
 - **结果文件** `$STATE_DIR/preflight.json`（原子写，`stateDir` 默认 `~/.dsh-auto-upgrade`）：
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "at": 1763100000000,
   "target": "0.2.2-rc.2",
   "plugins": [
@@ -132,8 +133,15 @@ pnpm run check                                # node --check
       "p2": { "ok": true, "reason": "装配通过（新增 dsh-awake）" }
     }
   ],
+  "p3": {
+    "ok": false,
+    "launch": "ok",
+    "entries": { "dsh-awake": "active", "dsh-usage-panel": "inactive" }
+  },
   "blocked": false,
-  "warnings": []
+  "warnings": [
+    { "plugin": "dsh-usage-panel", "kind": "p3-inactive", "reason": "启动预演中条目未激活" }
+  ]
 }
 ```
 
@@ -142,11 +150,25 @@ pnpm run check                                # node --check
     `evaluatePluginCompatibility()` 的未满足项；`p1.declared` 是自述矩阵三态，不改变门禁结论。
     `enabled: false` 的插件不阻断。
   - `p2`：只对 `link:` / `file:` 依赖做一次性 `DSH_HOME` 真装；装不上即 `ok: false` 并阻断。
-    其余插件为 `{ok: true, skipped: true, reason}`。
-  - `blocked`：任一启用插件 P1=`requirements` 或 P2 失败时为 `true`。
-  - `warnings[]`：`kind` ∈ `inventory`（清单读取失败）/ `p1-unverified` / `declared-incompatible`，
-    **只放不阻断的信息**（`plugin: null` 表示整个清单的问题）。
-  - `schema` 在判定口径变化时 +1；GUI / 进度页应拒绝未知大版本的 `schema`。
+    其余插件为 `{ok: true, skipped: true, reason}`。**预检的 P2 不复用 `/probe` 的结论缓存**
+    （`useCache: false` 强制真装）：缓存对应的是别的一次性 HOME，`plugin add` 被跳过时当前
+    HOME 的 profile 仍是空的，P3 会把所有预期条目误报成 `inactive`。
+  - `p3`：P3 启动预演结果，**永远不参与 `blocked`**。
+    - `launch`：`'ok'`（目标版本 dsh 的 web 真的起来、探针跑完且日志无 `StartupError`）、
+      `'skipped'`（没有 `link:` / `file:` 目标，没有 profile 可预演；`entries` 为空对象）
+      或 `'failed'`（目标版本装不上 / 启动器抛错 / 退出码非 0 / 进程以 0 退出但探针没打印 `done` /
+      90s 内 web 端口不可访问或探针没跑完 / 日志出现 `StartupError`，原因在 `error` 里）。
+    - `entries`：`{插件包名: 'active' | 'inactive'}`。`active` 来自真实启动后 Loader 条目状态
+      （预演时通过 `--patch` 注入一个极小探针，等 `appReady` 后遍历 `ctx.loader.entries()`）；
+      启动失败时所有预期条目均为 `inactive`；`launch: 'skipped'` 时为空对象。
+    - `ok`：`launch !== 'failed'` 且所有条目 `active`（`launch: 'skipped'` 时为 `true`）；仅供界面展示，**不是门禁**。
+    - `error?`：仅在 `launch === 'failed'` 时出现。
+  - `blocked`：任一启用插件 P1=`requirements` 或 P2 失败时为 `true`；P3 不改变它。
+  - `warnings[]`：`kind` ∈ `inventory`（清单读取失败）/ `p1-unverified` / `declared-incompatible` /
+    `p3-failed`（整个启动失败，`plugin: null`）/ `p3-inactive`（单个条目没起来），
+    **只放不阻断的信息**（`plugin: null` 表示整个清单 / 整个启动的问题）。
+  - `schema` 在判定口径变化时 +1；GUI / 进度页应拒绝未知大版本的 `schema`。`schema: 1` 的旧文件
+    没有 `p3`，按 `null` 处理。
 - **`/update` 门禁**：结果文件缺失 → `409 E_PREFLIGHT`（`detail.reason='missing'`）；
   `blocked === true` → `409 E_PREFLIGHT`（`detail.reason='blocked'`, `detail.blocked=[插件名]`）；
   两者 `detail.bypassable = true`。body 带 `force: true` 时跳过本门禁，并往
@@ -158,8 +180,20 @@ pnpm run check                                # node --check
 
   ⚠️ `force` **只**跳过预检门禁，不改变上表里 P1 硬门禁的行为：目标版本与已装插件不兼容时仍然
   `409 E_PLUGIN_INCOMPATIBLE`。
-- **未实现**：P3（一次性 `DSH_HOME` 里用目标版本真启动预演）与逐插件处置动作（升级 / 应用声明 /
-  临时禁用 / 自愈）留给后续 PR；GUI 与进度页也另单接入。
+- **P3 的范围**：同一个一次性 `DSH_HOME` 里真启动一次，不启动 3080、不碰全局安装；超时上限 90s。
+  - 目标版本二进制单独落盘：`npm install --prefix <一次性 HOME>/.dsh-rehearsal-target
+    @deepseek-ai/dsh@<target>`（安装上限 180s），用装出来的 `node_modules/.bin/dsh` 启动。
+    **装不上就是 `launch: 'failed'`，不回退到当前宿主二进制**（否则会把「目标版本起不来」伪装成
+    「起得来」）。
+  - 启动形态：`dsh --profile <probe> --patch <overlay> --port 0 --no-open`。预演会把一次性
+    profile 的 `dsh.profile.bundles` 前面补 `@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-web-app`，
+    否则 profile 挂完插件就退出、永远不打印 URL。⚠️ 不能写 `dsh web --profile <probe>`：
+    `dsh web` 会展开成 `--profile web`，再加 `--profile` 会报
+    `select a profile only once`（0.2.2-rc.3 实测）；`dsh --profile <probe> … --port 0` 是等价形态。
+  - 端口从 stdout 的 `dsh web: http://127.0.0.1:<port>/?token=…` 解析（只取 origin + port，
+    **token 不落日志、不进错误文案**），轮询 `/` 直到有响应（401 也算起来）。
+  - 插件自身的外部连接不由预演拦截。
+- **未实现**：逐插件处置动作（升级 / 应用声明 / 临时禁用 / 自愈）与 GUI / 进度页接入留给后续 PR。
 
 ## 过期缓存不算结论（0.2.4，issue #100）
 
