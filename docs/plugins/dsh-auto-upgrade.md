@@ -16,7 +16,7 @@
 
 | 路径 | 作用 |
 |---|---|
-| `lib/index.js` | 宿主入口：15 条路由、两条门禁、交接调度、一键开 issue |
+| `lib/index.js` | 宿主入口：15 条路由、三条门禁、交接调度、一键开 issue |
 | `lib/client.js` | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页（含常驻升级入口与降级护栏出路）+ 重连 watchdog（连续失败约 30s 后切「令牌已更换」指引，不再承诺「会自动重新连接」，issue #293） |
 | `lib/host/*.js` | 纯逻辑：协议常量 / loopback 围栏 / HTTP 管道 / SemVer / 工具链 / registry / 兼容性 / 会话 / 状态 / 任务 / 备份 / helper |
 | `docs/design/` | T1 设计：接口清单 + 数据流图 + 用户拍板结论 |
@@ -98,12 +98,68 @@ pnpm run check                                # node --check
   三条守卫 + 真浏览器冒烟；其中 `client-upgrade-entry` 用一个迷你 react 替身**真渲染**成文本，
   断言「有更新才出现升级入口」「降级护栏要点名建议渠道」这类行为，而不只是源码里有没有字符串。
 
-## 两条门禁（改行为要同步测试与文档）
+## 三条门禁（改行为要同步测试与文档）
 
 | 情况 | 行为 |
 |---|---|
 | 有会话在跑 | `409 E_SESSIONS_RUNNING`，`detail.bypassable = true` —— 前端弹警告，确认后可带 `force` 继续 |
 | 已装插件与**目标版本**不兼容 | `409 E_PLUGIN_INCOMPATIBLE`，`detail.bypassable = false` —— 不可绕过 |
+| 预检结果缺失或 `blocked` | `409 E_PREFLIGHT`，`detail.bypassable = true` —— `force` 跳过并写 `force-audit.jsonl` 留痕 |
+
+## 升级预检管线（P1 兼容 + P2 试装，#421 PR-1）
+
+把「P1 兼容性判定 + P2 试装」收进一次可落盘的预检，`/update` 以结果文件为前置门禁。
+
+- **`POST /api/dsh-auto-upgrade/preflight`**：body 可带 `{version}`（精确版本号）。
+  不给时依次取 `state.lastCheck.target` → `policy.channel === 'exact'` 的 `exactVersion` →
+  当前渠道的 registry `dist-tag`；都取不到回 `400`。后台跑，**`202` + `{startedAt, target, taskId}`**；
+  phase 走 `TaskRegistry` 的 `preflight`。并发 `409 E_BUSY`。
+- **`GET /api/dsh-auto-upgrade/preflight`**：`{ok, preflight: <既有工具链体检>, runner: {running, startedAt, target, error}, result}`。
+  `preflight` 键名保持不变（浏览器半边一直读它）；`result` 是落盘的预检结果，缺失时为 `null`。
+- **结果文件** `$STATE_DIR/preflight.json`（原子写，`stateDir` 默认 `~/.dsh-auto-upgrade`）：
+
+```json
+{
+  "schema": 1,
+  "at": 1763100000000,
+  "target": "0.2.2-rc.2",
+  "plugins": [
+    {
+      "name": "dsh-awake",
+      "version": "0.1.4",
+      "enabled": true,
+      "p1": { "ok": true, "verdict": "ok", "requirements": {}, "declared": "compatible" },
+      "p2": { "ok": true, "reason": "装配通过（新增 dsh-awake）" }
+    }
+  ],
+  "blocked": false,
+  "warnings": []
+}
+```
+
+  - `p1.verdict`：`ok` / `requirements`（官方门禁要求未满足，**阻断**）/ `unverified`
+    （manifest 读不到或插件自述从未验证，**只警告**）。`p1.requirements` 原样取自官方
+    `evaluatePluginCompatibility()` 的未满足项；`p1.declared` 是自述矩阵三态，不改变门禁结论。
+    `enabled: false` 的插件不阻断。
+  - `p2`：只对 `link:` / `file:` 依赖做一次性 `DSH_HOME` 真装；装不上即 `ok: false` 并阻断。
+    其余插件为 `{ok: true, skipped: true, reason}`。
+  - `blocked`：任一启用插件 P1=`requirements` 或 P2 失败时为 `true`。
+  - `warnings[]`：`kind` ∈ `inventory`（清单读取失败）/ `p1-unverified` / `declared-incompatible`，
+    **只放不阻断的信息**（`plugin: null` 表示整个清单的问题）。
+  - `schema` 在判定口径变化时 +1；GUI / 进度页应拒绝未知大版本的 `schema`。
+- **`/update` 门禁**：结果文件缺失 → `409 E_PREFLIGHT`（`detail.reason='missing'`）；
+  `blocked === true` → `409 E_PREFLIGHT`（`detail.reason='blocked'`, `detail.blocked=[插件名]`）；
+  两者 `detail.bypassable = true`。body 带 `force: true` 时跳过本门禁，并往
+  `$STATE_DIR/force-audit.jsonl` 追加一行：
+
+```json
+{"at":"2026-11-14T08:00:00.000Z","from":"0.2.1-rc.5","to":"0.2.2-rc.2","blocked":["dsh-awake"],"reason":"blocked"}
+```
+
+  ⚠️ `force` **只**跳过预检门禁，不改变上表里 P1 硬门禁的行为：目标版本与已装插件不兼容时仍然
+  `409 E_PLUGIN_INCOMPATIBLE`。
+- **未实现**：P3（一次性 `DSH_HOME` 里用目标版本真启动预演）与逐插件处置动作（升级 / 应用声明 /
+  临时禁用 / 自愈）留给后续 PR；GUI 与进度页也另单接入。
 
 ## 过期缓存不算结论（0.2.4，issue #100）
 
@@ -225,7 +281,8 @@ pnpm run check                                # node --check
 ## 升级前「试装」探针（#300 P1）
 
 `GET /probe` 读缓存/进度，`POST` 后台开跑（不阻断、并发 `409`）。一次性 `DSH_HOME` 里把每个
-`link:` / `file:` 插件真装一遍，判据见 `lib/host/probe.js`；**只作警告，不阻断升级**。
+`link:` / `file:` 插件真装一遍，判据见 `lib/host/probe.js`；**`/probe` 本身仍只作警告，不进阻断判定**。
+（#421 的预检复用同一执行器，但会把 P2 失败计入 `preflight.json` 的 `blocked`——差别在调用方，不在探测器。）
 
 ## 升级后「逐插件冒烟」（#300 P2）
 

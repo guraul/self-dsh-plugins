@@ -12,18 +12,27 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { createBackup, findLatestBackup, timestamp } from './host/backup.js'
 import { evaluatePlugins, readInventory } from './host/compat.js'
-import { entryCandidates, linkTargets, pluginIdFromSource, probeCacheEntries, runProbes } from './host/probe.js'
+import { probeCacheEntries } from './host/probe.js'
+import {
+  aggregatePreflight,
+  appendForceAudit,
+  blockedPluginNames,
+  buildForceAuditEntry,
+  collectProbeTargets,
+  decidePreflightGate,
+  readPreflight,
+  runProbePass,
+  writePreflight,
+} from './host/preflight-run.js'
 import { collectLoaderNames, createInjectResolver, officialInjectSeeds, platformSeedsFromStaticModules, runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
-import { runProbeWithProfile } from './host/probe-run.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
 import { originDecision, tokenAccepted, tokenOf } from './host/token-url.js'
 import { refreshUrlFile, repoRootFrom } from './host/url-file.mjs'
@@ -622,16 +631,169 @@ export function apply(ctx, config = {}) {
       },
     })
 
+    // —— 升级预检管线（issue #421 PR-1：P1 兼容 + P2 试装）——
+    // 结果落 `stateDir/preflight.json`，`POST /update` 以它为前置门禁（缺失或 blocked 时 409，
+    // `force: true` 可跳过并写 `force-audit.jsonl` 留痕）。
+    const probeCachePath = join(stateDir, 'probe-cache.json')
+    /** @type {null | {startedAt:number, target:string|null}} */
+    let preflightRun = null
+    /** 上一轮预检的整体异常（前端据此提示，而不是看着「没动静」）。 */
+    let preflightError = null
+
+    /**
+     * 一次性 `DSH_HOME` 里的试装（/probe 与预检 P2 共用同一执行器）。
+     * @param {{name:string, path:string, id?:string}[]} targets 试装项。
+     * @param {string} targetVersion 目标版本（进缓存键）。
+     * @returns {Promise<{results:object[]}>} 逐插件结论。
+     */
+    const executeProbeTargets = async (targets, targetVersion) => {
+      if (targets.length === 0) return { results: [] }
+      if (installation === undefined) throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'dsh installation is unresolved')
+      const { results } = await runProbePass({
+        targets,
+        targetVersion,
+        dshBin: installation.dshBin,
+        profileName: PROBE_PROFILE_NAME,
+        cachePath: probeCachePath,
+        run: async (command, args, options) => {
+          const result = await run(command, args, { ...options, timeoutMs: 180000 })
+          return { status: result.code, stdout: result.stdout }
+        },
+      })
+      return { results }
+    }
+
+    /**
+     * 预检目标版本：请求体显式给定时用它；否则取当前策略的目标 / 最新可升级版本。
+     * @param {unknown} requested 请求体里的 `version`。
+     * @returns {Promise<string>} 精确版本号。
+     * @throws {RequestError} 400。
+     */
+    const resolvePreflightTarget = async (requested) => {
+      const explicit = expectVersion(requested, 'version')
+      if (explicit !== undefined) return explicit
+      const state = await stores.state.read()
+      const checked = state.lastCheck?.target
+      if (typeof checked === 'string' && isExactVersion(checked)) return checked
+      const policy = await stores.policy.read()
+      if (policy.channel === 'exact' && isExactVersion(policy.exactVersion)) return policy.exactVersion
+      const packument = await fetchPackument(registry, DSH_PACKAGE)
+      const target = packument.ok ? packument.tags[policy.channel] : undefined
+      if (typeof target !== 'string' || !isExactVersion(target)) {
+        throw new RequestError(
+          400,
+          CODE.BAD_REQUEST,
+          `无法确定预检目标版本（渠道 ${policy.channel}）：${packument.ok ? '该渠道没有可用版本' : packument.error}`,
+        )
+      }
+      return target
+    }
+
+    /**
+     * `/update` 的预检门禁：结果缺失或有阻断项时拒绝，`force` 跳过并留痕。
+     * @param {{target:string, installed?:string, force?:boolean}} options 输入。
+     * @returns {Promise<object|null>} 读到的预检结果（缺失时 null）。
+     * @throws {RequestError} 409。
+     */
+    const assertPreflightAllowed = async (options) => {
+      const result = await readPreflight(stateDir)
+      const gate = decidePreflightGate({ result, force: options.force })
+      if (!gate.allowed) {
+        throw new RequestError(
+          409,
+          CODE.PREFLIGHT,
+          gate.reason === 'missing'
+            ? '还没有预检结果：先运行一次预检，或带 force 跳过（会留痕）'
+            : `预检未通过（${gate.blocked.length} 个插件）：${gate.blocked.join('、')}`,
+          { reason: gate.reason, blocked: gate.blocked, bypassable: true },
+        )
+      }
+      if (gate.reason !== null) {
+        await appendForceAudit(stateDir, buildForceAuditEntry({
+          from: options.installed,
+          to: options.target,
+          result,
+          reason: gate.reason,
+        }))
+      }
+      return result
+    }
+
     route(API.preflight, {
       GET: async (_req, res) => {
-        writeJson(res, 200, { ok: true, preflight: await runPreflight() })
+        const [facts, result] = await Promise.all([runPreflight(), readPreflight(stateDir)])
+        writeJson(res, 200, {
+          ok: true,
+          // 既有工具链体检（客户端一直读这个键，不要改名）。
+          preflight: facts,
+          runner: {
+            running: preflightRun !== null,
+            startedAt: preflightRun === null ? null : preflightRun.startedAt,
+            target: preflightRun === null ? null : preflightRun.target,
+            error: preflightError,
+          },
+          result,
+        })
+      },
+      POST: async (req, res) => {
+        const body = expectObject(await readJsonBody(req), 'body')
+        // 先占位再 await：否则两个并发 POST 都能穿过守卫。
+        if (preflightRun !== null) throw new RequestError(409, CODE.BUSY, '预检正在运行')
+        preflightRun = { startedAt: Date.now(), target: null }
+        preflightError = null
+        try {
+          if (installation === undefined || profileDir === undefined) {
+            throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'profile 信息不可用')
+          }
+          const target = await resolvePreflightTarget(body.version)
+          const task = tasks.start('preflight', { target })
+          task.setPhase('preflight')
+          preflightRun.target = target
+          writeJson(res, 202, { ok: true, startedAt: preflightRun.startedAt, target, taskId: task.id })
+          void (async () => {
+            try {
+              task.append(`目标：${target}`)
+              const evaluated = await inspectPlugins(target)
+              task.append(`P1：判定 ${evaluated.plugins.length} 个插件`)
+              let targets = []
+              try {
+                targets = await collectProbeTargets(profileDir)
+              } catch (error) {
+                throw new Error(`读 profile 依赖失败：${error instanceof Error ? error.message : String(error)}`)
+              }
+              if (targets.length > 0) task.append(`P2：试装 ${targets.length} 个 link:/file: 插件`)
+              const { results } = await executeProbeTargets(targets, target)
+              const result = aggregatePreflight({
+                target,
+                evaluated,
+                probes: results,
+                inventoryError: evaluated.inventoryError,
+              })
+              await writePreflight(stateDir, result)
+              task.append(result.blocked
+                ? `预检未通过：${blockedPluginNames(result).join('、')}`
+                : '预检通过')
+              task.finish({ ok: true })
+            } catch (error) {
+              preflightError = error instanceof Error ? error.message : String(error)
+              task.append(`失败：${preflightError}`)
+              console.warn(`[dsh-auto-upgrade] 预检失败：${preflightError}`)
+              task.finish({ ok: false, error: preflightError })
+            } finally {
+              preflightRun = null
+            }
+          })()
+        } catch (error) {
+          // 起跑前就失败（目标版本取不到等）：释放占位，否则会一直被 409 挡住。
+          preflightRun = null
+          throw error
+        }
       },
     })
 
     // —— 升级前「试装」探针（issue #300）——
     // 现有 preflight 只读声明，看不出「声明覆盖但装不上」。探针在一个一次性
     // DSH_HOME 里把每个 link:/file: 插件真装一遍；结论只作警告，不进阻断判定。
-    const probeCachePath = join(stateDir, 'probe-cache.json')
     /** @type {null | {startedAt:number, target:string|null}} */
     let probeRun = null
     /** 上一轮探针的整体异常（前端据此提示，而不是看着「没动静」）。 */
@@ -670,35 +832,12 @@ export function apply(ctx, config = {}) {
           throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'profile 信息不可用')
         }
         const target = (await readInstalledVersion(installation.manifestPath)) ?? 'unknown'
-        /** @type {{name:string, path:string, mtimeMs?:number}[]} */
+        /** @type {{name:string, path:string, id?:string}[]} */
         let targets = []
         try {
-          const manifest = JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
-          targets = linkTargets(manifest.dependencies)
+          targets = await collectProbeTargets(profileDir)
         } catch (error) {
           throw new RequestError(500, CODE.PRECONDITION, `读 profile 依赖失败：${error instanceof Error ? error.message : String(error)}`)
-        }
-        // 补上每个插件**真正的 id**：dump-config 里是模块导出的 name，不是包名（见 issue #346）。
-        for (const item of targets) {
-          try {
-            const manifestText = await readFile(join(item.path, 'package.json'), 'utf8')
-            const pluginManifest = JSON.parse(manifestText)
-            for (const candidate of entryCandidates(pluginManifest)) {
-              let source
-              try {
-                source = await readFile(join(item.path, candidate), 'utf8')
-              } catch {
-                continue
-              }
-              const id = pluginIdFromSource(source)
-              if (id !== undefined) {
-                item.id = id
-                break
-              }
-            }
-          } catch {
-            // 读不到就不设 id，runProbes 会回落到包名（行为与修复前一致）。
-          }
         }
         if (targets.length === 0) {
           // 早退必须先释放占位，否则后续 POST 永远 409、GET 永远 running（#300 review 轮 2）。
@@ -709,39 +848,14 @@ export function apply(ctx, config = {}) {
         probeRun.target = target
         writeJson(res, 202, { ok: true, startedAt: probeRun.startedAt, target, count: targets.length })
         void (async () => {
-          let home
           try {
-            home = await mkdtemp(join(tmpdir(), 'dsh-au-probe-'))
-            // 基线 dump 要求 profile **存在**：不存在时 `--dump-config` 直接 exit 1（#392）。
-            let cache = {}
-            try {
-              cache = JSON.parse(await readFile(probeCachePath, 'utf8'))
-            } catch {
-              cache = {}
-            }
-            const { cache: next } = await runProbeWithProfile({
-              dshHome: home,
-              profileName: PROBE_PROFILE_NAME,
-              probes: () => runProbes({
-              targets,
-              targetVersion: target,
-              dshBin: installation.dshBin,
-              profileName: PROBE_PROFILE_NAME,
-              dshHome: home,
-              cache,
-              now: Date.now(),
-                run: async (command, args, options) => {
-                  const result = await run(command, args, { ...options, timeoutMs: 180000 })
-                  return { status: result.code, stdout: result.stdout }
-                },
-              }),
-            })
-            await writeFile(probeCachePath, `${JSON.stringify(next, null, 2)}\n`)
+            // 基线 dump 要求 profile **存在**：不存在时 `--dump-config` 直接 exit 1（#392），
+            // 由 `runProbePass` 里的 `ensureProbeProfile` 建好一次性 profile。
+            await executeProbeTargets(targets, target)
           } catch (error) {
             probeError = error instanceof Error ? error.message : String(error)
             console.warn(`[dsh-auto-upgrade] 试装探针失败：${probeError}`)
           } finally {
-            if (home !== undefined) await rm(home, { recursive: true, force: true }).catch(() => {})
             probeRun = null
           }
         })()
@@ -1185,6 +1299,10 @@ export function apply(ctx, config = {}) {
         }
         const busy = tasks.active('update') ?? tasks.active('rollback') ?? tasks.active('restart')
         if (busy !== undefined) throw new RequestError(409, CODE.BUSY, `a ${busy.kind} task is already running`)
+
+        // 预检门禁（issue #421）：没有结果或有阻断项就不许升级；`force` 跳过并写留痕。
+        // 注意：它**不**取代下面的 P1 硬门禁（不兼容插件仍然不可绕过）。
+        await assertPreflightAllowed({ target, installed, force: body.force === true })
 
         await assertUpgradeAllowed({ targetVersion: target, force: body.force === true })
 

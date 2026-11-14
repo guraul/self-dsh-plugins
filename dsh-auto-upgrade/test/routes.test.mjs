@@ -196,6 +196,12 @@ async function makeEnvironment(options = {}) {
     await writeFile(join(stateDir, 'url.txt'), 'http://127.0.0.1:1/?token=TEST_TOKEN\n')
   }
   const profileDir = await makeProfile({ plugins: options.plugins ?? [] })
+  // 预检门禁（#421）：/update 现在要求 stateDir/preflight.json 存在且未 blocked。
+  // 默认放一份通过的结果；「缺失」场景用 omitPreflight，blocked 场景直接传 preflight。
+  if (options.preflight !== undefined || options.omitPreflight !== true) {
+    const preflight = options.preflight ?? { schema: 1, at: Date.now(), target: '9.9.9', plugins: [], blocked: false, warnings: [] }
+    await writeFile(join(stateDir, 'preflight.json'), `${JSON.stringify(preflight, null, 2)}\n`)
+  }
   const registry = await makeRegistry({ latest: '9.9.9', next: '9.9.9' })
   const github = await makeGithub({
     'dsh-v9.9.9': { name: 'dsh v9.9.9', body: '## 亮点\n- 假 registry 里的更新说明', html_url: 'https://example.invalid/releases/tag/dsh-v9.9.9' },
@@ -239,6 +245,22 @@ async function waitFor(predicate, what, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     if (predicate()) return
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
+/**
+ * 异步条件的轮询版本（预检要走一遍真实判定 + 落盘）。
+ * @param {() => Promise<boolean>} predicate 条件。
+ * @param {string} what 描述。
+ * @param {number} [timeoutMs] 超时。
+ * @returns {Promise<void>} 完成。
+ */
+async function waitForAsync(predicate, what, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await predicate()) return
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
@@ -849,6 +871,172 @@ test('自述矩阵：已知不兼容与 unverified 混在一起时，issue 只�
     assert.match(text, /\| `declared-bad@1\.0\.0` \|/, '已知不兼容要进表格')
     assert.doesNotMatch(text, /never-verified/, 'unverified 不许出现在表格或点名里')
     assert.match(text, /另有 1 个插件未验证该版本/, 'unverified 只能作一行背景')
+  } finally {
+    await env.close()
+  }
+})
+
+test('POST /preflight：后台预检落盘，GET 同时给出工具链体检、runner 与 result（#421 PR-1）', async (t) => {
+  const env = await makeEnvironment({ omitPreflight: true })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const bad = await fetch(`${env.host.base}${API.preflight}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '^9.9.9' }),
+    })
+    assert.equal(bad.status, 400, 'version 必须是精确版本号')
+
+    // 不带 version：从假 registry 的 latest 取目标。
+    const started = await fetch(`${env.host.base}${API.preflight}`, { method: 'POST', headers: TOKEN, body: '{}' })
+    assert.equal(started.status, 202)
+    const startBody = await started.json()
+    assert.equal(startBody.ok, true)
+    assert.equal(startBody.target, '9.9.9')
+    assert.equal(typeof startBody.startedAt, 'number')
+
+    let state
+    await waitForAsync(async () => {
+      state = await (await fetch(`${env.host.base}${API.preflight}`)).json()
+      return state.runner.running === false && state.result !== null
+    }, 'the preflight result to be written')
+
+    assert.equal(state.runner.error, null)
+    assert.equal(state.result.target, '9.9.9')
+    assert.equal(state.result.blocked, false)
+    assert.deepEqual(state.result.plugins, [], '空 profile 没有可判定插件')
+    assert.ok(Array.isArray(state.result.warnings))
+    assert.equal(typeof state.result.at, 'number')
+    assert.equal(state.preflight.dsh.version, installedVersion(env.anchor), '既有工具链体检必须原样保留')
+
+    // 有通过结果之后，/update 的门禁放行（后面还有会话 / 插件硬门禁）。
+    const update = await fetch(`${env.host.base}${API.update}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9' }),
+    })
+    assert.equal(update.status, 202)
+  } finally {
+    await env.close()
+  }
+})
+
+test('POST /preflight：P1 要求未满足 → blocked 并点名；未验证只进 warnings（#421 PR-1）', async (t) => {
+  const env = await makeEnvironment({
+    omitPreflight: true,
+    plugins: [
+      {
+        name: 'incompatible-plugin',
+        version: '1.0.0',
+        peerDependencies: { '@deepseek-ai/dsh-tools': '^0.1.0-rc.2' },
+      },
+      { name: 'never-verified', version: '2.0.0', peerDependencies: { '@deepseek-ai/dsh-tools': '>=0.1.0' } },
+    ],
+  })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const started = await fetch(`${env.host.base}${API.preflight}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9' }),
+    })
+    assert.equal(started.status, 202)
+
+    let result
+    await waitForAsync(async () => {
+      const state = await (await fetch(`${env.host.base}${API.preflight}`)).json()
+      result = state.result
+      return state.runner.running === false && result !== null
+    }, 'the blocked preflight result to be written')
+
+    assert.equal(result.blocked, true)
+    const blocked = result.plugins.find((plugin) => plugin.name === 'incompatible-plugin')
+    assert.equal(blocked.p1.ok, false)
+    assert.equal(blocked.p1.verdict, 'requirements')
+    assert.ok(Object.keys(blocked.p1.requirements).length > 0, '未满足项必须原样带出')
+    assert.deepEqual(blocked.p2, { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' })
+
+    const unverified = result.plugins.find((plugin) => plugin.name === 'never-verified')
+    assert.equal(unverified.p1.verdict, 'unverified')
+    assert.equal(unverified.p1.ok, true, '未验证不阻断')
+    assert.ok(result.warnings.some((item) => item.plugin === 'never-verified' && item.kind === 'p1-unverified'))
+
+    const rejected = await fetch(`${env.host.base}${API.update}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9' }),
+    })
+    assert.equal(rejected.status, 409)
+    const body = await rejected.json()
+    assert.equal(body.code, 'E_PREFLIGHT')
+    assert.equal(body.detail.reason, 'blocked')
+    assert.deepEqual(body.detail.blocked, ['incompatible-plugin'])
+  } finally {
+    await env.close()
+  }
+})
+
+test('预检门禁：没有 preflight.json 时 /update 409，force 留痕后继续', async (t) => {
+  const env = await makeEnvironment({ omitPreflight: true })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const blocked = await fetch(`${env.host.base}${API.update}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9' }),
+    })
+    assert.equal(blocked.status, 409)
+    const body = await blocked.json()
+    assert.equal(body.code, 'E_PREFLIGHT')
+    assert.equal(body.detail.reason, 'missing')
+    assert.equal(body.detail.bypassable, true)
+    assert.equal(env.host.scheduled.length, 0, '被门禁拦下时不许交接')
+
+    const forced = await fetch(`${env.host.base}${API.update}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9', force: true }),
+    })
+    assert.equal(forced.status, 202, 'force 可以跳过预检门禁')
+    await waitFor(() => env.host.scheduled.length === 1, 'the helper to be scheduled')
+    const lines = (await readFile(join(env.stateDir, 'force-audit.jsonl'), 'utf8')).trim().split('\n')
+    assert.equal(lines.length, 1)
+    const audit = JSON.parse(lines[0])
+    assert.equal(audit.to, '9.9.9')
+    assert.equal(audit.reason, 'missing')
+    assert.deepEqual(audit.blocked, [])
+    assert.match(audit.at, /^\d{4}-\d{2}-\d{2}T/)
+  } finally {
+    await env.close()
+  }
+})
+
+test('预检门禁：blocked=true 时 409 并点名插件；force 写留痕后继续', async (t) => {
+  const preflight = {
+    schema: 1,
+    at: Date.now(),
+    target: '9.9.9',
+    blocked: true,
+    plugins: [
+      {
+        name: 'probe-fails',
+        version: '1.0.0',
+        enabled: true,
+        p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible' },
+        p2: { ok: false, reason: 'plugin add 退出码 1' },
+      },
+    ],
+    warnings: [],
+  }
+  const env = await makeEnvironment({ omitPreflight: true, preflight })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const rejected = await fetch(`${env.host.base}${API.update}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9' }),
+    })
+    assert.equal(rejected.status, 409)
+    const detail = (await rejected.json()).detail
+    assert.equal(detail.reason, 'blocked')
+    assert.deepEqual(detail.blocked, ['probe-fails'])
+    assert.equal(detail.bypassable, true)
+
+    const forced = await fetch(`${env.host.base}${API.update}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9', force: true }),
+    })
+    assert.equal(forced.status, 202)
+    await waitFor(() => env.host.scheduled.length === 1, 'the helper to be scheduled')
+    const audit = JSON.parse((await readFile(join(env.stateDir, 'force-audit.jsonl'), 'utf8')).trim())
+    assert.equal(audit.reason, 'blocked')
+    assert.deepEqual(audit.blocked, ['probe-fails'])
+    assert.equal(audit.to, '9.9.9')
   } finally {
     await env.close()
   }

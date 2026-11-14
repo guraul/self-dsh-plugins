@@ -128,8 +128,13 @@ test('runProbes：add 失败就不再 dump，且成功失败都进缓存', async
 test('探针路由用到的助手都已导入（漏了 `run` 会静默失效——#300 的真实 blocker）', async () => {
   const source = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
   // `cacheHit` 在 #359 之后不再由 index.js 直接用（改走 `probeCacheEntries`），列表跟着换。
-  for (const name of ['run', 'probeCacheEntries', 'runProbes', 'linkTargets']) {
+  // #421 起试装执行器搬进 `preflight-run.js`，与 index 的接线分别校验。
+  for (const name of ['run', 'probeCacheEntries']) {
     assert.match(source, new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./host/`), `缺少 ${name} 的导入`)
+  }
+  const runner = await readFile(new URL('../lib/host/preflight-run.js', import.meta.url), 'utf8')
+  for (const name of ['runProbes', 'linkTargets', 'runProbeWithProfile']) {
+    assert.match(runner, new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '\\./`), `缺少 ${name} 的导入`)
   }
 })
 
