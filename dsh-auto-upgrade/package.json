@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
-    "check": "node --check lib/index.js && node --check lib/client.js"
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check smoke.mjs"
   },
   "license": "MIT",
   "repository": {
@@ -39,6 +39,10 @@
     "react": "^18.2.0"
   },
   "dsh": {
+    "smoke": {
+      "module": "./smoke.mjs",
+      "timeoutMs": 5000
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     },

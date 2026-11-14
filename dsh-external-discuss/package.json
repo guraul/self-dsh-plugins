@@ -16,8 +16,8 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node test/host.test.mjs",
-    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/host/http.js && node --check lib/host/transcript.js && node --check extension/background.js && node --check extension/dsh-content.js && node --check extension/qingyan-content.js"
+    "test": "node test/host.test.mjs && node --test test/smoke-module.test.mjs",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/host/http.js && node --check lib/host/transcript.js && node --check extension/background.js && node --check extension/dsh-content.js && node --check extension/qingyan-content.js && node --check smoke.mjs"
   },
   "license": "MIT",
   "keywords": [
@@ -36,6 +36,10 @@
     "react": "^18.2.0"
   },
   "dsh": {
+    "smoke": {
+      "module": "./smoke.mjs",
+      "timeoutMs": 5000
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
