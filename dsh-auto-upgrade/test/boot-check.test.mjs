@@ -8,6 +8,7 @@ import {
   BOOT_CHECK_FILE,
   BOOT_CHECK_SCHEMA,
   CORE_PLUGINS,
+  buildBootCheckKey,
   classifyResults,
   disableLoadedPlugin,
   findLoaderEntry,
@@ -16,6 +17,8 @@ import {
   runBootCheck,
   shouldSkipBootCheck,
   toBootCheckResult,
+  writeBootCheck,
+  writeSkippedBootCheck,
 } from '../lib/host/boot-check.js'
 
 /**
@@ -190,11 +193,77 @@ test('核心插件自报失败：豁免运行时禁用，但仍计入 problems �
   }
 })
 
-test('重复启动：版本没变且已有结果就跳过；版本变了或结果缺失则重跑', () => {
-  assert.equal(shouldSkipBootCheck({ lastBootCheckVersion: '0.2.2-rc.3', dshVersion: '0.2.2-rc.3', hasResult: true }), true)
-  assert.equal(shouldSkipBootCheck({ lastBootCheckVersion: '0.2.2-rc.3', dshVersion: '0.2.2-rc.4', hasResult: true }), false)
-  assert.equal(shouldSkipBootCheck({ lastBootCheckVersion: '0.2.2-rc.3', dshVersion: '0.2.2-rc.3', hasResult: false }), false)
-  assert.equal(shouldSkipBootCheck({ lastBootCheckVersion: null, dshVersion: '0.2.2-rc.3', hasResult: true }), false)
+test('指纹：dsh 版本 / 插件版本 / manifest mtime 任一变化都会变；不变则稳定', () => {
+  const base = {
+    dshVersion: '0.2.2-rc.3',
+    plugins: [
+      { name: 'dsh-awake', version: '1.0.0', manifestMtimeMs: 100 },
+      { name: 'dsh-usage-panel', version: '2.0.0', manifestMtimeMs: 200 },
+    ],
+  }
+  const key = buildBootCheckKey(base)
+  assert.match(key, /^[0-9a-f]{64}$/)
+  assert.equal(buildBootCheckKey({ ...base, plugins: [...base.plugins].reverse() }), key, '依赖顺序变化不算指纹变化')
+  assert.equal(buildBootCheckKey({ ...base }), key, '同样的输入给同样的指纹')
+  assert.notEqual(buildBootCheckKey({ ...base, dshVersion: '0.2.2-rc.4' }), key, 'dsh 升级要重跑')
+  assert.notEqual(buildBootCheckKey({
+    ...base,
+    plugins: [{ ...base.plugins[0], version: '1.0.1' }, base.plugins[1]],
+  }), key, '插件升版本要重跑')
+  assert.notEqual(buildBootCheckKey({
+    ...base,
+    plugins: [{ ...base.plugins[0], manifestMtimeMs: 101 }, base.plugins[1]],
+  }), key, '补 dsh.smoke 改了 manifest 要重跑')
+
+  assert.equal(shouldSkipBootCheck({ lastBootCheckKey: key, key, hasResult: true }), true)
+  assert.equal(shouldSkipBootCheck({ lastBootCheckKey: key, key: `${key}x`, hasResult: true }), false, '指纹变了不能跳过')
+  assert.equal(shouldSkipBootCheck({ lastBootCheckKey: key, key, hasResult: false }), false, '结果文件没了不能跳过')
+  assert.equal(shouldSkipBootCheck({ lastBootCheckKey: null, key, hasResult: true }), false)
+})
+
+test('跳过也写 boot-check.json：skipped=true + 上次摘要，保证进度页看到本轮文件', async () => {
+  const stateDir = await makeStateDir()
+  try {
+    const previous = {
+      schema: BOOT_CHECK_SCHEMA,
+      at: 1,
+      from: '0.2.2-rc.2',
+      to: '0.2.2-rc.3',
+      problems: 2,
+      disabled: ['dsh-awake'],
+      unverified: ['dsh-usage-panel'],
+      results: [{ name: 'dsh-awake', ok: false, checks: [] }],
+    }
+    await writeBootCheck(stateDir, previous)
+
+    const skipped = await writeSkippedBootCheck({
+      stateDir,
+      dshVersion: '0.2.2-rc.3',
+      from: '0.2.2-rc.2',
+      at: 2,
+    })
+    assert.equal(skipped.skipped, true)
+    assert.equal(skipped.at, 2)
+    assert.equal(skipped.to, '0.2.2-rc.3')
+    assert.equal(skipped.from, '0.2.2-rc.2')
+    assert.equal(skipped.problems, 2)
+    assert.deepEqual(skipped.disabled, ['dsh-awake'])
+    assert.deepEqual(skipped.unverified, ['dsh-usage-panel'])
+    assert.deepEqual(skipped.results, previous.results)
+
+    const written = JSON.parse(await readFile(join(stateDir, BOOT_CHECK_FILE), 'utf8'))
+    assert.deepEqual(written, skipped, '落盘的必须就是返回的那份')
+  } finally {
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('重复启动：指纹没变且已有结果就跳过；指纹变了或结果缺失则重跑', () => {
+  const key = buildBootCheckKey({ dshVersion: '0.2.2-rc.3', plugins: [] })
+  assert.equal(shouldSkipBootCheck({ lastBootCheckKey: key, key, hasResult: true }), true)
+  assert.equal(shouldSkipBootCheck({ lastBootCheckKey: key, key: buildBootCheckKey({ dshVersion: '0.2.2-rc.4', plugins: [] }), hasResult: true }), false)
+  assert.equal(shouldSkipBootCheck({ lastBootCheckKey: key, key, hasResult: false }), false)
+  assert.equal(shouldSkipBootCheck({ lastBootCheckKey: null, key, hasResult: true }), false)
 
   // 落盘后可以被下一轮读到：去重靠的正是这份结果。
   return makeStateDir().then(async (stateDir) => {

@@ -1038,6 +1038,6 @@ test('设置页底部：还没有预检结果时摘要如实说「还没跑过�
     },
   })
   const text = textOf(await react.mount(Settings, {}))
-  assert.match(text, /最近一次预检：还没有跑过/)
+  assert.match(text, /还没有跑过预检 · 升级时会自动跑/)
   assert.doesNotMatch(text, /最近一次启动检查/, 'boot-check 还没有端点，不许先写半截')
 })
