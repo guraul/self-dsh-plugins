@@ -146,6 +146,8 @@ async function startHost(options) {
     registry: options.registry,
     githubApiBase: options.githubApiBase,
     stateDir: options.stateDir,
+    // 启动冒烟是真实宿主行为；路由测试只关心路由，别让后台冒烟去碰真 `gh`（#429）。
+    bootCheck: false,
     urlFile: options.stateDir === undefined ? undefined : join(options.stateDir, 'url.txt'),
     exit: (code) => exits.push(code),
     ...(options.runGh === undefined ? {} : { runGh: options.runGh }),

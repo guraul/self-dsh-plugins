@@ -33,6 +33,7 @@ import {
 } from './host/preflight-run.js'
 import { runRehearsal } from './host/rehearse.js'
 import { collectLoaderNames, createInjectResolver, officialInjectSeeds, platformSeedsFromStaticModules, runSmokes } from './host/smoke.js'
+import { disableLoadedPlugin, readBootCheck, runBootCheck, shouldSkipBootCheck } from './host/boot-check.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
 import { maybeReportSmokeFailures } from './host/smoke-issue.js'
@@ -169,6 +170,8 @@ export function apply(ctx, config = {}) {
   const runGhSeam = typeof config.runGh === 'function' ? config.runGh : defaultRunGh
   /** helper 是 POSIX sh 脚本，Windows 上不假装支持。 */
   const helperSupported = process.platform !== 'win32'
+  /** 启动后冒烟（#429）；测试 / 特殊部署可用 `bootCheck: false` 关掉。 */
+  const bootCheckEnabled = config.bootCheck !== false
 
   let installation
   let installationError
@@ -1578,6 +1581,68 @@ export function apply(ctx, config = {}) {
       }
       console.warn('[dsh-auto-upgrade] url.txt 未刷新：等了 30 秒仍没等到新地址')
     })()
+
+    // —— 升级后第一次启动的冒烟（issue #429）——
+    // 启动完成（webServer 绑好端口）后在后台跑一次：不阻塞启动、不 delay ready。
+    // 版本没变且已有结果就跳过（`state.lastBootCheckVersion` 去重）。
+    if (bootCheckEnabled) {
+      void (async () => {
+        try {
+          const dshVersion = installation === undefined ? undefined : await readInstalledVersion(installation.manifestPath)
+          if (typeof dshVersion !== 'string' || dshVersion === '') {
+            console.warn('[dsh-auto-upgrade] 启动冒烟跳过：拿不到已装 dsh 版本')
+            return
+          }
+          const state = await stores.state.read()
+          const hasResult = (await readBootCheck(stateDir)) !== undefined
+          if (shouldSkipBootCheck({ lastBootCheckVersion: state.lastBootCheckVersion, dshVersion, hasResult })) return
+          if (profileDir === undefined) {
+            console.warn('[dsh-auto-upgrade] 启动冒烟跳过：profile 信息不可用')
+            return
+          }
+          // 就绪信号只有 `port` 可观察（WebServer 没有 ready 事件）：等到绑定为止，最多 ~30 秒。
+          for (let attempt = 0; attempt < 60 && typeof webServer.port !== 'number'; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500))
+          }
+          const { plugins, bundles } = await collectSmokePlugins()
+          if (plugins.length === 0) return
+          const dshDir = installation?.dshDir
+          const installTreeHas = (pkg) => dshDir !== undefined && existsSync(join(dshDir, 'node_modules', pkg))
+          const packageExists = (pkg) => installTreeHas(pkg) || existsSync(join(profileDir, 'node_modules', pkg))
+          const graphEntries = collectBootGraphEntries()
+          const loader = typeof ctx.get === 'function' ? ctx.get('loader') : undefined
+          const enabled = collectLoaderNames(loader)
+          const { seeds, seedsKnown } = await collectPlatformSeeds(dshDir, graphEntries, installTreeHas)
+          const report = await runBootCheck({
+            stateDir,
+            dshVersion,
+            from: state.pendingRestart?.from ?? state.installed ?? dshVersion,
+            smoke: () => runSmokes({
+              plugins,
+              bundles,
+              enabled,
+              context: { dshVersion, dshDir },
+              resolvable: createInjectResolver({
+                graphIds: graphEntries.map((entry) => entry?.id).filter((id) => typeof id === 'string'),
+                packageExists,
+                seeds,
+                seedsKnown,
+              }),
+              importModule: (plugin, modulePath) => import(pathToFileURL(join(plugin.dir, modulePath)).href),
+            }),
+            // 只摘运行时 fiber，不写 profile：重启自动恢复。
+            disable: (pluginName) => disableLoadedPlugin(loader, pluginName),
+            slug: repositorySlug(ownPackage),
+            report: (input) => createIssue({ ...input, runGh: runGhSeam }),
+          })
+          await stores.state.patch({ lastBootCheckVersion: dshVersion })
+          console.log(`[dsh-auto-upgrade] 启动冒烟完成：${String(report.problems)} 个问题，禁用 ${String(report.disabled.length)} 个，未验证 ${String(report.unverified.length)} 个`)
+        } catch (error) {
+          // 启动冒烟是旁路：失败只记日志，绝不能影响宿主启动。
+          console.warn(`[dsh-auto-upgrade] 启动冒烟失败：${error instanceof Error ? error.message : String(error)}`)
+        }
+      })()
+    }
 
     ctx.effect(() => () => {
       for (const dispose of disposers) dispose()
