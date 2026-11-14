@@ -5,8 +5,22 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { CHECK_GRACE_MS, checkLine, resolveCheck } from '../lib/host/progress-server.mjs'
 
 const SERVER = new URL('../lib/host/progress-server.mjs', import.meta.url).pathname
+
+/** 本轮的冒烟结果文件（契约由后续 PR 落盘）。 */
+function bootCheck(overrides = {}) {
+  return JSON.stringify({
+    schema: 1,
+    at: Date.now(),
+    problems: 0,
+    disabled: [],
+    unverified: [],
+    results: [],
+    ...overrides,
+  })
+}
 
 /** 假宿主：任何请求都回 303（模拟「新令牌可用」）。 */
 async function fakeHost() {
@@ -22,9 +36,9 @@ async function fakeHost() {
 }
 
 /** 起进度服务并等它写出端口。 */
-async function startProgress(stateDir, urlFile, base) {
+async function startProgress(stateDir, urlFile, base, extra = []) {
   const child = spawn(process.execPath, [SERVER, '--state', stateDir, '--url-file', urlFile, '--port', '0',
-    ...(base === undefined ? [] : ['--base', base])], {
+    ...(base === undefined ? [] : ['--base', base]), ...extra], {
     stdio: 'ignore',
   })
   const portFile = join(stateDir, 'progress-port.json')
@@ -50,14 +64,22 @@ test('#300 重启进度服务：就绪时 /state 报 done 并给出可直接打�
   try {
     // 新地址要在服务起来之后才出现（起来之前 url.txt 里的内容属于「本轮之前」）。
     await writeFile(urlFile, `${url}\n`)
+    await writeFile(join(stateDir, 'boot-check.json'), bootCheck())
     const state = await (await fetch(`${progress.base}/state`)).json()
     assert.equal(state.phase, 'done')
     assert.equal(state.url, url, '完成时必须把新地址交给页面')
     assert.ok(typeof state.elapsedMs === 'number')
+    assert.equal(state.check?.state, 'done', '有新地址 + 本轮冒烟结果才算完成')
+    assert.equal(state.check?.problems, 0)
 
     const page = await fetch(`${progress.base}/`)
     assert.equal(page.status, 200)
-    assert.match(await page.text(), /dsh web 正在重启/, '进度页要能直接打开（宿主已死时它仍在）')
+    const html = await page.text()
+    assert.match(html, /dsh web 正在重启/, '进度页要能直接打开（宿主已死时它仍在）')
+    assert.match(html, /id=smoke/, '跳转前要有一行冒烟检查')
+    assert.match(html, /冒烟检查：/, '页面文案与服务端同一份实现')
+    // 内联脚本必须能编译：`checkLine` 是以源码形式注入的，写坏了页面会整段不动。
+    assert.doesNotThrow(() => new Function(/<script>([\s\S]+)<\/script>/.exec(html)[1]))
     assert.equal(page.headers.get('access-control-allow-origin'), null, '同源轮询，不该开 CORS（免得任意网页探到带令牌的地址）')
   } finally {
     progress.kill()
@@ -96,6 +118,7 @@ test('#300 进度服务：点击时 url.txt 里的旧令牌不算就绪（#293 �
     assert.notEqual(early.phase, 'done', '旧令牌仍有效，但它不是本轮的新地址')
     assert.equal(early.url, undefined, '没到 done 就不许给地址')
     await writeFile(urlFile, `${host.origin}/?token=NEW_TOKEN_AFTER_RESTART_2\n`)
+    await writeFile(join(stateDir, 'boot-check.json'), bootCheck())
     const later = await (await fetch(`${progress.base}/state`)).json()
     assert.equal(later.phase, 'done', '换成新令牌后才算完成')
   } finally {
@@ -166,4 +189,94 @@ test('#300 进度：端口活着但旧令牌还能认证 → 报「旧进程正�
     await host.close()
     await rm(stateDir, { recursive: true, force: true })
   }
+})
+
+test('#423 冒烟检查：新地址可达但结果文件没落盘 → 先等，落盘后才 done 并给出计数', async () => {
+  const host = await fakeHost()
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  const urlFile = join(stateDir, 'url.txt')
+  const url = `${host.origin}/?token=NEW_TOKEN_SMOKE_WAIT_01`
+  const progress = await startProgress(stateDir, urlFile)
+  try {
+    await writeFile(urlFile, `${url}\n`)
+    const early = await (await fetch(`${progress.base}/state`)).json()
+    assert.equal(early.phase, 'verifying', '结果没出来不许宣布完成')
+    assert.equal(early.check?.state, 'pending')
+    assert.equal(early.url, undefined, '冒烟没结束前不给跳转地址')
+
+    await writeFile(join(stateDir, 'boot-check.json'), bootCheck({ problems: 2, disabled: ['dsh-awake'], unverified: ['x', 'y'] }))
+    const later = await (await fetch(`${progress.base}/state`)).json()
+    assert.equal(later.phase, 'done')
+    assert.equal(later.url, url)
+    assert.deepEqual(later.check, { state: 'done', problems: 2, disabled: 1, unverified: 2 })
+  } finally {
+    progress.kill()
+    await host.close()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('#423 冒烟检查：超过等待上限标 timeout，但照常 done 并给地址（不阻塞跳转）', async () => {
+  const host = await fakeHost()
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-au-progress-'))
+  const urlFile = join(stateDir, 'url.txt')
+  const url = `${host.origin}/?token=NEW_TOKEN_SMOKE_TIMEOUT_1`
+  // 把 20 秒压到 100ms：验证的是「超时后照常跳转」的判定，不是真等。
+  const progress = await startProgress(stateDir, urlFile, undefined, ['--check-grace-ms', '100'])
+  try {
+    await writeFile(urlFile, `${url}\n`)
+    let state = await (await fetch(`${progress.base}/state`)).json()
+    const deadline = Date.now() + 3000
+    while (state.check?.state !== 'timeout' && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      state = await (await fetch(`${progress.base}/state`)).json()
+    }
+    assert.equal(state.check?.state, 'timeout', '结果文件始终缺失 → timeout')
+    assert.equal(state.phase, 'done', '超时不能把用户卡在进度页')
+    assert.equal(state.url, url, '超时也照常跳转')
+    assert.match(state.detail, /冒烟检查未完成/)
+  } finally {
+    progress.kill()
+    await host.close()
+    await rm(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('#423 冒烟检查：结果文件缺失 → 先 pending，到 20s 才 timeout（注入时钟，不真等）', () => {
+  const liveSince = 1_000_000
+  const before = resolveCheck({ raw: '', fresh: false, now: liveSince + CHECK_GRACE_MS - 1, liveSinceMs: liveSince })
+  assert.deepEqual(before, { state: 'pending', problems: 0, disabled: 0, unverified: 0 })
+  const atDeadline = resolveCheck({ raw: '', fresh: false, now: liveSince + CHECK_GRACE_MS, liveSinceMs: liveSince })
+  assert.equal(atDeadline.state, 'timeout')
+  // 地址还没就绪（liveSince 为 null）时，等多久都不算超时——等待只在「新地址可达」后开始。
+  const notLive = resolveCheck({ raw: '', fresh: false, now: liveSince + CHECK_GRACE_MS * 10, liveSinceMs: null })
+  assert.equal(notLive.state, 'pending')
+  // 上一轮留下的文件（fresh=false）不算本轮结果。
+  const stale = resolveCheck({ raw: bootCheck(), fresh: false, now: liveSince + CHECK_GRACE_MS, liveSinceMs: liveSince })
+  assert.equal(stale.state, 'timeout')
+})
+
+test('#423 冒烟检查：problems / disabled / unverified 计数正确', () => {
+  const raw = bootCheck({ problems: 3, disabled: ['a', 'b'], unverified: ['c'] })
+  const check = resolveCheck({ raw, fresh: true, now: 10, liveSinceMs: 0 })
+  assert.deepEqual(check, { state: 'done', problems: 3, disabled: 2, unverified: 1 })
+})
+
+test('#423 冒烟检查：无问题时三个计数都是 0', () => {
+  const check = resolveCheck({ raw: bootCheck(), fresh: true, now: 10, liveSinceMs: 0 })
+  assert.deepEqual(check, { state: 'done', problems: 0, disabled: 0, unverified: 0 })
+})
+
+test('#423 冒烟检查：未知 schema 当「还没有结果」，不拿读不懂的文件下结论', () => {
+  const raw = JSON.stringify({ schema: 2, problems: 0, disabled: [], unverified: [] })
+  assert.equal(resolveCheck({ raw, fresh: true, now: 0, liveSinceMs: null }).state, 'pending')
+})
+
+test('#423 冒烟检查文案：disabled 非空时照实说「已临时禁用 X 个」', () => {
+  assert.equal(
+    checkLine({ state: 'done', problems: 3, disabled: 2, unverified: 1 }),
+    '冒烟检查：3 个问题 / 已临时禁用 2 个 / 1 个未验证',
+  )
+  assert.equal(checkLine({ state: 'timeout', problems: 0, disabled: 0, unverified: 0 }), '冒烟检查：检查未完成')
+  assert.equal(checkLine({ state: 'pending', problems: 0, disabled: 0, unverified: 0 }), '冒烟检查：进行中…')
 })
