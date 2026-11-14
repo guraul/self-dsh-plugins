@@ -130,7 +130,13 @@ pnpm run check                                # node --check
       "name": "dsh-awake",
       "version": "0.1.4",
       "enabled": true,
-      "p1": { "ok": true, "verdict": "ok", "requirements": {}, "declared": "compatible" },
+      "p1": {
+        "ok": true,
+        "verdict": "ok",
+        "requirements": {},
+        "declared": "compatible",
+        "depth": "L2"
+      },
       "p2": { "ok": true, "reason": "装配通过（新增 dsh-awake）" }
     }
   ],
@@ -146,10 +152,14 @@ pnpm run check                                # node --check
 }
 ```
 
-  - `p1.verdict`：`ok` / `requirements`（官方门禁要求未满足，**阻断**）/ `unverified`
-    （manifest 读不到或插件自述从未验证，**只警告**）。`p1.requirements` 原样取自官方
-    `evaluatePluginCompatibility()` 的未满足项；`p1.declared` 是自述矩阵三态，不改变门禁结论。
-    `enabled: false` 的插件不阻断。
+  - `p1.verdict`：`ok` / `pending` / `requirements`（官方门禁要求未满足，**阻断**）/ `unverified`
+    （manifest 读不到或插件自述从未验证，**只警告**）。
+    - **`ok` 只给 L2 及以上**（`dshDepth` 记录到 L2 / L3 / L4）；门禁放行但只到 `L1`、或压根没记
+      深度时降级为 `pending`——「可装配 · 未验证行为」不是兼容，GUI 把它计入待处理而不是通过。
+    - `p1.depth` 原样取自 `dsh.compatibility.dshDepth[<目标版本>]`，没记录 / 非法值就**不写这个字段**
+      （旧消费方看不到它也不影响判定）。
+    - `p1.requirements` 原样取自官方 `evaluatePluginCompatibility()` 的未满足项；`p1.declared` 是
+      自述矩阵三态，不改变门禁结论。`enabled: false` 的插件不阻断，也不进待处理。
   - `p2`：只对 `link:` / `file:` 依赖做一次性 `DSH_HOME` 真装；装不上即 `ok: false` 并阻断。
     其余插件为 `{ok: true, skipped: true, reason}`。**预检的 P2 不复用 `/probe` 的结论缓存**
     （`useCache: false` 强制真装）：缓存对应的是别的一次性 HOME，`plugin add` 被跳过时当前
@@ -164,12 +174,14 @@ pnpm run check                                # node --check
       启动失败时所有预期条目均为 `inactive`；`launch: 'skipped'` 时为空对象。
     - `ok`：`launch !== 'failed'` 且所有条目 `active`（`launch: 'skipped'` 时为 `true`）；仅供界面展示，**不是门禁**。
     - `error?`：仅在 `launch === 'failed'` 时出现。
-  - `blocked`：任一启用插件 P1=`requirements` 或 P2 失败时为 `true`；P3 不改变它。
+  - `blocked`：任一启用插件 P1=`requirements` 或 P2 失败时为 `true`；`pending` / `unverified` 不置位，
+    P3 也不改变它。
   - `warnings[]`：`kind` ∈ `inventory`（清单读取失败）/ `p1-unverified` / `declared-incompatible` /
     `p3-failed`（整个启动失败，`plugin: null`）/ `p3-inactive`（单个条目没起来），
     **只放不阻断的信息**（`plugin: null` 表示整个清单 / 整个启动的问题）。
-  - `schema` 在判定口径变化时 +1；GUI / 进度页应拒绝未知大版本的 `schema`。`schema: 1` 的旧文件
-    没有 `p3`，按 `null` 处理。
+  - `schema` 在判定口径变化时 +1；GUI / 进度页应拒绝未知大版本的 `schema`。2 = 新增 `p3`；
+    `schema: 1` 的旧文件没有 `p3`，按 `null` 处理。`p1.depth` 与 `verdict: 'pending'` 是**新增可选
+    字段与枚举值**（旧消费方按「不是 ok 就不算通过」读仍然正确），所以版本号不再动。
 - **`/update` 门禁**：结果文件缺失 → `409 E_PREFLIGHT`（`detail.reason='missing'`）；
   `blocked === true` → `409 E_PREFLIGHT`（`detail.reason='blocked'`, `detail.blocked=[插件名]`）；
   两者 `detail.bypassable = true`。body 带 `force: true` 时跳过本门禁，并往
@@ -194,6 +206,8 @@ pnpm run check                                # node --check
   - 端口从 stdout 的 `dsh web: http://127.0.0.1:<port>/?token=…` 解析（只取 origin + port，
     **token 不落日志、不进错误文案**），轮询 `/` 直到有响应（401 也算起来）。
   - 插件自身的外部连接不由预演拦截。
+  ⚠️ 已知欠账（#428）：GUI 的「有会话正在跑」确认框目前仍复用 `force: true`，因此会**顺带**跳过
+  预检门禁并写一条 `force-audit`。宿主补上 `confirmSessions: true` 后客户端再改成只带该字段。
 - **未实现**：逐插件处置动作（升级 / 应用声明 / 临时禁用 / 自愈）与进度页接入留给后续 PR；
   GUI 的升级卡已在 #422 接入，但**尚未展示 P3 结论**（界面仍写「启动预演 未接入（P3）」，见下节）。
 
@@ -208,19 +222,21 @@ pnpm run check                                # node --check
 - **保留**：发布渠道、当天首次自动检测、显示浮层、重新启用提示、立即检查、本机体检、重启服务、回滚。
 - **升级确认卡（两段式）**：`renderPlanPanel` 第一段是目标版本（含当前版本）与备份路径；第二段读
   `GET /preflight` 的 `result`：
-  - `兼容判定 N/M · K 个待处理`（N = `p1.ok === true`，pending 含未验证）；
+  - `兼容判定 N/M · K 个待处理`（N = `p1.verdict === 'ok'`，即 **L2+**；`pending`（只到 L1 / 没记深度）
+    与 `unverified` 都算待处理，**不看 `p1.ok`**——它只表示「不阻断」）；
   - `试装 N/M`（分母只算 `p2.skipped !== true` 的插件；没有可试装项时显示「无 link:/file: 项」）；
   - `启动预演 未接入（P3）`——宿主侧的 P3 已由 #425 实现并写进 `result.p3`，但 GUI 还没展示；
     **没接入就写没接入**，不拿试装冒充启动检查。
-  - 逐插件一行 `⚠ <name> <未验证|装不上|装配失败>：<原因>`，一个插件只出一行（优先级：P1 要求未满足
-    → P2 装不上 → P1 未验证）。
+  - 逐插件一行 `⚠ <name> <未验证|可装配 · 未验证行为|装不上|装配失败>：<原因>`，一个插件只出一行
+    （优先级：P1 要求未满足 → P2 装不上 → P1 未验证 → P1 仅装配）。
   - 按钮 `[取消] [重新预检] [开始升级] [仍要升级]`。`开始升级` 在 `result === null`、
-    `result.blocked === true`、预检正在跑或 `busy` 时禁用；`仍要升级` 调 `POST /update` 带
-    `force: true`（宿主跳过预检门禁并写 `force-audit.jsonl`）。`重新预检` = `POST /preflight`
-    （202）→ 按 `PREFLIGHT_POLL_MS` 轮询 `GET` 到 `runner.running === false`，再用新快照替换卡片；
-    轮询间隔与上限见 `PREFLIGHT_POLL_MS` / `PREFLIGHT_POLL_MAX`。
+    **`result.blocked !== false`**（缺字段 / 旧 schema 同样禁用）、预检正在跑或 `busy` 时禁用；
+    `仍要升级` 调 `POST /update` 带 `force: true`（宿主跳过预检门禁并写 `force-audit.jsonl`）。
+    `重新预检` = `POST /preflight`（202）→ 按 `PREFLIGHT_POLL_MS` 轮询 `GET` 到 `runner.running === false`，
+    再用新快照替换卡片；轮询间隔与上限见 `PREFLIGHT_POLL_MS` / `PREFLIGHT_POLL_MAX`。
 - **页底摘要**：`<details>` 一行
-  `最近一次预检：N 个问题 · M 个插件（K 个未验证）`，展开是目标/结论时间、逐插件原因与清单读取告警。
+  `最近一次预检：N 个问题 · M 个插件（K 个未验证）`（K 含 `pending`），展开是目标/结论时间、
+  逐插件原因与清单读取告警。
   进设置页时 GET 一次，`重新预检` 成功后通过 `onPreflight` 写回同一份 state。
   ⚠️ **boot-check 仍是占位**：`stateDir/boot-check.json` 还没有端点，`renderPreflightSummary` 里留了
   `TODO(#422/boot-check)`；在宿主提供接口前**不要**编「本次已临时禁用 X 个」这类数字。

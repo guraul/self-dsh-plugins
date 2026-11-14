@@ -7,7 +7,8 @@
  *
  * 判定口径：
  * - **P1** 用 `compat.js` 的 `evaluatePlugins()` 按**目标版本**逐插件判定：门禁要求未满足 =
- *   `requirements`（阻断）；manifest 读不到或插件自述从未验证 = `unverified`（只警告，不阻断）。
+ *   `requirements`（阻断）；manifest 读不到或插件自述从未验证 = `unverified`（只警告，不阻断）；
+ *   门禁放行但验证深度只到 L1 / 没记深度 = `pending`（只警告，**不算通过**）。
  * - **P2** 复用一次性 `DSH_HOME` 试装执行器：只覆盖 `link:` / `file:` 插件，装不上 = 阻断。
  * - **P3** 启动预演（`rehearse.js`）：在同一个一次性 `DSH_HOME` 里真启动一次，条目没起来
  *   只写 warning，**不改 `blocked`**。
@@ -17,6 +18,7 @@ import { appendFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { DEPTHS } from './compat.js'
 import { entryCandidates, linkTargets, pluginIdFromSource, runProbes } from './probe.js'
 import { runProbeWithProfile } from './probe-run.js'
 
@@ -24,22 +26,47 @@ import { runProbeWithProfile } from './probe-run.js'
 export const PREFLIGHT_FILE = 'preflight.json'
 /** 强制升级留痕文件名（状态目录内，一行一条 JSON）。 */
 export const FORCE_AUDIT_FILE = 'force-audit.jsonl'
-/** 结果文件 schema；判定口径变了就 +1，旧结果仍然可读但要标明版本。 */
+/**
+ * 结果文件 schema；判定口径变了就 +1，旧结果仍然可读但要标明版本。
+ *
+ * 2 = P3 启动预演（新增 `p3` 字段与 `p3-*` 告警，见 #425）。
+ * #422 的 `p1.depth` / `p1.verdict='pending'` 是**新增可选字段与枚举值**，旧消费方按
+ * 「不是 ok 就不是通过」读不会误判，所以版本号不再动（守卫测试会盯着这一点）。
+ */
 export const PREFLIGHT_SCHEMA = 2
 
+/** 只有 L2 及以上才算「行为验证过」；L1 只是装配通过（见 `compat.js` 的 `DEPTHS`）。 */
+export const VERIFIED_DEPTHS = ['L2', 'L3', 'L4']
+
 /**
- * 把 `evaluatePlugins()` 的单插件判定折成 P1 三态。
+ * 规范化验证深度：只认 `L1`–`L4`，没记录 / 拼错一律 undefined（= 未记录深度）。
+ * @param {unknown} value `evaluatePlugins()` 的 `depth`。
+ * @returns {'L1'|'L2'|'L3'|'L4'|undefined} 深度。
+ */
+export function normalizeDepth(value) {
+  return DEPTHS.includes(value) ? value : undefined
+}
+
+/**
+ * 把 `evaluatePlugins()` 的单插件判定折成 P1 **四态**。
  *
- * 三态刻意与门禁语义对齐：`requirements` 才阻断，`unverified` 只是「没法下结论」。
- * 自述矩阵（`declared`）原样带出，但不改变 `requirements` 结论——它从来不是门禁。
+ * 四态与门禁语义对齐：`requirements` 才阻断；`unverified`（没法下结论）与
+ * `pending`（门禁放行但只到 L1 / 没记深度）都**只警告**。
+ *
+ * ⚠️ `ok` 只留给 **L2+**：`evaluatePlugins()` 的 `compatible` 只说明门禁放行，不等于行为验证过；
+ * 丢掉 `depth` 会把「可装配」静默升格成「兼容」——`depth` 必须原样带出，L1 / 缺失要降级成
+ * `pending`，否则 GUI 的「兼容判定」会把它们算成通过。
  * @param {object} plugin `evaluatePlugins()` 的插件条目。
- * @returns {{ok:boolean, verdict:'ok'|'requirements'|'unverified', requirements:object, declared:string, detail?:string}} P1 判定。
+ * @returns {{ok:boolean, verdict:'ok'|'pending'|'requirements'|'unverified', requirements:object, declared:string, depth?:string, detail?:string}} P1 判定。
  */
 export function judgeP1(plugin) {
   const declared = plugin?.declared?.verdict ?? 'unverified'
   const requirements = plugin?.peers ?? {}
+  const depth = normalizeDepth(plugin?.depth)
+  const withDepth = depth === undefined ? {} : { depth }
+  // 禁用插件不会被新宿主加载，既不算通过也不算待处理。
   if (plugin?.enabled === false) {
-    return { ok: true, verdict: 'ok', requirements: {}, declared }
+    return { ok: true, verdict: 'ok', requirements: {}, declared, ...withDepth }
   }
   // manifest 读不到不是「不兼容」，是「信息不足」：如实标 unverified，不阻断。
   if (plugin?.known === false) {
@@ -48,6 +75,7 @@ export function judgeP1(plugin) {
       verdict: 'unverified',
       requirements: {},
       declared,
+      ...withDepth,
       ...(typeof plugin.detail === 'string' ? { detail: plugin.detail } : {}),
     }
   }
@@ -57,14 +85,26 @@ export function judgeP1(plugin) {
       verdict: 'requirements',
       requirements,
       declared,
+      ...withDepth,
       ...(typeof plugin.detail === 'string' ? { detail: plugin.detail } : {}),
     }
   }
   // 门禁已放行，但插件自述从未验证：仍然是「未验证」，不是「兼容」。
   if (declared === 'unverified') {
-    return { ok: true, verdict: 'unverified', requirements: {}, declared }
+    return { ok: true, verdict: 'unverified', requirements: {}, declared, ...withDepth }
   }
-  return { ok: true, verdict: 'ok', requirements: {}, declared }
+  // 门禁放行 + 自述 compatible，还要看验证深度：L1 / 没记深度只能叫「可装配 · 未验证行为」。
+  if (depth === undefined || !VERIFIED_DEPTHS.includes(depth)) {
+    return {
+      ok: true,
+      verdict: 'pending',
+      requirements: {},
+      declared,
+      ...withDepth,
+      detail: depth === undefined ? '没有记录验证深度（可装配 · 未验证行为）' : `只到 ${depth}（可装配 · 未验证行为）`,
+    }
+  }
+  return { ok: true, verdict: 'ok', requirements: {}, declared, ...withDepth }
 }
 
 /**

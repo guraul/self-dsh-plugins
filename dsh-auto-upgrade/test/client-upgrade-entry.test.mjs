@@ -722,8 +722,8 @@ const PREFLIGHT_FACTS = {
 }
 
 /**
- * 预检结果四类现场：通过 / 未验证 / 装不上（P1 要求未满足）/ 装配失败（P2 装不上）。
- * 计数：兼容 3/4、试装 1/2、未验证 1 个、blocked。
+ * 预检结果四类现场：通过（L2）/ 未验证 / 装不上（P1 要求未满足）/ 装配失败（P2 装不上）。
+ * 计数：兼容 2/4（只算 verdict=ok）、待处理 2、试装 1/2、未验证 1 个、blocked。
  */
 const PREFLIGHT_BLOCKED = {
   schema: 1,
@@ -732,22 +732,22 @@ const PREFLIGHT_BLOCKED = {
   plugins: [
     {
       name: 'dsh-awake', version: '0.1.4', enabled: true,
-      p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible' },
+      p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth: 'L2' },
       p2: { ok: true, reason: '装配通过' },
     },
     {
       name: 'dsh-usage-panel', version: '0.2.3-fork.1', enabled: true,
-      p1: { ok: true, verdict: 'unverified', requirements: {}, declared: 'unverified' },
+      p1: { ok: true, verdict: 'unverified', requirements: {}, declared: 'unverified', depth: 'L2' },
       p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
     },
     {
       name: 'dsh-subagents', version: '0.5.0', enabled: true,
-      p1: { ok: false, verdict: 'requirements', requirements: { '@deepseek-ai/dsh-tools': '0.2.1-rc.2' }, declared: 'compatible' },
+      p1: { ok: false, verdict: 'requirements', requirements: { '@deepseek-ai/dsh-tools': '0.2.1-rc.2' }, declared: 'compatible', depth: 'L2' },
       p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
     },
     {
       name: 'dsh-plugin-memx', version: '0.3.0', enabled: true,
-      p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible' },
+      p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth: 'L2' },
       p2: { ok: false, reason: 'plugin add 退出码 1' },
     },
   ],
@@ -816,7 +816,7 @@ test('升级卡两段式：目标 + 预检分项 + 逐插件待处理；blocked 
   tree = await clickButton(tree, '升级')
   const text = textOf(tree)
   assert.match(text, /目标 0\.2\.2-alpha\.2（当前 0\.2\.1-rc\.2）/, '第一段：目标版本')
-  assert.match(text, /兼容判定 3\/4 · 1 个待处理/, '第二段：兼容判定 N/M 与待处理数')
+  assert.match(text, /兼容判定 2\/4 · 2 个待处理/, '只有 verdict=ok（L2+）算兼容；未验证不算')
   assert.match(text, /试装 1\/2/, '第二段：试装 N/M（跳过的不算进分母）')
   assert.match(text, /启动预演 未接入（P3）/, 'P3 没接入时必须如实显示「未接入」')
   assert.match(text, /⚠ dsh-usage-panel 未验证：插件没有记录该版本的验证结论/)
@@ -878,6 +878,60 @@ test('升级卡：结果通过且未 blocked 时「开始升级」可用，提�
   tree = await clickButton(tree, '开始升级')
   const updates = calls.filter((call) => call.url === API.update && call.method === 'POST')
   assert.deepEqual(JSON.parse(updates[0].body), { version: '0.2.2-alpha.2', force: false })
+})
+
+test('升级卡：只到 L1 的插件计入待处理、不算兼容，「开始升级」仍可用（它不阻断）', async () => {
+  const result = {
+    ...PREFLIGHT_BLOCKED,
+    blocked: false,
+    plugins: [
+      PREFLIGHT_BLOCKED.plugins[0],
+      {
+        name: 'dsh-awake-l1', version: '0.1.4', enabled: true,
+        p1: {
+          ok: true, verdict: 'pending', requirements: {}, declared: 'compatible',
+          depth: 'L1', detail: '只到 L1（可装配 · 未验证行为）',
+        },
+        p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
+      },
+    ],
+  }
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: PLAN_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result,
+    },
+  })
+  let tree = await react.mount(Settings, {})
+  tree = await clickButton(tree, '升级')
+  const text = textOf(tree)
+  assert.match(text, /兼容判定 1\/2 · 1 个待处理/, 'L1 不能算进兼容判定')
+  assert.match(text, /⚠ dsh-awake-l1 可装配 · 未验证行为：只到 L1：装配通过，但行为没有验证过/)
+  assert.doesNotMatch(text, /⚠ dsh-awake /, 'L2 通过的插件不逐条占位')
+  const start = collect(tree, (node) => node.type === 'button' && textOf(node) === '开始升级')[0]
+  assert.equal(start.props.disabled, false, 'pending 只是警告，不阻断升级')
+})
+
+test('升级卡：缺 blocked 字段（旧 schema / 结果残缺）时「开始升级」也必须禁用', async () => {
+  const { blocked: _blocked, ...legacy } = PREFLIGHT_OK
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: PLAN_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: legacy,
+    },
+  })
+  let tree = await react.mount(Settings, {})
+  tree = await clickButton(tree, '升级')
+  const start = collect(tree, (node) => node.type === 'button' && textOf(node) === '开始升级')[0]
+  assert.equal(start.props.disabled, true, 'blocked 只认明确的 false，未知不许当通过')
 })
 
 test('升级卡：重新预检走 POST 并轮询 GET，结果回来后才替换卡片', async () => {
