@@ -23,6 +23,8 @@
 | `extension/background.js` | 扩展侧：定位（必要时打开）清言标签页、切前台、转发 |
 | `extension/dsh-content.js` | DSH 页 ↔ 扩展的桥（只转发，**不读页面 DOM**） |
 | `extension/qingyan-content.js` | 清言页执行器：新对话 / 重命名 / 粘贴 / 发送；**选择器候选集中在文件顶部 `CONFIG`** |
+| `smoke.mjs` | 升级后冒烟（`dsh.smoke`）：payload 纯函数 / 路由形状 / 默认 URL + 用宿主 cordis 实际加载插件 |
+| `test/smoke-module.test.mjs` | 冒烟自测（2 条；需要宿主 dsh 的那条在无 dsh 的机器上跳过） |
 
 投递链路：页面按钮 → `GET .../payload?sessionId=…`（宿主取正文与标题）→ `window.postMessage`
 （频道 `dsh-external-discuss`）→ 扩展 `dsh-content.js` → `background.js` → `qingyan-content.js`
@@ -50,10 +52,15 @@
 ```sh
 cd dsh-external-discuss
 pnpm install        # 只有 react 一个 peer
-pnpm test           # = node test/host.test.mjs（宿主半边隔离冒烟：路由注册 / 会话折算 / 标题回退 / 错误分支）
-pnpm run check      # 逐个入口 node --check（宿主 + 浏览器半边 + 三个扩展脚本）
+pnpm test           # = node test/host.test.mjs + node --test test/smoke-module.test.mjs（宿主半边隔离冒烟 + 冒烟模块自测）
+pnpm run check      # 逐个入口 node --check（宿主 + 浏览器半边 + 三个扩展脚本 + smoke.mjs）
 ```
 
 - 单测**不依赖 dsh 运行时**，用假 `ctx` / 假会话；因此**加路由或改折算逻辑必须同步 `test/host.test.mjs`**。
+- `smoke.mjs` 是宿主升级后 `/api/dsh-auto-upgrade/smoke` 跑的行为断言：`payload` 在 fixture 上验
+  角色过滤 / 截断 / 标题回退，`route-shape` 验两条 exact 路由，`url-default` 守住「默认送到清言
+  `https://chatglm.cn/`」，`host-load` 从 `ctx.dshDir` 取**宿主实际的 cordis** 真加载并驱动一次
+  `/payload`。改 `transcript.js` 的折算规则、路由路径或投递目标时，这四条会立刻红——
+  **不要靠改 smoke 让它变绿，先确认是代码退化了还是上游契约变了**。
 - 浏览器半边与扩展没有构建产物可验，改动后要做一次真浏览器冒烟（装扩展 → 刷新 DSH 页面 → 投递一次 →
   看清言标签页 `[dsh→清言]` 日志）。

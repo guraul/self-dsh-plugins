@@ -20,6 +20,8 @@
 | `lib/index.js` | 宿主入口：15 条路由、三条门禁、交接调度、一键开 issue |
 | `lib/client.js` | 浏览器半边：`shell.overlay` 浮层 + `settings.section` 设置页（含常驻升级入口、两段式升级确认卡与页底预检摘要）+ 重连 watchdog（连续失败约 30s 后切「令牌已更换」指引，不再承诺「会自动重新连接」，issue #293） |
 | `lib/host/*.js` | 纯逻辑：协议常量 / loopback 围栏 / HTTP 管道 / SemVer / 工具链 / registry / 兼容性 / 会话 / 状态 / 任务 / 备份 / helper |
+| `smoke.mjs` | 升级后冒烟（`dsh.smoke`）：预检聚合 / 门禁纯函数 + **宿主实际安装**的官方兼容性 API |
+| `test/smoke-module.test.mjs` | 冒烟自测（2 条；需要宿主 dsh 的那条在无 dsh 的机器上跳过） |
 | `docs/design/` | T1 设计：接口清单 + 数据流图 + 用户拍板结论 |
 | `docs/acceptance/` | 验收报告：逐条证据 + **明确没验证什么** |
 | `CHANGELOG.md` | 变更记录（含待办） |
@@ -88,6 +90,12 @@ pnpm run check                                # node --check
 ```
 
 > 本插件是仓库内**唯一有 `.npmrc`、且只有 `pnpm-lock.yaml`** 的插件（`dsh-auto-upgrade/.npmrc` 指向共享 store）。
+
+`smoke.mjs` 是宿主升级后 `/api/dsh-auto-upgrade/smoke` 跑的行为断言：`preflight` 用 fixture 锁
+`aggregatePreflight()` 的稳定结论（`depth` / `pending` 口径：只有 L2+ 算通过，L1 或没记深度只警告），
+`gate` 锁 `/update` 前置门禁的三分支，`official-api` 从 `ctx.dshDir` 解析**宿主实际安装**的
+`@deepseek-ai/dsh-app-boot`，断言 `evaluatePluginCompatibility` / `readProfileVersionExemptions`
+仍存在且判定可用。**不要 import 插件自己 `node_modules` 里的旧副本**——那会在升级后继续绿，等于没验。
 
 ## 测试约定
 
@@ -373,7 +381,7 @@ pnpm run check                                # node --check
 `dsh.profile.bundles`）/ 插件目录 / `dsh.client.inject` 可解析）+ 插件自报断言（`dsh.smoke = { module, timeoutMs }`，模块导出 `run()`）。没写 `dsh.smoke`
 的插件只跑兜底三项并标 `partial`——不假装验过行为。`run(context)` 会收到宿主的
 `dshVersion` / `dshDir`：断言要验**宿主实际加载的那份**，别 import 到插件自己 node_modules 的旧副本。
-目前声明了 `dsh.smoke` 的有 `dsh-im-bridge-workspaces` 与 `dsh-subagents`。
+目前声明了 `dsh.smoke` 的插件以各插件 `package.json` 的 `dsh.smoke` 为准（不在本文维护易过期的名单）。
 
 兜底三项的判据（#413 修正）：
 

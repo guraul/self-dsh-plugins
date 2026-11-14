@@ -39,6 +39,8 @@
 | `src/client/i18n.ts` | zh/en 文案；`button.optimize` / `button.optimizing` **保留 key 但不再参与渲染**（title 用 `button.title*`） |
 | `src/client/SettingsCard.tsx`、`settings-face.ts` | 设置卡（模型 / 模式 / 语言 / 温度 / 超时 / 上下文） |
 | `lib/` | **构建产物**（esbuild），`lib/client.js` 是 lazy-CJS factory，loader id = 包名 |
+| `smoke.mjs` | 升级后冒烟（`dsh.smoke`）：宿主导出面 / 路由集合 / 客户端 `inject` 契约 + 用宿主 cordis 实际加载插件 |
+| `test/smoke-module.test.mjs` | 冒烟自测（2 条；需要宿主 dsh 的那条在无 dsh 的机器上跳过） |
 
 链路：按钮点击 → `controller.optimize(draft, sessionId)` → 客户端拼上下文（`ctx.sessions` 事件窗口，
 缺席回落 legacy 查询）→ `POST /dsh-prompt-optimizer/optimize`（SSE：`delta` / `done` / `error`）→
@@ -415,7 +417,7 @@ make it two days
 cd dsh-prompt-optimizer
 pnpm install            # pnpm 12 需要 pnpm-workspace.yaml 的 allowBuilds 放行 esbuild
 pnpm run typecheck      # tsc --noEmit，0 错误
-pnpm test               # smoke / prompt / controller / slot-guard / button-state 五套，全绿
+pnpm test               # smoke / prompt / controller / slot-guard / button-state / 冒烟模块六套，全绿
                         # controller 的 c28 锁 lastAnalysis 生命周期（done 写入 / 空值归一 / settle 保留 / close 复位）
 pnpm run build          # 产出 lib/index.js、lib/client.js、lib/prompt.js、lib/controller.js
 node --check lib/index.js && node --check lib/client.js
@@ -429,3 +431,10 @@ node --check lib/index.js && node --check lib/client.js
   `shouldAutoClose`）；删任何一个都会让测试直接报错，这是有意的保护。
 - `test/button-state.test.mjs` 锁 `resolveButtonState` 的优先级与跨会话隔离（7 组断言）；
   调状态机优先级先看它。
+
+`smoke.mjs` 是宿主升级后 `/api/dsh-auto-upgrade/smoke` 跑的行为断言：`exports` 验 `apply` / `inject` /
+`name`，`route-shape` 验两条 exact 路由与本文档一致，`client-inject` 断言**构建产物与源码一致且
+`slots` 在第一位**（当前完整值是 `['slots', 'connection', 'remote']`——后两个是可选服务，
+契约只要求 `slots` 为首，不是「只能有 slots」），`host-load` 从 `ctx.dshDir` 取**宿主实际的 cordis**
+真加载插件。改路由路径、导出面或客户端主 `inject` 时这四条会立刻红；改 `src/client/index.tsx` 的
+主 `inject` 后**必须 `pnpm run build`**，否则 `client-inject` 会抓到源码/产物不一致。

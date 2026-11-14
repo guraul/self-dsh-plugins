@@ -41,6 +41,8 @@
 | `lib/client.js` | 浏览器半边：`conversation.input.right` 单按钮（纯描边图标 + 两色状态）+ 中英字典 + 内联样式 |
 | `scripts/lint.js` | 门禁之一：对 `lib/**`、`test/**` 逐个 `node --check` |
 | `test/*.test.mjs` | 状态机、路由、跨站/loopback 围栏、客户端注册与 store |
+| `smoke.mjs` | 升级后冒烟（`dsh.smoke`）：start/stop 幂等纯逻辑 + 路由形状 + 用宿主 cordis 实际加载插件 |
+| `test/smoke-module.test.mjs` | 冒烟自测（2 条；需要宿主 dsh 的那条在无 dsh 的机器上跳过） |
 
 ## 架构与数据流
 
@@ -82,9 +84,14 @@ caffeinate ──持有──► PreventUserIdleSystemSleep
 
 ```sh
 cd dsh-awake
-node --test "test/*.test.mjs"   # 35 条：状态机 / 路由 / 围栏 / 客户端注册与 store
-node scripts/lint.js            # 11 个文件的 node --check
+node --test "test/*.test.mjs"   # 37 条：35 条行为单测 + 2 条 smoke 自测
+node scripts/lint.js            # lib/ + test/ 全量 node --check
 ```
+
+`smoke.mjs` 是宿主升级后 `/api/dsh-auto-upgrade/smoke` 跑的行为断言：`start-idempotent` /
+`stop-idempotent` 用注入的假 `spawn` 验「重复点不叠进程、stop 只 kill 一次」，`route-shape`
+验三条 exact 路由与 `ARGS` 永不带 `-t`，`host-load` 从 `ctx.dshDir` 取**宿主实际的 cordis**
+真加载插件。它**绝不 spawn 真实 `caffeinate`**；改状态机语义或路由前缀时这几条会立刻红。
 
 单测**绝不 spawn 真实 `caffeinate`**：`createAwakeService({ spawn, wait, now, platform })` 全是注入缝，
 `test/routes.test.mjs` 用假 `webServer.register` + 真 `node:http` 服务驱动路由。
