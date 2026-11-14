@@ -95,6 +95,23 @@ test('客户端源码里有重连 watchdog 与任务日志跟随（交接后页�
   assert.match(source, /E_PLUGIN_INCOMPATIBLE/)
 })
 
+test('设置页收口：试装 / 冒烟 / 兼容三块不再渲染，升级卡只剩两段式四个按钮（#422）', async () => {
+  const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
+  // 删掉的区块连同它们的端点与文案一起消失——留着 key 迟早会被重新贴回来。
+  for (const gone of ['API.probe', 'API.smoke', 'API.plugins', 'settings.probeRun', 'settings.smokeRun', 'settings.pluginsFor']) {
+    assert.ok(!source.includes(gone), `${gone} 应随三块面板一起删除（#422）`)
+  }
+  // 升级卡的四个动作与两段式分项。
+  for (const kept of ['preflight.rerun', 'preflight.start', 'preflight.force', 'preflight.compatLine', 'preflight.probeLine', 'preflight.p3', 'preflight.assembleOnly']) {
+    assert.ok(source.includes(kept), `升级卡缺少 ${kept}`)
+  }
+  // 「兼容」只认 verdict==='ok'（宿主只给 L2+）；拿 p1.ok 数通过会把 L1/待处理冒充兼容。
+  assert.match(source, /plugin\?\.p1\?\.verdict === 'ok'/, '兼容计数必须按 verdict，不许退回 p1.ok')
+  assert.match(source, /plugin\?\.p1\?\.verdict === 'pending'/, 'pending 必须进入待处理行')
+  // blocked 只认明确的 false：缺失 / 旧 schema 一律不许「开始升级」。
+  assert.match(source, /result\?\.blocked !== false/, 'blocked 不能只认 === true')
+})
+
 test('样式继承 dsh 字体，且只用主题里真实存在的 token', async (t) => {
   const anchor = findInstallAnchor()
   if (anchor === undefined) return t.skip('no global @deepseek-ai/dsh installation found')

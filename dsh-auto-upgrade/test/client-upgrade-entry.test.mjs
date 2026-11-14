@@ -196,7 +196,6 @@ const Settings = bySlot('settings.section')
 const Overlay = bySlot('shell.overlay')
 
 const pluginRoutes = {
-  [API.plugins]: { ok: true, plugins: [] },
   [API.restartDiagnostics]: { ok: true, log: [], result: null, payload: null },
 }
 
@@ -491,24 +490,16 @@ test('浮层：门禁拒绝时点名插件，要求最多列 3 条、其余折�
   assert.match(text, /开 issue 记录这个不兼容/)
 })
 
-test('设置页：插件表按判定目标版本取数，并在表头写明按哪个版本评估', async () => {
+test('设置页：兼容性清单撤掉后不再拉 /plugins，阻塞仍由检测结果点名', async () => {
   const { calls } = stubFetch({
     ...pluginRoutes,
     [API.status]: statusWith(RISK_CHECK, { dismissed: true, overlay: false }),
-    [`${API.plugins}?version=0.2.1-rc.4`]: { ok: true, target: '0.2.1-rc.4', plugins: [BRIDGE] },
-    // 未带 version 的那份是宿主按「已装版本」判的，全兼容——用它就会和同屏的升级结论自相矛盾。
-    [API.plugins]: {
-      ok: true,
-      target: '0.2.1-rc.2',
-      plugins: [{ ...BRIDGE, compatible: true, peers: {} }],
-    },
   })
   const text = textOf(await react.mount(Settings, {}))
-  assert.match(text, /已装插件兼容性（按 0\.2\.1-rc\.4 评估）/, '表头必须写明评估版本')
-  assert.match(text, /不兼容/, '必须采用按目标版本判定的那份')
+  assert.doesNotMatch(text, /已装插件兼容性/, '插件兼容清单已删除（#422）')
+  assert.match(text, /不兼容/, '门禁阻塞仍要逐条点名')
   assert.match(text, /开 issue 记录这个不兼容/, '设置页也要有开 issue 入口')
-  assert.ok(calls.some((call) => call.url === `${API.plugins}?version=0.2.1-rc.4`), '必须带 version 取数')
-  assert.ok(!calls.some((call) => call.url === API.plugins), '不该再打未带 version 的旧请求')
+  assert.ok(!calls.some((call) => call.url.startsWith(API.plugins)), '设置页不许再拉插件清单')
 })
 
 test('浮层：点「开 issue」走 report-issue，成功后同块显示 #N 链接', async () => {
@@ -723,122 +714,330 @@ const CALM_STATUS = statusWith(
   { dismissed: true, overlay: false },
 )
 
-test('设置页：试装 / 冒烟两个按钮常驻，无数据时给占位文案（不留空白面板）', async () => {
+/** 升级卡要铺的工具链体检（`GET /preflight` 的 `preflight` 键）。 */
+const PREFLIGHT_FACTS = {
+  dsh: { version: '0.2.1-rc.2' },
+  npm: { command: 'npm install -g @deepseek-ai/dsh@0.2.2-alpha.2' },
+  paths: { backupBase: '/Users/gubin/.dsh-backups' },
+}
+
+/**
+ * 预检结果四类现场：通过（L2）/ 未验证 / 装不上（P1 要求未满足）/ 装配失败（P2 装不上）。
+ * 计数：兼容 2/4（只算 verdict=ok）、待处理 2、试装 1/2、未验证 1 个、blocked。
+ */
+const PREFLIGHT_BLOCKED = {
+  schema: 1,
+  at: Date.UTC(2026, 10, 14, 8, 0, 0),
+  target: '0.2.2-alpha.2',
+  plugins: [
+    {
+      name: 'dsh-awake', version: '0.1.4', enabled: true,
+      p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth: 'L2' },
+      p2: { ok: true, reason: '装配通过' },
+    },
+    {
+      name: 'dsh-usage-panel', version: '0.2.3-fork.1', enabled: true,
+      p1: { ok: true, verdict: 'unverified', requirements: {}, declared: 'unverified', depth: 'L2' },
+      p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
+    },
+    {
+      name: 'dsh-subagents', version: '0.5.0', enabled: true,
+      p1: { ok: false, verdict: 'requirements', requirements: { '@deepseek-ai/dsh-tools': '0.2.1-rc.2' }, declared: 'compatible', depth: 'L2' },
+      p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
+    },
+    {
+      name: 'dsh-plugin-memx', version: '0.3.0', enabled: true,
+      p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth: 'L2' },
+      p2: { ok: false, reason: 'plugin add 退出码 1' },
+    },
+  ],
+  blocked: true,
+  warnings: [],
+}
+
+/** 同一份结果的通过版：只剩一个插件，未 blocked。 */
+const PREFLIGHT_OK = { ...PREFLIGHT_BLOCKED, plugins: [PREFLIGHT_BLOCKED.plugins[0]], blocked: false }
+
+/** 有更新、且已装版本与检测快照一致（不触发过期补检）。 */
+const PLAN_STATUS = statusAt(
+  { date: TODAY, decision: 'update-available', installed: '0.2.1-rc.2', target: '0.2.2-alpha.2', channel: 'alpha', tags: TAGS, incompatible: [] },
+  '0.2.1-rc.2',
+  { dismissed: true, overlay: false },
+)
+
+/**
+ * 在已挂载的元素树里点一个按钮，并把重新渲染后的树交回来。
+ * @param {any} tree 元素树。
+ * @param {string} label 按钮文案。
+ * @returns {Promise<any>} 重新渲染后的树。
+ */
+async function clickButton(tree, label) {
+  const button = collect(tree, (node) => node.type === 'button' && textOf(node) === label)[0]
+  assert.ok(button !== undefined, `找不到按钮 ${label}`)
+  button.props.onClick()
+  return react.flush()
+}
+
+test('设置页：试装 / 冒烟 / 兼容三块面板已删除（按钮与标题都不再渲染）', async () => {
   stubFetch({
     ...pluginRoutes,
-    [API.status]: CALM_STATUS,
-    [API.probe]: { ok: true, running: false, startedAt: null, target: null, error: null, entries: [] },
-    [API.smoke]: { ok: true, running: false, startedAt: null, error: null, at: null, results: [] },
+    [API.status]: {
+      ...CALM_STATUS,
+      capabilities: { restart: true, rollback: true },
+      pendingRestart: { mode: 'upgrade', from: '0.2.0-rc.2', to: '0.2.1-rc.2' },
+    },
   })
   const tree = await react.mount(Settings, {})
   const labels = collect(tree, (node) => node.type === 'button').map((node) => textOf(node))
-  assert.ok(labels.includes('跑一次试装'), `试装按钮缺失：${JSON.stringify(labels)}`)
-  assert.ok(labels.includes('跑一次冒烟'), `冒烟按钮缺失：${JSON.stringify(labels)}`)
+  assert.ok(!labels.includes('跑一次试装'), '「跑一次试装」必须删除（#422）')
+  assert.ok(!labels.includes('跑一次冒烟'), '「跑一次冒烟」必须删除（#422）')
   const text = textOf(tree)
-  assert.ok(text.includes('还没有试装结论'), '无数据时必须显示试装占位文案')
-  assert.ok(text.includes('还没有冒烟结论'), '无数据时必须显示冒烟占位文案')
+  for (const gone of ['试装结论', '冒烟结论', '已装插件兼容性']) {
+    assert.ok(!text.includes(gone), `「${gone}」区块必须删除（#422）`)
+  }
+  // #422 明确保留的控制项还在。
+  for (const kept of ['立即检查', '本机体检', '重启服务', '回滚到 0.2.0-rc.2']) {
+    assert.ok(labels.includes(kept), `保留的控制项缺失：${kept}`)
+  }
 })
 
-test('设置页：进设置页就 GET 一次已缓存的试装 / 冒烟结论，不逼用户先点一次', async () => {
+test('升级卡两段式：目标 + 预检分项 + 逐插件待处理；blocked 时「开始升级」禁用', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: PLAN_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: PREFLIGHT_BLOCKED,
+    },
+  })
+  let tree = await react.mount(Settings, {})
+  tree = await clickButton(tree, '升级')
+  const text = textOf(tree)
+  assert.match(text, /目标 0\.2\.2-alpha\.2（当前 0\.2\.1-rc\.2）/, '第一段：目标版本')
+  assert.match(text, /兼容判定 2\/4 · 2 个待处理/, '只有 verdict=ok（L2+）算兼容；未验证不算')
+  assert.match(text, /试装 1\/2/, '第二段：试装 N/M（跳过的不算进分母）')
+  assert.match(text, /启动预演 未接入（P3）/, 'P3 没接入时必须如实显示「未接入」')
+  assert.match(text, /⚠ dsh-usage-panel 未验证：插件没有记录该版本的验证结论/)
+  assert.match(text, /⚠ dsh-subagents 装不上：@deepseek-ai\/dsh-tools 精确 0\.2\.1-rc\.2/)
+  assert.match(text, /⚠ dsh-plugin-memx 装配失败：plugin add 退出码 1/)
+  assert.doesNotMatch(text, /⚠ dsh-awake/, '通过的插件不逐条占位')
+
+  const planButtons = collect(tree, (node) => node.type === 'button'
+    && ['取消', '重新预检', '开始升级', '仍要升级'].includes(textOf(node)))
+  assert.deepEqual(planButtons.map((node) => textOf(node)), ['取消', '重新预检', '开始升级', '仍要升级'])
+  const byLabel = (label) => planButtons.find((node) => textOf(node) === label)
+  assert.equal(byLabel('开始升级').props.disabled, true, 'blocked 时「开始升级」必须禁用')
+  assert.equal(byLabel('仍要升级').props.disabled, false, '「仍要升级」是留痕出口，保持可用')
+})
+
+test('升级卡：结果缺失时「开始升级」禁用；「仍要升级」带 force:true 提交', async () => {
   const { calls } = stubFetch({
     ...pluginRoutes,
-    [API.status]: CALM_STATUS,
-    [API.probe]: { ok: true, running: false, error: null, entries: [{ version: '0.2.0-rc.2', name: 'dsh-awake', at: Date.now(), ok: true, detail: '装配通过', stale: false }] },
-    [API.smoke]: { ok: true, running: false, error: null, at: Date.now(), results: [{ name: 'dsh-awake', ok: true, partial: false, checks: [] }] },
+    [API.status]: PLAN_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: null,
+    },
+    [API.update]: { ok: false, code: 'E_TEST', error: '测试桩到此为止' },
   })
-  const text = textOf(await react.mount(Settings, {}))
-  assert.equal(calls.filter((call) => call.url === API.probe && call.method === 'GET').length, 1, '进设置页要 GET 一次试装结论')
-  assert.equal(calls.filter((call) => call.url === API.smoke && call.method === 'GET').length, 1, '进设置页要 GET 一次冒烟结论')
-  assert.ok(text.includes('dsh-awake'), '已缓存的结论要直接铺出来')
-  assert.ok(text.includes('装配通过'), '要显示试装结论摘要')
+  let tree = await react.mount(Settings, {})
+  tree = await clickButton(tree, '升级')
+  const text = textOf(tree)
+  assert.match(text, /还没有预检结果/, '结果缺失必须说清楚')
+  const find = (label) => collect(tree, (node) => node.type === 'button' && textOf(node) === label)[0]
+  assert.equal(find('开始升级').props.disabled, true, '结果缺失时不许「开始升级」')
+  assert.equal(find('仍要升级').props.disabled, false)
+
+  tree = await clickButton(tree, '仍要升级')
+  const updates = calls.filter((call) => call.url === API.update && call.method === 'POST')
+  assert.equal(updates.length, 1, '「仍要升级」必须打 /update')
+  assert.deepEqual(JSON.parse(updates[0].body), { version: '0.2.2-alpha.2', force: true })
 })
 
-test('设置页：试装 / 冒烟结论逐插件一行（红绿点 + 插件名 + 结论摘要），明细折叠', async () => {
+test('升级卡：结果通过且未 blocked 时「开始升级」可用，提交不带 force', async () => {
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: PLAN_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: PREFLIGHT_OK,
+    },
+    [API.update]: { ok: false, code: 'E_TEST', error: '测试桩到此为止' },
+  })
+  let tree = await react.mount(Settings, {})
+  tree = await clickButton(tree, '升级')
+  assert.match(textOf(tree), /兼容判定 1\/1/)
+  const start = collect(tree, (node) => node.type === 'button' && textOf(node) === '开始升级')[0]
+  assert.equal(start.props.disabled, false, '通过时「开始升级」必须可点')
+  tree = await clickButton(tree, '开始升级')
+  const updates = calls.filter((call) => call.url === API.update && call.method === 'POST')
+  assert.deepEqual(JSON.parse(updates[0].body), { version: '0.2.2-alpha.2', force: false })
+})
+
+test('升级卡：只到 L1 的插件计入待处理、不算兼容，「开始升级」仍可用（它不阻断）', async () => {
+  const result = {
+    ...PREFLIGHT_BLOCKED,
+    blocked: false,
+    plugins: [
+      PREFLIGHT_BLOCKED.plugins[0],
+      {
+        name: 'dsh-awake-l1', version: '0.1.4', enabled: true,
+        p1: {
+          ok: true, verdict: 'pending', requirements: {}, declared: 'compatible',
+          depth: 'L1', detail: '只到 L1（可装配 · 未验证行为）',
+        },
+        p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
+      },
+    ],
+  }
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: PLAN_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result,
+    },
+  })
+  let tree = await react.mount(Settings, {})
+  tree = await clickButton(tree, '升级')
+  const text = textOf(tree)
+  assert.match(text, /兼容判定 1\/2 · 1 个待处理/, 'L1 不能算进兼容判定')
+  assert.match(text, /⚠ dsh-awake-l1 可装配 · 未验证行为：只到 L1：装配通过，但行为没有验证过/)
+  assert.doesNotMatch(text, /⚠ dsh-awake /, 'L2 通过的插件不逐条占位')
+  const start = collect(tree, (node) => node.type === 'button' && textOf(node) === '开始升级')[0]
+  assert.equal(start.props.disabled, false, 'pending 只是警告，不阻断升级')
+})
+
+test('升级卡：缺 blocked 字段（旧 schema / 结果残缺）时「开始升级」也必须禁用', async () => {
+  const { blocked: _blocked, ...legacy } = PREFLIGHT_OK
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: PLAN_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: legacy,
+    },
+  })
+  let tree = await react.mount(Settings, {})
+  tree = await clickButton(tree, '升级')
+  const start = collect(tree, (node) => node.type === 'button' && textOf(node) === '开始升级')[0]
+  assert.equal(start.props.disabled, true, 'blocked 只认明确的 false，未知不许当通过')
+})
+
+test('升级卡：重新预检走 POST 并轮询 GET，结果回来后才替换卡片', async () => {
+  let gets = 0
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: PLAN_STATUS,
+    [API.preflight]: () => {
+      const call = calls[calls.length - 1]
+      if (call.method === 'POST') {
+        return { status: 202, json: async () => ({ ok: true, startedAt: Date.now(), target: '0.2.2-alpha.2', taskId: 'p-1' }) }
+      }
+      gets += 1
+      // 1 = 进页、2 = 打开升级卡：都还没有结果；3 = POST 后的第一拍仍在跑；4 = 写完。
+      const payload = {
+        ok: true,
+        preflight: PREFLIGHT_FACTS,
+        runner: { running: gets === 3, startedAt: null, target: null, error: null },
+        result: gets >= 4 ? PREFLIGHT_OK : null,
+      }
+      return { status: 200, json: async () => payload }
+    },
+  })
+  let tree = await react.mount(Settings, {})
+  tree = await clickButton(tree, '升级')
+  assert.match(textOf(tree), /还没有预检结果/)
+
+  tree = await clickButton(tree, '重新预检')
+  assert.match(textOf(tree), /预检正在跑/, 'POST 之后要如实显示正在跑')
+  assert.equal(
+    calls.filter((call) => call.url === API.preflight && call.method === 'POST').length,
+    1,
+    '「重新预检」必须 POST 一次',
+  )
+
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  tree = await react.flush()
+  assert.match(textOf(tree), /兼容判定 1\/1/, '轮询到结论后必须替换卡片')
+  assert.doesNotMatch(textOf(tree), /预检正在跑/)
+  assert.ok(gets >= 4, `必须轮询到 runner 停下，实际 GET 了 ${String(gets)} 次`)
+})
+
+test('设置页底部：预检摘要一行可展开，逐插件原因与目标/时间都在', async () => {
   stubFetch({
     ...pluginRoutes,
     [API.status]: CALM_STATUS,
-    [API.probe]: {
+    [API.preflight]: {
       ok: true,
-      running: false,
-      error: null,
-      entries: [
-        { version: '0.2.2-alpha.2', name: 'dsh-awake', at: Date.now(), ok: true, detail: '装配通过', stale: false },
-        { version: '0.2.2-alpha.2', name: 'dsh-usage-panel', at: Date.now(), ok: false, detail: 'plugin add 退出码 1', stale: true },
-      ],
-    },
-    [API.smoke]: {
-      ok: true,
-      running: false,
-      error: null,
-      at: Date.now(),
-      results: [
-        { name: 'dsh-awake', ok: true, partial: true, checks: [{ name: 'bundle', ok: true, detail: '在 dsh.profile.bundles 里启用' }] },
-        { name: 'dsh-subagents', ok: false, partial: false, detail: '插件自报 ok=false', checks: [{ name: 'bundle', ok: false, detail: '没被 profile 启用（插件不会被加载）' }] },
-      ],
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: PREFLIGHT_BLOCKED,
     },
   })
   const tree = await react.mount(Settings, {})
   const text = textOf(tree)
-  for (const name of ['dsh-awake', 'dsh-usage-panel', 'dsh-subagents']) {
-    assert.ok(text.includes(name), `逐插件一行必须出现插件名 ${name}`)
-  }
-  assert.ok(text.includes('装配通过'), '试装行要有结论摘要')
-  assert.ok(text.includes('结论已过期'), '过期的试装结论必须标出来')
-  assert.ok(text.includes('只验了兜底三项，行为未验证'), 'partial 冒烟要说明行为未验证')
-  assert.ok(text.includes('插件自报 ok=false'), '失败冒烟要带上宿主给的摘要')
-  const dots = collect(tree, (node) => node.type === 'span'
-    && typeof node.props?.className === 'string'
-    && /^dsh-au-(ok|bad)$/.test(node.props.className)
-    && textOf(node).startsWith('●'))
-  assert.ok(dots.some((node) => node.props.className === 'dsh-au-ok'), '缺绿点（通过）')
-  assert.ok(dots.some((node) => node.props.className === 'dsh-au-bad'), '缺红点（失败）')
-  const folds = collect(tree, (node) => node.type === 'details')
-  assert.ok(folds.length >= 4, `明细必须折叠在 <details> 里：${String(folds.length)}`)
-  assert.ok(text.includes('检查明细'), '冒烟明细要有折叠入口')
+  assert.match(text, /最近一次预检：3 个问题 · 4 个插件（1 个未验证）/)
+  const summary = collect(tree, (node) => node.type === 'details' && textOf(node).includes('最近一次预检'))
+  assert.equal(summary.length, 1, '摘要必须是一个可展开的 details')
+  const body = textOf(summary[0])
+  assert.match(body, /目标 0\.2\.2-alpha\.2 · 结论时间/)
+  assert.match(body, /⚠ dsh-subagents 装不上：/)
+  assert.match(body, /⚠ dsh-plugin-memx 装配失败：plugin add 退出码 1/)
+  // 摘要必须贴在设置页底部（最后一个面板）。
+  const panels = collect(tree, (node) => node.props?.className === 'dsh-au-panel')
+  assert.match(textOf(panels[panels.length - 1]), /最近一次预检/)
 })
 
-test('设置页：点按钮走 POST 触发、随后 GET 取结论', async () => {
-  const { calls } = stubFetch({
+test('设置页底部：只有 inventory 警告算「清单读取失败」，p3-failed 不被误标', async () => {
+  stubFetch({
     ...pluginRoutes,
     [API.status]: CALM_STATUS,
-    [API.probe]: { ok: true, running: false, error: null, entries: [] },
-    [API.smoke]: { ok: true, running: false, error: null, results: [] },
-  })
-  let tree = await react.mount(Settings, {})
-  const click = async (label) => {
-    const button = collect(tree, (node) => node.type === 'button' && textOf(node) === label)[0]
-    assert.ok(button !== undefined, `找不到按钮 ${label}`)
-    button.props.onClick()
-    tree = await react.flush()
-  }
-  await click('跑一次试装')
-  await click('跑一次冒烟')
-  assert.equal(calls.filter((call) => call.url === API.probe && call.method === 'POST').length, 1, '试装按钮必须 POST 触发')
-  assert.equal(calls.filter((call) => call.url === API.smoke && call.method === 'POST').length, 1, '冒烟按钮必须 POST 触发')
-  assert.ok(calls.filter((call) => call.url === API.probe && call.method === 'GET').length >= 2, 'POST 之后必须再 GET 取结论')
-  assert.ok(calls.filter((call) => call.url === API.smoke && call.method === 'GET').length >= 2, 'POST 之后必须再 GET 取结论')
-})
-
-test('设置页：挂载时那一轮还在跑 → 接着轮询到结束再铺新结论（文案不许假承诺）', async () => {
-  const { calls } = stubFetch({
-    ...pluginRoutes,
-    [API.status]: CALM_STATUS,
-    // 前两次 GET（挂载那次 + 轮询前那次）都还在跑，第三次才写完结论。
-    [API.probe]: () => {
-      const payload = calls.filter((call) => call.url === API.probe && call.method === 'GET').length < 3
-        ? { ok: true, running: true, startedAt: Date.now(), target: '0.2.0-rc.2', error: null, entries: [] }
-        : { ok: true, running: false, startedAt: null, target: null, error: null, entries: [{ version: '0.2.0-rc.2', name: 'dsh-awake', at: Date.now(), ok: true, detail: '装配通过', stale: false }] }
-      return { status: 200, json: async () => payload }
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: {
+        ...PREFLIGHT_BLOCKED,
+        warnings: [
+          { plugin: null, kind: 'inventory', reason: 'ENOENT: preflight.json' },
+          { plugin: null, kind: 'p3-failed', reason: '启动预演超时' },
+        ],
+      },
     },
-    [API.smoke]: { ok: true, running: false, startedAt: null, error: null, results: [] },
   })
-  const duringRun = textOf(await react.mount(Settings, {}))
-  assert.ok(duringRun.includes('试装正在跑'), '还在跑时要如实显示「正在跑」')
-  // 轮询节奏 2s 一轮：等它跑到「跑完」那一拍再看。
-  await new Promise((resolve) => setTimeout(resolve, 2600))
-  const settled = textOf(await react.flush())
-  const probeGets = calls.filter((call) => call.url === API.probe && call.method === 'GET').length
-  assert.ok(probeGets >= 3, `挂载路径必须继续轮询，实际只 GET 了 ${String(probeGets)} 次`)
-  assert.ok(settled.includes('dsh-awake'), '轮询结束后必须铺出新结论')
-  assert.ok(!settled.includes('试装正在跑'), '跑完就不该再挂着「正在跑」')
+  const tree = await react.mount(Settings, {})
+  const summary = collect(tree, (node) => node.type === 'details' && textOf(node).includes('最近一次预检'))
+  assert.equal(summary.length, 1, '摘要必须是一个可展开的 details')
+  const body = textOf(summary[0])
+  // 3 个逐插件待处理 + 1 条 inventory 警告；p3-failed 不计入、也不渲染成清单读取失败。
+  assert.match(body, /最近一次预检：4 个问题 · 4 个插件（1 个未验证）/)
+  assert.match(body, /清单读取失败：ENOENT: preflight\.json/)
+  assert.doesNotMatch(body, /启动预演超时/, 'p3-failed 与清单读取无关，不能被误标')
+})
+
+test('设置页底部：还没有预检结果时摘要如实说「还没跑过」，不编数字', async () => {
+  stubFetch({
+    ...pluginRoutes,
+    [API.status]: CALM_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: null,
+    },
+  })
+  const text = textOf(await react.mount(Settings, {}))
+  assert.match(text, /最近一次预检：还没有跑过/)
+  assert.doesNotMatch(text, /最近一次启动检查/, 'boot-check 还没有端点，不许先写半截')
 })
