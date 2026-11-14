@@ -779,7 +779,8 @@ export function apply(ctx, config = {}) {
               const p3 = home === null
                 ? { ok: true, launch: 'ok', entries: {} }
                 : await runRehearsal({
-                  dshBin: installation.dshBin,
+                  targetVersion: target,
+                  npmBin: installation.npm,
                   dshHome: home,
                   profileName: PROBE_PROFILE_NAME,
                   entries: targets.map((item) => item.name).filter((name) => enabled.has(name)),

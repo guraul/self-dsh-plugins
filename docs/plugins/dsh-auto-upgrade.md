@@ -152,7 +152,8 @@ pnpm run check                                # node --check
   - `p2`：只对 `link:` / `file:` 依赖做一次性 `DSH_HOME` 真装；装不上即 `ok: false` 并阻断。
     其余插件为 `{ok: true, skipped: true, reason}`。
   - `p3`：P3 启动预演结果，**永远不参与 `blocked`**。
-    - `launch`：`'ok'`（dsh 跑完且日志无 `StartupError`）或 `'failed'`（退出码非 0 / 超时 90s /
+    - `launch`：`'ok'`（目标版本 dsh 的 web 真的起来、探针跑完且日志无 `StartupError`）或
+      `'failed'`（目标版本装不上 / 启动器抛错 / 退出码非 0 / 90s 内 web 端口不可访问或探针没跑完 /
       日志出现 `StartupError`，原因在 `error` 里）。
     - `entries`：`{插件包名: 'active' | 'inactive'}`。`active` 来自真实启动后 Loader 条目状态
       （预演时通过 `--patch` 注入一个极小探针，等 `appReady` 后遍历 `ctx.loader.entries()`）；
@@ -176,9 +177,19 @@ pnpm run check                                # node --check
 
   ⚠️ `force` **只**跳过预检门禁，不改变上表里 P1 硬门禁的行为：目标版本与已装插件不兼容时仍然
   `409 E_PLUGIN_INCOMPATIBLE`。
-- **P3 的范围**：同一个一次性 `DSH_HOME` 里真启动一次，不启动 3080 / 不连 registry；超时上限 90s。
-  插件自身的外部连接不由预演拦截。目标版本二进制落盘仍沿用 P2 的 dsh 可执行文件解析方式，
-  单独安装目标版本 dsh 留给后续 PR。
+- **P3 的范围**：同一个一次性 `DSH_HOME` 里真启动一次，不启动 3080、不碰全局安装；超时上限 90s。
+  - 目标版本二进制单独落盘：`npm install --prefix <一次性 HOME>/.dsh-rehearsal-target
+    @deepseek-ai/dsh@<target>`（安装上限 180s），用装出来的 `node_modules/.bin/dsh` 启动。
+    **装不上就是 `launch: 'failed'`，不回退到当前宿主二进制**（否则会把「目标版本起不来」伪装成
+    「起得来」）。
+  - 启动形态：`dsh --profile <probe> --patch <overlay> --port 0 --no-open`。预演会把一次性
+    profile 的 `dsh.profile.bundles` 前面补 `@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-web-app`，
+    否则 profile 挂完插件就退出、永远不打印 URL。⚠️ 不能写 `dsh web --profile <probe>`：
+    `dsh web` 会展开成 `--profile web`，再加 `--profile` 会报
+    `select a profile only once`（0.2.2-rc.3 实测）；`dsh --profile <probe> … --port 0` 是等价形态。
+  - 端口从 stdout 的 `dsh web: http://127.0.0.1:<port>/?token=…` 解析（只取 origin + port，
+    **token 不落日志、不进错误文案**），轮询 `/` 直到有响应（401 也算起来）。
+  - 插件自身的外部连接不由预演拦截。
 - **未实现**：逐插件处置动作（升级 / 应用声明 / 临时禁用 / 自愈）与 GUI / 进度页接入留给后续 PR。
 
 ## 过期缓存不算结论（0.2.4，issue #100）
