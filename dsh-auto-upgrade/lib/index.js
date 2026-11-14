@@ -12,7 +12,8 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { readdir, readFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -30,6 +31,7 @@ import {
   runProbePass,
   writePreflight,
 } from './host/preflight-run.js'
+import { runRehearsal } from './host/rehearse.js'
 import { collectLoaderNames, createInjectResolver, officialInjectSeeds, platformSeedsFromStaticModules, runSmokes } from './host/smoke.js'
 import { appendCompatRow, buildRefillPlan, compatRow, patchCompatibility } from './host/refill.js'
 import { openRefillPullRequest } from './host/refill-pr.js'
@@ -644,9 +646,10 @@ export function apply(ctx, config = {}) {
      * 一次性 `DSH_HOME` 里的试装（/probe 与预检 P2 共用同一执行器）。
      * @param {{name:string, path:string, id?:string}[]} targets 试装项。
      * @param {string} targetVersion 目标版本（进缓存键）。
+     * @param {string} [home] 复用的一次性 `DSH_HOME`（预检要把 P3 放在同一个 HOME 里）。
      * @returns {Promise<{results:object[]}>} 逐插件结论。
      */
-    const executeProbeTargets = async (targets, targetVersion) => {
+    const executeProbeTargets = async (targets, targetVersion, home) => {
       if (targets.length === 0) return { results: [] }
       if (installation === undefined) throw new RequestError(500, CODE.PRECONDITION, installationError ?? 'dsh installation is unresolved')
       const { results } = await runProbePass({
@@ -655,6 +658,7 @@ export function apply(ctx, config = {}) {
         dshBin: installation.dshBin,
         profileName: PROBE_PROFILE_NAME,
         cachePath: probeCachePath,
+        ...(home === undefined ? {} : { home }),
         run: async (command, args, options) => {
           const result = await run(command, args, { ...options, timeoutMs: 180000 })
           return { status: result.code, stdout: result.stdout }
@@ -751,6 +755,7 @@ export function apply(ctx, config = {}) {
           preflightRun.target = target
           writeJson(res, 202, { ok: true, startedAt: preflightRun.startedAt, target, taskId: task.id })
           void (async () => {
+            let home = null
             try {
               task.append(`目标：${target}`)
               const evaluated = await inspectPlugins(target)
@@ -762,11 +767,29 @@ export function apply(ctx, config = {}) {
                 throw new Error(`读 profile 依赖失败：${error instanceof Error ? error.message : String(error)}`)
               }
               if (targets.length > 0) task.append(`P2：试装 ${targets.length} 个 link:/file: 插件`)
-              const { results } = await executeProbeTargets(targets, target)
+              // P2 与 P3 共用同一个一次性 HOME：P3 直接启动 P2 刚装好的 profile。
+              home = targets.length > 0 ? await mkdtemp(join(tmpdir(), 'dsh-au-preflight-')) : null
+              const { results } = await executeProbeTargets(targets, target, home ?? undefined)
+              // P3 只警告：启动失败 / 条目没起来都不改 blocked。
+              task.setPhase('rehearse')
+              task.append('P3：启动预演')
+              const enabled = new Set(
+                evaluated.plugins.filter((plugin) => plugin.enabled !== false).map((plugin) => plugin.name),
+              )
+              const p3 = home === null
+                ? { ok: true, launch: 'ok', entries: {} }
+                : await runRehearsal({
+                  dshBin: installation.dshBin,
+                  dshHome: home,
+                  profileName: PROBE_PROFILE_NAME,
+                  entries: targets.map((item) => item.name).filter((name) => enabled.has(name)),
+                })
+              task.append(p3.ok ? 'P3：启动预演通过' : `P3：启动预演有警告${p3.error === undefined ? '' : `（${p3.error}）`}`)
               const result = aggregatePreflight({
                 target,
                 evaluated,
                 probes: results,
+                p3,
                 inventoryError: evaluated.inventoryError,
               })
               await writePreflight(stateDir, result)
@@ -780,6 +803,7 @@ export function apply(ctx, config = {}) {
               console.warn(`[dsh-auto-upgrade] 预检失败：${preflightError}`)
               task.finish({ ok: false, error: preflightError })
             } finally {
+              if (home !== null) await rm(home, { recursive: true, force: true }).catch(() => {})
               preflightRun = null
             }
           })()
