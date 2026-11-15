@@ -112,9 +112,12 @@ pnpm run check                                # node --check
 
 | 情况 | 行为 |
 |---|---|
-| 有会话在跑 | `409 E_SESSIONS_RUNNING`，`detail.bypassable = true` —— 前端弹警告，确认后可带 `force` 继续 |
+| 有会话在跑 | `409 E_SESSIONS_RUNNING`，`detail.bypassable = true` —— 前端弹警告，确认后带 `confirmSessions: true` 继续（只跳过本条，不影响其他门禁、不留痕）；「仍要升级」带 `force` |
 | 已装插件与**目标版本**不兼容 | `409 E_PLUGIN_INCOMPATIBLE`，`detail.bypassable = false` —— 不可绕过 |
 | 预检结果缺失或 `blocked` | `409 E_PREFLIGHT`，`detail.bypassable = true` —— `force` 跳过并写 `force-audit.jsonl` 留痕 |
+
+`confirmSessions` 与 `force` 是**两个不同出口**（#428）：前者只表示「确认中断正在跑的会话」，
+**不**跳过预检门禁、**不**写 `force-audit.jsonl`；后者才是「强制升级」（跳过预检门禁并留痕）。
 
 ## 升级预检管线（P1 兼容 + P2 试装 + P3 启动预演，#421 / #425）
 
@@ -195,7 +198,8 @@ pnpm run check                                # node --check
 ```
 
   ⚠️ `force` **只**跳过预检门禁，不改变上表里 P1 硬门禁的行为：目标版本与已装插件不兼容时仍然
-  `409 E_PLUGIN_INCOMPATIBLE`。
+  `409 E_PLUGIN_INCOMPATIBLE`。`confirmSessions: true` 则**不**参与本门禁：它只跳过「有会话在跑」，
+  预检结果缺失 / `blocked` 时照样 `409 E_PREFLIGHT`，也不写 `force-audit.jsonl`（#428）。
 - **P3 的范围**：同一个一次性 `DSH_HOME` 里真启动一次，不启动 3080、不碰全局安装；超时上限 90s。
   - 目标版本二进制单独落盘：`npm install --prefix <一次性 HOME>/.dsh-rehearsal-target
     @deepseek-ai/dsh@<target>`（安装上限 180s），用装出来的 `node_modules/.bin/dsh` 启动。
@@ -209,8 +213,8 @@ pnpm run check                                # node --check
   - 端口从 stdout 的 `dsh web: http://127.0.0.1:<port>/?token=…` 解析（只取 origin + port，
     **token 不落日志、不进错误文案**），轮询 `/` 直到有响应（401 也算起来）。
   - 插件自身的外部连接不由预演拦截。
-  ⚠️ 已知欠账（#428）：GUI 的「有会话正在跑」确认框目前仍复用 `force: true`，因此会**顺带**跳过
-  预检门禁并写一条 `force-audit`。宿主补上 `confirmSessions: true` 后客户端再改成只带该字段。
+  - GUI 的「有会话正在跑」确认框带 `confirmSessions: true`（只确认中断会话），不再复用 `force`；
+    「仍要升级」仍带 `force: true`（#428）。
 - **未实现**：逐插件处置动作（升级 / 应用声明 / 临时禁用 / 自愈）与进度页接入留给后续 PR；
   GUI 的升级卡已在 #422 接入，但**尚未展示 P3 结论**（界面仍写「启动预演 未接入（P3）」，见下节）。
 

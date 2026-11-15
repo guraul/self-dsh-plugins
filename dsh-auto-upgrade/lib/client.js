@@ -697,7 +697,7 @@ window.__ModuleLoader__.load({
      * 升级流程控制器：预检 → 更新说明 → 提交 → 两条门禁 → 交接 watchdog。
      * 浮层与设置页各自造一个，但跑的是**同一份代码**（只注入各自的 state），避免两处漂移。
      * @param {object} io 界面接口：`t` / `watchRef` / `getTarget` 与各自的 state setter。
-     * @returns {{openPlan:(target:string|null)=>Promise<void>, rerun:(target:string|null)=>Promise<void>, submit:(force:boolean)=>Promise<void>, switchChannel:(channel:string)=>Promise<void>}} 控制器。
+     * @returns {{openPlan:(target:string|null)=>Promise<void>, rerun:(target:string|null)=>Promise<void>, submit:(options?:{force?:boolean, confirmSessions?:boolean})=>Promise<void>, switchChannel:(channel:string)=>Promise<void>}} 控制器。
      */
     function createUpgradeFlow(io) {
       const followTask = makeTaskFollower(io.setHandoff)
@@ -784,14 +784,22 @@ window.__ModuleLoader__.load({
 
       /**
        * 提交升级；会话门禁是「警告可强制」，插件不兼容则拒绝且不可绕过。
-       * @param {boolean} force 是否已在会话警告上确认。
+       *
+       * 两个出口语义不同：`confirmSessions` 只确认「中断正在跑的会话」，**不**跳过预检门禁、
+       * 不留 `force-audit` 痕迹；`force` 是「仍要升级」，会跳过预检门禁并留痕（#428）。
+       * @param {{force?:boolean, confirmSessions?:boolean}} [options] 确认选项。
        * @returns {Promise<void>} 完成后刷新界面。
        */
-      const submit = async (force) => {
+      const submit = async (options = {}) => {
+        const force = options.force === true
+        const confirmSessions = options.confirmSessions === true
         io.setBusy(true)
         const result = await request(API.update, {
           method: 'POST',
-          body: { version: io.getTarget(), force: force === true },
+          // 会话确认只带 `confirmSessions`：复用 `force` 会顺带绕过预检门禁并写一条假留痕。
+          body: confirmSessions
+            ? { version: io.getTarget(), confirmSessions: true }
+            : { version: io.getTarget(), force },
         })
         io.setBusy(false)
         if (result.ok === true) {
@@ -809,12 +817,11 @@ window.__ModuleLoader__.load({
           startWatchdog(io.watchRef, io.getTarget() ?? null, (state) => io.setHandoff((previous) => ({ ...(previous ?? { log: [] }), step: state })))
           return
         }
-        if (result.code === 'E_SESSIONS_RUNNING' && result.detail?.bypassable === true && force !== true) {
+        if (result.code === 'E_SESSIONS_RUNNING' && result.detail?.bypassable === true && force !== true && confirmSessions !== true) {
           const count = result.detail?.sessions?.length ?? 0
           if (window.confirm(io.t('overlay.sessionsWarning', { count }))) {
-            // TODO(#428): 只确认「中断会话」应该带 `confirmSessions: true`，别复用 `force: true`
-            // （它会连预检门禁一起跳过并写 force-audit）。宿主当前没有这个字段，先保留现状。
-            await submit(true)
+            // 只确认「中断会话」：带 `confirmSessions: true`，别复用 `force`（#428）。
+            await submit({ confirmSessions: true })
           }
           return
         }
@@ -1430,10 +1437,10 @@ window.__ModuleLoader__.load({
           busy,
           confirmClass: 'dsh-au-btn dsh-au-primary',
           cancelClass: 'dsh-au-btn',
-          onConfirm: () => flow.submit(false),
+          onConfirm: () => flow.submit({}),
           onCancel: () => setPlan(null),
           onRerun: () => flow.rerun(plan.target ?? null),
-          onForce: () => flow.submit(true),
+          onForce: () => flow.submit({ force: true }),
         }))
       } else {
         if (decision === 'update-available' || decision === 'update-with-plugin-risk') {
@@ -1728,10 +1735,10 @@ window.__ModuleLoader__.load({
           busy,
           confirmClass: 'dsh-au-selectbtn dsh-au-selectbtn-primary',
           cancelClass: 'dsh-au-selectbtn',
-          onConfirm: () => flow.submit(false),
+          onConfirm: () => flow.submit({}),
           onCancel: () => setPlan(null),
           onRerun: () => flow.rerun(plan.target ?? null),
-          onForce: () => flow.submit(true),
+          onForce: () => flow.submit({ force: true }),
         }) : null,
         // 降级护栏的出路：本机 / 渠道最新版 + 「切到 <建议渠道>」。
         decision === 'downgrade-guard' ? h('div', { key: 'downgrade', className: 'dsh-au-panel' }, [

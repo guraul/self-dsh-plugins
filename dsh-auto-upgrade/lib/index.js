@@ -324,13 +324,16 @@ export function apply(ctx, config = {}) {
 
   /**
    * 升级门禁：会话（可强制继续）与插件不兼容（不升级，只警告）。
-   * @param {{targetVersion:string, force?:boolean}} options 输入。
+   *
+   * 会话门禁有两个出口：`force`（强制升级，同时跳预检门禁并留痕）与
+   * `confirmSessions`（只确认中断会话，**不**影响预检门禁、**不**留痕，#428）。
+   * @param {{targetVersion:string, force?:boolean, confirmSessions?:boolean}} options 输入。
    * @returns {Promise<{sessions:object, plugins:object}>} 通过门禁时返回现场事实。
    * @throws {RequestError} 409。
    */
   const assertUpgradeAllowed = async (options) => {
     const sessions = listRunningSessions(getAgents())
-    if (options.force !== true && sessions.sessions.length > 0) {
+    if (options.force !== true && options.confirmSessions !== true && sessions.sessions.length > 0) {
       throw new RequestError(
         409,
         CODE.SESSIONS_RUNNING,
@@ -1355,7 +1358,12 @@ export function apply(ctx, config = {}) {
         // 注意：它**不**取代下面的 P1 硬门禁（不兼容插件仍然不可绕过）。
         await assertPreflightAllowed({ target, installed, force: body.force === true })
 
-        await assertUpgradeAllowed({ targetVersion: target, force: body.force === true })
+        // `confirmSessions` 只跳过「有会话在跑」：预检门禁已在上面按 `force` 判定过（#428）。
+        await assertUpgradeAllowed({
+          targetVersion: target,
+          force: body.force === true,
+          confirmSessions: body.confirmSessions === true,
+        })
 
         const task = tasks.start('update', { from: installed ?? null, to: target })
         task.setPhase('preflight')
