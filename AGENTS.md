@@ -59,6 +59,7 @@
 | [`dsh-subagents/`](./dsh-subagents) | `dsh-plugin-subagents` | 角色化子代理层：角色（executor / reviewer）× 接入形态（A/B/C），共享判定契约 | **原创**（替代 fork `dsh-plugin-product-subagents`） |
 | [`dsh-prompt-optimizer/`](./dsh-prompt-optimizer) | `@y1x1n/dsh-prompt-optimizer` | 发送栏纯图标按钮，一键优化提示词并直接写回输入框（线性图标 + 内联 loading，无弹出面板） | **fork**（npm `@y1x1n/dsh-prompt-optimizer@0.6.1`，`0.6.1-fork.1`） |
 | [`dsh-usage-panel/`](./dsh-usage-panel) | `dsh-usage-panel` | 用量面板：设置页「消耗统计」展示 Token 用量 KPI、活跃热力图、按模型堆叠柱状图与模型环形图，只读聚合会话日志、不回写 | **fork**（`AlfredChaos/dsh-usage-panel` v0.2.3，本地 `0.2.3-fork.1`） |
+| [`dsh-go-quota/`](./dsh-go-quota) | `dsh-go-quota` | 输入框下方统计行里的额度 pill：直查 OpenCode GO 官方用量接口（`/zen/go/v1/usage`），点开显示 5 小时 / 本周 / 本月三个窗口 | **原创** |
 
 顶层其它文件：[`README.md`](./README.md)（对外说明）、[`upgrade-dsh.sh`](./upgrade-dsh.sh)（全局 dsh 升级/回滚/恢复）、
 [`dsh-web-stop.sh`](./dsh-web-stop.sh)（停服）、[`.dsh-web/`](./.dsh-web)（LaunchAgent 与重启脚本）、

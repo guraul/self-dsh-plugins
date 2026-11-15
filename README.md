@@ -15,6 +15,7 @@
 | [`dsh-subagent-policy-fallback/`](./dsh-subagent-policy-fallback) | `dsh-subagent-policy-fallback` | host-only：给种子 / 恢复会话补 `subagent/model-selection-policy`，让这些会话里的 subagent 也能显式选 `provider/model` | 可用（门禁全绿；真机恢复会话未验收） |
 | [`dsh-subagents/`](./dsh-subagents) | `dsh-plugin-subagents` | 角色化子代理层：角色（`executor` / `reviewer`）× 接入形态（A 原生 / B 委派 CLI / C 伪模型），三种形态共享同一份判定契约 | 开发中（PR2 交付骨架 + 角色层 + 契约层；宿主侧注册与挂载在 PR4） |
 | [`dsh-prompt-optimizer/`](./dsh-prompt-optimizer) | `@y1x1n/dsh-prompt-optimizer` | 发送栏纯图标按钮：一键优化提示词，完成后直接写回输入框（fork：线性图标 / 去文案 / 内联 loading，无弹出面板） | 可用（`0.6.1-fork.1`，门禁全绿；真机 GUI 手点未做） |
+| [`dsh-go-quota/`](./dsh-go-quota) | `dsh-go-quota` | 输入框下方统计行里的额度 pill：直查 OpenCode GO 官方用量接口，点开显示 5 小时 / 本周 / 本月三个窗口 | 开发中（宿主单测全绿；真机 GUI 未验收） |
 
 ## 文档地图
 
@@ -87,6 +88,19 @@
 - 面向 agent 的工作约定：[`docs/plugins/dsh-auto-upgrade.md`](./docs/plugins/dsh-auto-upgrade.md)
 
 ---
+
+## dsh-go-quota
+
+**来源：纯原创。**
+
+在聊天输入框下方那一行统计 pill 末尾追加一枚**额度** pill，显示 OpenCode GO 套餐 5 小时滚动窗口的已用百分比；
+点开是与上下文浮层同样式的面板，列出 5 小时 / 本周 / 本月三个窗口与各自的重置倒计时。
+
+数据直查官网 `GET https://opencode.ai/zen/go/v1/usage`（Bearer 凭据，key 留在宿主进程，浏览器只拿归一化 JSON），
+不统计本地会话日志，也不抓控制台页面。接口只返回百分比，没有美元金额；该路由官方未公开文档，字段变化时显示「额度不可用」
+而不是 0%。
+
+只在挂载与展开时查询（宿主缓存 30 秒），不做后台轮询；不消耗套餐额度。
 
 ## dsh-external-discuss
 

@@ -22,7 +22,8 @@
       "dsh-subagent-policy-fallback",
       "dsh-plugin-memx",
       "dsh-awake",
-      "dsh-usage-panel"
+      "dsh-usage-panel",
+      "dsh-go-quota"
     ],
     "exclude": ["tools"]
   }
