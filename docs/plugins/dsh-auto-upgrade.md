@@ -92,10 +92,11 @@ pnpm run check                                # node --check
 > 本插件是仓库内**唯一有 `.npmrc`、且只有 `pnpm-lock.yaml`** 的插件（`dsh-auto-upgrade/.npmrc` 指向共享 store）。
 
 `smoke.mjs` 是宿主升级后 `/api/dsh-auto-upgrade/smoke` 跑的行为断言：`preflight` 用 fixture 锁
-`aggregatePreflight()` 的稳定结论（`depth` / `pending` 口径：只有 L2+ 算通过，L1 或没记深度只警告），
-`gate` 锁 `/update` 前置门禁的三分支，`official-api` 从 `ctx.dshDir` 解析**宿主实际安装**的
-`@deepseek-ai/dsh-app-boot`，断言 `evaluatePluginCompatibility` / `readProfileVersionExemptions`
-仍存在且判定可用。**不要 import 插件自己 `node_modules` 里的旧副本**——那会在升级后继续绿，等于没验。
+`aggregatePreflight()` 的稳定结论（P1 只有 `ok` / `incompatible` 两态——只看官方声明范围是否覆盖
+目标版本，不读兼容台账），`gate` 锁 `/update` 前置门禁的三分支，`official-api` 从 `ctx.dshDir` 解析
+**宿主实际安装**的 `@deepseek-ai/dsh-app-boot`，断言 `evaluatePluginCompatibility` /
+`readProfileVersionExemptions` 仍存在且判定可用。**不要 import 插件自己 `node_modules` 里的旧副本**
+——那会在升级后继续绿，等于没验。
 
 ## 测试约定
 
@@ -130,7 +131,7 @@ pnpm run check                                # node --check
 
 ```json
 {
-  "schema": 2,
+  "schema": 3,
   "at": 1763100000000,
   "target": "0.2.2-rc.2",
   "plugins": [
@@ -140,10 +141,7 @@ pnpm run check                                # node --check
       "enabled": true,
       "p1": {
         "ok": true,
-        "verdict": "ok",
-        "requirements": {},
-        "declared": "compatible",
-        "depth": "L2"
+        "verdict": "ok"
       },
       "p2": { "ok": true, "reason": "装配通过（新增 dsh-awake）" }
     }
@@ -160,14 +158,13 @@ pnpm run check                                # node --check
 }
 ```
 
-  - `p1.verdict`：`ok` / `pending` / `requirements`（官方门禁要求未满足，**阻断**）/ `unverified`
-    （manifest 读不到或插件自述从未验证，**只警告**）。
-    - **`ok` 只给 L2 及以上**（`dshDepth` 记录到 L2 / L3 / L4）；门禁放行但只到 `L1`、或压根没记
-      深度时降级为 `pending`——「可装配 · 未验证行为」不是兼容，GUI 把它计入待处理而不是通过。
-    - `p1.depth` 原样取自 `dsh.compatibility.dshDepth[<目标版本>]`，没记录 / 非法值就**不写这个字段**
-      （旧消费方看不到它也不影响判定）。
-    - `p1.requirements` 原样取自官方 `evaluatePluginCompatibility()` 的未满足项；`p1.declared` 是
-      自述矩阵三态，不改变门禁结论。`enabled: false` 的插件不阻断，也不进待处理。
+  - `p1`：只判**官方声明范围是否覆盖目标版本**（`evaluatePluginCompatibility()`）。
+    - `p1.verdict` 只有 `ok` / `incompatible`：`incompatible` = 官方要求未满足（**阻断**），
+      `requirements` 带出未满足项；`ok` = 声明覆盖（**不阻断**）。
+    - **不读兼容台账**：`dsh.compatibility.dshReleases` / `dshDepth` 不参与 P1，也不再产出
+      `declared` / `depth` / `pending` / `unverified` 字段或 `p1-unverified` 告警（#438）。
+      自述矩阵只是历史记录，见 [`COMPATIBILITY.md`](../COMPATIBILITY.md) 顶部说明。
+    - `enabled: false` 的插件不阻断，也不进待处理；manifest 读不到同样不阻断（信息不足不是不兼容）。
   - `p2`：只对 `link:` / `file:` 依赖做一次性 `DSH_HOME` 真装；装不上即 `ok: false` 并阻断。
     其余插件为 `{ok: true, skipped: true, reason}`。**预检的 P2 不复用 `/probe` 的结论缓存**
     （`useCache: false` 强制真装）：缓存对应的是别的一次性 HOME，`plugin add` 被跳过时当前
@@ -182,14 +179,12 @@ pnpm run check                                # node --check
       启动失败时所有预期条目均为 `inactive`；`launch: 'skipped'` 时为空对象。
     - `ok`：`launch !== 'failed'` 且所有条目 `active`（`launch: 'skipped'` 时为 `true`）；仅供界面展示，**不是门禁**。
     - `error?`：仅在 `launch === 'failed'` 时出现。
-  - `blocked`：任一启用插件 P1=`requirements` 或 P2 失败时为 `true`；`pending` / `unverified` 不置位，
-    P3 也不改变它。
-  - `warnings[]`：`kind` ∈ `inventory`（清单读取失败）/ `p1-unverified` / `declared-incompatible` /
-    `p3-failed`（整个启动失败，`plugin: null`）/ `p3-inactive`（单个条目没起来），
-    **只放不阻断的信息**（`plugin: null` 表示整个清单 / 整个启动的问题）。
+  - `blocked`：任一启用插件 P1=`incompatible` 或 P2 失败时为 `true`，P3 不改变它。
+  - `warnings[]`：`kind` ∈ `inventory`（清单读取失败）/ `p3-failed`（整个启动失败，`plugin: null`）/
+    `p3-inactive`（单个条目没起来），**只放不阻断的信息**（`plugin: null` 表示整个清单 / 整个启动的问题）。
   - `schema` 在判定口径变化时 +1；GUI / 进度页应拒绝未知大版本的 `schema`。2 = 新增 `p3`；
-    `schema: 1` 的旧文件没有 `p3`，按 `null` 处理。`p1.depth` 与 `verdict: 'pending'` 是**新增可选
-    字段与枚举值**（旧消费方按「不是 ok 就不算通过」读仍然正确），所以版本号不再动。
+    3 = P1 收敛为 `ok` / `incompatible`、不再读兼容台账（#438）。`schema: 1` 的旧文件没有 `p3`，
+    按 `null` 处理。
 - **`/update` 门禁**：结果文件缺失 → `409 E_PREFLIGHT`（`detail.reason='missing'`）；
   `blocked === true` → `409 E_PREFLIGHT`（`detail.reason='blocked'`, `detail.blocked=[插件名]`）；
   两者 `detail.bypassable = true`。body 带 `force: true` 时跳过本门禁，并往
@@ -230,21 +225,21 @@ pnpm run check                                # node --check
 - **保留**：发布渠道、当天首次自动检测、显示浮层、重新启用提示、立即检查、本机体检、重启服务、回滚。
 - **升级确认卡（两段式）**：`renderPlanPanel` 第一段是目标版本（含当前版本）与备份路径；第二段读
   `GET /preflight` 的 `result`：
-  - `兼容判定 N/M · K 个待处理`（N = `p1.verdict === 'ok'`，即 **L2+**；`pending`（只到 L1 / 没记深度）
-    与 `unverified` 都算待处理，**不看 `p1.ok`**——它只表示「不阻断」）；
+  - `声明覆盖 N/M`（N = `p1.verdict === 'ok'`，即官方声明范围覆盖目标版本的插件数；
+    不再显示「待处理 / 未验证」计数，台账不参与预检）；
   - `试装 N/M`（分母只算 `p2.skipped !== true` 的插件；没有可试装项时显示「无 link:/file: 项」）；
   - `启动预演 未接入（P3）`——宿主侧的 P3 已由 #425 实现并写进 `result.p3`，但 GUI 还没展示；
     **没接入就写没接入**，不拿试装冒充启动检查。
-  - 逐插件一行 `⚠ <name> <未验证|可装配 · 未验证行为|装不上|装配失败>：<原因>`，一个插件只出一行
-    （优先级：P1 要求未满足 → P2 装不上 → P1 未验证 → P1 仅装配）。
+  - 逐插件一行 `⚠ <name> <装不上|装配失败>：<原因>`，一个插件只出一行
+    （优先级：P1 声明范围不覆盖 → P2 装不上）。
   - 按钮 `[取消] [重新预检] [开始升级] [仍要升级]`。`开始升级` 在 `result === null`、
     **`result.blocked !== false`**（缺字段 / 旧 schema 同样禁用）、预检正在跑或 `busy` 时禁用；
     `仍要升级` 调 `POST /update` 带 `force: true`（宿主跳过预检门禁并写 `force-audit.jsonl`）。
     `重新预检` = `POST /preflight`（202）→ 按 `PREFLIGHT_POLL_MS` 轮询 `GET` 到 `runner.running === false`，
     再用新快照替换卡片；轮询间隔与上限见 `PREFLIGHT_POLL_MS` / `PREFLIGHT_POLL_MAX`。
 - **页底摘要**：`<details>` 一行
-  `最近一次预检：N 个问题 · M 个插件（K 个未验证）`（K 含 `pending`），展开是目标/结论时间、
-  逐插件原因与清单读取告警。
+  `最近一次预检：N 个问题 · M 个插件`，展开是目标/结论时间、逐插件原因与清单读取告警。
+  摘要不统计台账「未验证」（台账已不参与预检，#438）。
   进设置页时 GET 一次，`重新预检` 成功后通过 `onPreflight` 写回同一份 state。
   ⚠️ **boot-check 仍是占位**：`stateDir/boot-check.json` 还没有端点，`renderPreflightSummary` 里留了
   `TODO(#422/boot-check)`；在宿主提供接口前**不要**编「本次已临时禁用 X 个」这类数字。
@@ -409,7 +404,7 @@ pnpm run check                                # node --check
 `{state:'pending'|'done'|'timeout', problems, disabled, unverified}`（后三者为计数），
 `boot-check.json` 契约为 `{schema:1, at, problems, disabled:[], unverified:[], results:[]}`；
 `schema !== 1` 或 mtime 早于本轮启动的文件都当「还没有结果」。结果文件由后续 PR 落盘。
-进度页在跳转前渲染 `冒烟检查：N 个问题 / 已临时禁用 X 个 / M 个未验证`，超时显示「检查未完成」。
+进度页在跳转前渲染 `启动检查：N 个问题 / 已临时禁用 X 个 / M 个未写冒烟断言`，超时显示「检查未完成」。
 
 ## 另需注意的两条设计约束
 

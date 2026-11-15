@@ -131,7 +131,7 @@ export function checkLine(check) {
   if (check.state !== 'done') return ''
   if (check.skipped === true) return '本版本已检查：' + String(check.problems) + ' 个问题'
   return '启动检查：' + String(check.problems) + ' 个问题 / 已临时禁用 ' + String(check.disabled)
-    + ' 个 / ' + String(check.unverified) + ' 个未验证'
+    + ' 个 / ' + String(check.unverified) + ' 个未写冒烟断言'
 }
 
 /**

@@ -112,8 +112,7 @@ window.__ModuleLoader__.load({
       'settings.empty': '（暂无）',
       'settings.pendingRestart': '上次交接：{mode} {from} → {to}',
       'settings.updateAvailable': '发现新版本 {target}（当前 {installed}）',
-      'preflight.compatLine': '兼容判定 {ok}/{total}',
-      'preflight.pending': ' · {count} 个待处理',
+      'preflight.compatLine': '声明覆盖 {ok}/{total}',
       'preflight.probeLine': '试装 {ok}/{total}',
       'preflight.probeNone': '试装 无 link:/file: 项',
       'preflight.probeRunning': '预检正在跑，跑完自动刷新…',
@@ -123,19 +122,14 @@ window.__ModuleLoader__.load({
       'preflight.start': '开始升级',
       'preflight.force': '仍要升级',
       'preflight.forceHint': '跳过预检门禁，并写入 force-audit 留痕',
-      'preflight.unverified': '未验证',
-      'preflight.unverifiedReason': '插件没有记录该版本的验证结论',
-      'preflight.assembleOnly': '可装配 · 未验证行为',
-      'preflight.assembleOnlyReason': '只到 {depth}：装配通过，但行为没有验证过',
-      'preflight.depthMissing': '没有记录验证深度（只有装配通过不算兼容）',
       'preflight.cannotInstall': '装不上',
       'preflight.assembleFailed': '装配失败',
       'preflight.requirementsUnknown': '要求未满足（宿主没给出明细）',
-      'preflight.summary': '最近一次预检：{issues} 个问题 · {total} 个插件（{unverified} 个未验证）',
+      'preflight.summary': '最近一次预检：{issues} 个问题 · {total} 个插件',
       'preflight.summaryNone': '还没有跑过预检 · 升级时会自动跑',
       'preflight.summaryNoneHint': '升级卡里的「重新预检」会生成结论，之后再回来看这里。',
       'preflight.summaryAt': '目标 {target} · 结论时间 {at}',
-      'preflight.noIssues': '没有待处理项',
+      'preflight.noIssues': '没有发现问题',
       'preflight.inventoryWarning': '清单读取失败：{reason}',
     }
 
@@ -209,8 +203,7 @@ window.__ModuleLoader__.load({
       'settings.empty': '(none)',
       'settings.pendingRestart': 'Last handoff: {mode} {from} → {to}',
       'settings.updateAvailable': 'New version {target} (current {installed})',
-      'preflight.compatLine': 'Compatibility {ok}/{total}',
-      'preflight.pending': ' · {count} pending',
+      'preflight.compatLine': 'Declared coverage {ok}/{total}',
       'preflight.probeLine': 'Trial install {ok}/{total}',
       'preflight.probeNone': 'Trial install: no link:/file: plugins',
       'preflight.probeRunning': 'Preflight is running; this refreshes itself when it finishes…',
@@ -220,19 +213,14 @@ window.__ModuleLoader__.load({
       'preflight.start': 'Start upgrade',
       'preflight.force': 'Upgrade anyway',
       'preflight.forceHint': 'Skips the preflight gate and appends a force-audit record',
-      'preflight.unverified': 'unverified',
-      'preflight.unverifiedReason': 'The plugin has no verification record for this version',
-      'preflight.assembleOnly': 'assembles · behaviour unverified',
-      'preflight.assembleOnlyReason': 'L1 only ({depth}): it assembles, but its behaviour was never verified',
-      'preflight.depthMissing': 'No verification depth recorded (assembly alone is not compatibility)',
       'preflight.cannotInstall': 'cannot install',
       'preflight.assembleFailed': 'assembly failed',
       'preflight.requirementsUnknown': 'unmet requirements (host gave no detail)',
-      'preflight.summary': 'Last preflight: {issues} issues · {total} plugins ({unverified} unverified)',
+      'preflight.summary': 'Last preflight: {issues} issues · {total} plugins',
       'preflight.summaryNone': 'No preflight yet · runs automatically on upgrade',
       'preflight.summaryNoneHint': 'Use "Re-run preflight" in the upgrade card; the result shows up here.',
       'preflight.summaryAt': 'Target {target} · result at {at}',
-      'preflight.noIssues': 'Nothing pending',
+      'preflight.noIssues': 'No issues found',
       'preflight.inventoryWarning': 'Could not read the inventory: {reason}',
     }
 
@@ -611,12 +599,12 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 预检结果分项计数：P1 通过数 / 总数、P2 实际试装数（跳过的不算）/ 通过数、未验证数。
+     * 预检结果分项计数：P1 声明覆盖数 / 总数、P2 实际试装数（跳过的不算）/ 通过数。
      *
-     * 「通过」只算 `p1.verdict === 'ok'`（宿主只给 L2+ 这个结论）；`pending`（只到 L1 / 没记深度）
-     * 与 `unverified` 一样计入「未验证」，绝不能拿 `p1.ok` 冒充通过——`ok` 只表示「不阻断」。
+     * `compat` 只数 `p1.verdict === 'ok'`（= 官方声明范围覆盖目标版本）；`incompatible` 是阻断项。
+     * 兼容台账（`dshReleases` / `dshDepth`）已不参与预检，所以这里**没有**「未验证」计数（#438）。
      * @param {any} result `GET /preflight` 的 `result`（`preflight.json` 内容），缺失时传 `null`。
-     * @returns {{total:number, compat:number, probeTotal:number, probeOk:number, unverified:number}} 计数。
+     * @returns {{total:number, compat:number, probeTotal:number, probeOk:number}} 计数。
      */
     function preflightCounts(result) {
       const plugins = (Array.isArray(result?.plugins) ? result.plugins : [])
@@ -627,13 +615,12 @@ window.__ModuleLoader__.load({
         compat: plugins.filter((plugin) => plugin?.p1?.verdict === 'ok').length,
         probeTotal: probed.length,
         probeOk: probed.filter((plugin) => plugin?.p2?.ok === true).length,
-        unverified: plugins.filter((plugin) => plugin?.p1?.verdict === 'unverified' || plugin?.p1?.verdict === 'pending').length,
       }
     }
 
     /**
-     * 预检结果 → 逐插件待处理行。一个插件只出一行，优先级：装不上（P1 未满足）→
-     * 装配失败（P2 装不上）→ 未验证（P1 没有该版本的结论）→ 可装配未验证行为（只到 L1 / 没记深度）。
+     * 预检结果 → 逐插件待处理行。一个插件只出一行，优先级：装不上（P1 声明范围不覆盖）→
+     * 装配失败（P2 装不上）。`p1` 现在只有 `ok` / `incompatible` 两态（#438）。
      * @param {any} result 预检结果。
      * @param {Function} t 翻译函数。
      * @returns {{name:string, status:string, reason:string}[]} 待处理行。
@@ -644,13 +631,13 @@ window.__ModuleLoader__.load({
         if (plugin?.enabled === false) continue
         const p1 = plugin?.p1 ?? {}
         const p2 = plugin?.p2 ?? {}
-        if (p1.verdict === 'requirements') {
+        if (p1.verdict === 'incompatible') {
           const requirements = Object.entries(p1.requirements ?? {})
           rows.push({
             name: plugin.name,
             status: t('preflight.cannotInstall'),
             reason: requirements.length === 0
-              ? (typeof p1.detail === 'string' && p1.detail !== '' ? p1.detail : t('preflight.requirementsUnknown'))
+              ? t('preflight.requirementsUnknown')
               : requirements.slice(0, 3).map((entry) => formatRequirement(t, entry)).join(' · '),
           })
           continue
@@ -660,24 +647,6 @@ window.__ModuleLoader__.load({
             name: plugin.name,
             status: t('preflight.assembleFailed'),
             reason: typeof p2.reason === 'string' ? p2.reason : '',
-          })
-          continue
-        }
-        if (p1.verdict === 'unverified') {
-          rows.push({
-            name: plugin.name,
-            status: t('preflight.unverified'),
-            reason: typeof p1.detail === 'string' && p1.detail !== '' ? p1.detail : t('preflight.unverifiedReason'),
-          })
-          continue
-        }
-        if (p1.verdict === 'pending') {
-          rows.push({
-            name: plugin.name,
-            status: t('preflight.assembleOnly'),
-            reason: typeof p1.depth === 'string' && p1.depth !== ''
-              ? t('preflight.assembleOnlyReason', { depth: p1.depth })
-              : t('preflight.depthMissing'),
           })
         }
       }
@@ -703,7 +672,7 @@ window.__ModuleLoader__.load({
       const total = issues.length + inventory.length
       const summary = result === null
         ? t('preflight.summaryNone')
-        : t('preflight.summary', { issues: total, total: counts.total, unverified: counts.unverified })
+        : t('preflight.summary', { issues: total, total: counts.total })
       const body = result === null
         ? [h('div', { key: 'none', className: 'dsh-au-muted' }, t('preflight.summaryNoneHint'))]
         : [
@@ -883,7 +852,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 升级确认卡（两段式）：目标版本 + 预检分项（兼容判定 / 试装 / P3 未接入）+ 逐插件待处理，
+     * 升级确认卡（两段式）：目标版本 + 预检分项（声明覆盖 / 试装 / P3 未接入）+ 逐插件待处理，
      * 再给 `[取消] [重新预检] [开始升级] [仍要升级]`。
      *
      * 「开始升级」只在**结果存在且未 blocked** 时可用；「仍要升级」走 `/update` 的 `force:true`
@@ -911,7 +880,7 @@ window.__ModuleLoader__.load({
         lines.push(h('li', { key: 'missing', className: 'dsh-au-warn' }, t('preflight.missing')))
       } else {
         lines.push(h('li', { key: 'compat', className: blockedNow ? 'dsh-au-warn' : 'dsh-au-ok' },
-          `${t('preflight.compatLine', { ok: counts.compat, total: counts.total })}${counts.total - counts.compat === 0 ? '' : t('preflight.pending', { count: counts.total - counts.compat })}`))
+          t('preflight.compatLine', { ok: counts.compat, total: counts.total })))
         lines.push(h('li', { key: 'probe', className: counts.probeOk === counts.probeTotal ? 'dsh-au-ok' : 'dsh-au-warn' },
           counts.probeTotal === 0
             ? t('preflight.probeNone')

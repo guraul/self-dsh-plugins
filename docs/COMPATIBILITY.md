@@ -1,5 +1,9 @@
 # DSH 兼容矩阵（插件实测记录）
 
+> **⚠️ 自 2026-11-15 起预检不再读取本表；本表仅作历史记录，不再要求维护。**
+> 升级预检现在只判官方声明范围（`engines.dsh` / `peerDependencies`）是否覆盖目标版本，
+> 不看 `dsh.compatibility.dshReleases` / `dshDepth`（见 issue #438）。
+
 > 本表记录**插件 × dsh 版本**的实际验证结果。规则 6（见根 [`AGENTS.md`](../AGENTS.md)）要求：
 > 插件的 `peerDependencies` 声明不覆盖当前 dsh 时，profile 会**跳过该 bundle**（表现是插件莫名其妙没加载）。
 > 所以"放宽声明"必须先验证、再放宽，并把 verdict 同时写进插件的

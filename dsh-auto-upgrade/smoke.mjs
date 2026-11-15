@@ -2,28 +2,26 @@
  * dsh-auto-upgrade 的冒烟断言（`dsh.smoke` 契约见 `docs/plugins/dsh-auto-upgrade.md`）。
  *
  * 只验升级后 5 秒内能确定的事，不联网、不跑真实预检：
- *   1. `preflight`：`aggregatePreflight()` 在 fixture 上产出稳定结论，含 `depth` / `pending` 口径
- *      （只有 L2+ 算通过；L1 / 缺深度是 pending，只警告不阻断）；
+ *   1. `preflight`：`aggregatePreflight()` 在 fixture 上产出稳定结论，P1 只有 `ok` / `incompatible`
+ *      两态（只看官方声明范围，**不读兼容台账**）；
  *   2. `gate`：`decidePreflightGate()` 的缺失 / 阻断 / force 判定不变；
  *   3. `official-api`：用**宿主实际安装的那份** `@deepseek-ai/dsh-app-boot`（`ctx.dshDir`），
  *      断言 `evaluatePluginCompatibility` / `readProfileVersionExemptions` 仍存在且判定可用。
  *
- * 为什么能抓漂移：预检是升级门禁的唯一依据，`depth` 字段被上游改名、`pending` 被误算成通过、
- * 官方兼容性 API 改名/改签名，都会让第 1、3 条立刻红。第 3 条刻意不 import 插件自己
- * `node_modules` 里的旧副本——那会在升级后继续绿，等于没验。
+ * 为什么能抓漂移：预检是升级门禁的唯一依据，P1 枚举被上游改名、官方兼容性 API 改名/改签名，
+ * 都会让第 1、3 条立刻红。第 3 条刻意不 import 插件自己 `node_modules` 里的旧副本——那会在
+ * 升级后继续绿，等于没验。
  */
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** 与 `preflight-run.js` 一致；判定口径的破坏性变化才允许 +1。 */
-const PREFLIGHT_SCHEMA = 2
-/** 只有 L2+ 算行为验证过。 */
-const VERIFIED_DEPTHS = ['L2', 'L3', 'L4']
+const PREFLIGHT_SCHEMA = 3
 /** 被冒烟刻意钻空子的假 peer 要求：当前 dsh 不可能满足。 */
 const IMPOSSIBLE_PEER = '>=99.0.0'
 
 /**
- * 一个 `evaluatePlugins()` 形状的插件条目（默认 L2 = 行为验证过）。
+ * 一个 `evaluatePlugins()` 形状的插件条目。
  * @param {object} [over] 覆盖字段。
  * @returns {object} 条目。
  */
@@ -36,8 +34,6 @@ function plugin(over = {}) {
     known: true,
     exempted: false,
     peers: {},
-    declared: { verdict: 'compatible', source: 'self-declared' },
-    depth: 'L2',
     ...over,
   }
 }
@@ -102,23 +98,11 @@ export async function run(ctx = {}) {
     }
     const result = aggregatePreflight(options)
     const byName = new Map(result.plugins.map((item) => [item.name, item]))
-    const expectedOk = {
-      ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth: 'L2',
-    }
-    const expectedPendingL1 = {
-      ok: true,
-      verdict: 'pending',
-      requirements: {},
-      declared: 'compatible',
-      depth: 'L1',
-      detail: '只到 L1（可装配 · 未验证行为）',
-    }
+    const expectedOk = { ok: true, verdict: 'ok' }
     const stable = JSON.stringify(result) === JSON.stringify(aggregatePreflight(options))
-    const depthOk = VERIFIED_DEPTHS.includes(byName.get('ok-plugin').p1.depth)
-      && byName.get('ok-plugin').p1.verdict === 'ok'
-    const pendingOk = JSON.stringify(byName.get('assembly-only').p1) === JSON.stringify(expectedPendingL1)
-      && byName.get('no-depth').p1.verdict === 'pending'
-      && 'depth' in byName.get('no-depth').p1 === false
+    // 台账字段（declared / depth）带什么值都不影响 P1（#438）。
+    const ledgerIgnoredOk = JSON.stringify(byName.get('assembly-only').p1) === JSON.stringify(expectedOk)
+      && JSON.stringify(byName.get('never-verified').p1) === JSON.stringify(expectedOk)
     const blockedOk = result.blocked === true
       && JSON.stringify(blockedPluginNames(result)) === JSON.stringify(['needs-upgrade', 'probe-fails'])
     const p2Ok = JSON.stringify(byName.get('ok-plugin').p2) === JSON.stringify({ ok: true, reason: '装配通过（新增 ok-plugin）' })
@@ -126,8 +110,7 @@ export async function run(ctx = {}) {
       && JSON.stringify(byName.get('needs-upgrade').p2) === JSON.stringify({
         ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）',
       })
-    const warningsOk = JSON.stringify(result.warnings.map((item) => item.kind))
-      === JSON.stringify(['p1-unverified', 'p1-unverified'])
+    const warningsOk = JSON.stringify(result.warnings.map((item) => item.kind)) === JSON.stringify([])
     const disabledOk = byName.get('disabled-plugin').p1.verdict === 'ok'
       && byName.get('disabled-plugin').enabled === false
     const onlyWarnings = aggregatePreflight({
@@ -136,8 +119,7 @@ export async function run(ctx = {}) {
     })
     return {
       ok: result.schema === PREFLIGHT_SCHEMA
-        && depthOk
-        && pendingOk
+        && ledgerIgnoredOk
         && blockedOk
         && p2Ok
         && warningsOk
@@ -158,7 +140,7 @@ export async function run(ctx = {}) {
       plugins: [{
         name: 'bad',
         enabled: true,
-        p1: { ok: false, verdict: 'requirements', requirements: { x: '^1' }, declared: 'compatible' },
+        p1: { ok: false, verdict: 'incompatible', requirements: { x: '^1' } },
         p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
       }],
     }

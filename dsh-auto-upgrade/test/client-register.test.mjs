@@ -102,12 +102,17 @@ test('设置页收口：试装 / 冒烟 / 兼容三块不再渲染，升级卡�
     assert.ok(!source.includes(gone), `${gone} 应随三块面板一起删除（#422）`)
   }
   // 升级卡的四个动作与两段式分项。
-  for (const kept of ['preflight.rerun', 'preflight.start', 'preflight.force', 'preflight.compatLine', 'preflight.probeLine', 'preflight.p3', 'preflight.assembleOnly']) {
+  for (const kept of ['preflight.rerun', 'preflight.start', 'preflight.force', 'preflight.compatLine', 'preflight.probeLine', 'preflight.p3']) {
     assert.ok(source.includes(kept), `升级卡缺少 ${kept}`)
   }
-  // 「兼容」只认 verdict==='ok'（宿主只给 L2+）；拿 p1.ok 数通过会把 L1/待处理冒充兼容。
-  assert.match(source, /plugin\?\.p1\?\.verdict === 'ok'/, '兼容计数必须按 verdict，不许退回 p1.ok')
-  assert.match(source, /plugin\?\.p1\?\.verdict === 'pending'/, 'pending 必须进入待处理行')
+  // 台账已不参与预检（#438）：pending / unverified 的计数与逐条文案必须一起消失。
+  for (const gone of ['preflight.pending', 'preflight.unverified', 'preflight.assembleOnly', 'preflight.depthMissing']) {
+    assert.ok(!source.includes(gone), `${gone} 应随兼容台账一起删除（#438）`)
+  }
+  // 「声明覆盖」只认 verdict==='ok'；拿 p1.ok 数通过会与门禁口径漂移。
+  assert.match(source, /plugin\?\.p1\?\.verdict === 'ok'/, '声明覆盖计数必须按 verdict，不许退回 p1.ok')
+  assert.match(source, /p1\.verdict === 'incompatible'/, 'P1 不兼容必须进入待处理行')
+  assert.doesNotMatch(source, /verdict === 'pending'/, 'P1 不再有 pending 态（#438）')
   // blocked 只认明确的 false：缺失 / 旧 schema 一律不许「开始升级」。
   assert.match(source, /result\?\.blocked !== false/, 'blocked 不能只认 === true')
 })
