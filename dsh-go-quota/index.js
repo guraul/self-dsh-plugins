@@ -5,9 +5,9 @@
  * 全在宿主。失败一律回 HTTP 200 + `{ ok: false, code }`，方便客户端分辨
  * 「没配 key / 上游拒绝 / 网络断了 / 上游改了结构」。
  *
- * 失败码：`no-key`（拿不到凭据）、`unauthorized`（上游 401/403）、
+ * 失败码：`no-key`（拿不到凭据，或凭据服务不可用）、`unauthorized`（上游 401/403）、
  * `upstream`（其它非 2xx，带 `status`）、`network`（fetch 抛错）、
- * `shape`（结构或字段不合约定）、`internal`（凭据服务自身出错）。
+ * `shape`（结构或字段不合约定）。
  *
  * key 只以 `Authorization` 头发给上游，不进日志、不进错误信息、不进响应体。
  * @module dsh-plugin-go-quota
@@ -146,8 +146,8 @@ export function apply(ctx, config = {}) {
       const hit = await credentials.resolve(apiKeyEnv)
       body = hit?.value ? await load(hit.value) : { ok: false, code: 'no-key' }
     } catch {
-      // 凭据服务不可用与「没配 key」对用户是同一件事：都给可操作的 no-key。
-      // 只有离谱的异常才落到 internal，且不带任何细节。
+      // 凭据服务不可用与「没配 key」对用户是同一件事：都给可操作的 no-key，
+      // 且响应体不带任何错误细节。
       body = { ok: false, code: 'no-key' }
     }
     send(res, 200, body)
