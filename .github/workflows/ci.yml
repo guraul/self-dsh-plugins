@@ -59,6 +59,12 @@ jobs:
               extension/background.js
               extension/dsh-content.js
               extension/qingyan-content.js
+          - dir: dsh-go-quota
+            install: true
+            fresh: true
+            entry: |
+              index.js
+              client.js
           - dir: dsh-im-bridge-workspaces
             install: true
             # 构建产物不可复现（绝对路径 + CSS 哈希），不做新鲜度检查。
