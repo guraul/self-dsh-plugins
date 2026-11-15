@@ -6,9 +6,10 @@
  * `test/preflight.test.mjs`。
  *
  * 判定口径：
- * - **P1** 用 `compat.js` 的 `evaluatePlugins()` 按**目标版本**逐插件判定：门禁要求未满足 =
- *   `requirements`（阻断）；manifest 读不到或插件自述从未验证 = `unverified`（只警告，不阻断）；
- *   门禁放行但验证深度只到 L1 / 没记深度 = `pending`（只警告，**不算通过**）。
+ * - **P1** 只判**官方声明范围是否覆盖目标版本**（`evaluatePlugins()` 的 `compatible`）：
+ *   不满足 = `incompatible`（阻断），其余一律 `ok`。**不读兼容台账**
+ *   （`dsh.compatibility.dshReleases` / `dshDepth`）——那份人工记录没有真实读者，
+ *   官方安装 / 加载门禁也不看它（#438）。
  * - **P2** 复用一次性 `DSH_HOME` 试装执行器：只覆盖 `link:` / `file:` 插件，装不上 = 阻断。
  * - **P3** 启动预演（`rehearse.js`）：在同一个一次性 `DSH_HOME` 里真启动一次，条目没起来
  *   只写 warning，**不改 `blocked`**。
@@ -18,7 +19,6 @@ import { appendFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { DEPTHS } from './compat.js'
 import { entryCandidates, linkTargets, pluginIdFromSource, runProbes } from './probe.js'
 import { runProbeWithProfile } from './probe-run.js'
 
@@ -30,81 +30,28 @@ export const FORCE_AUDIT_FILE = 'force-audit.jsonl'
  * 结果文件 schema；判定口径变了就 +1，旧结果仍然可读但要标明版本。
  *
  * 2 = P3 启动预演（新增 `p3` 字段与 `p3-*` 告警，见 #425）。
- * #422 的 `p1.depth` / `p1.verdict='pending'` 是**新增可选字段与枚举值**，旧消费方按
- * 「不是 ok 就不是通过」读不会误判，所以版本号不再动（守卫测试会盯着这一点）。
+ * 3 = P1 收敛为两态 `ok` / `incompatible`，不再读兼容台账（#438）。
  */
-export const PREFLIGHT_SCHEMA = 2
-
-/** 只有 L2 及以上才算「行为验证过」；L1 只是装配通过（见 `compat.js` 的 `DEPTHS`）。 */
-export const VERIFIED_DEPTHS = ['L2', 'L3', 'L4']
+export const PREFLIGHT_SCHEMA = 3
 
 /**
- * 规范化验证深度：只认 `L1`–`L4`，没记录 / 拼错一律 undefined（= 未记录深度）。
- * @param {unknown} value `evaluatePlugins()` 的 `depth`。
- * @returns {'L1'|'L2'|'L3'|'L4'|undefined} 深度。
- */
-export function normalizeDepth(value) {
-  return DEPTHS.includes(value) ? value : undefined
-}
-
-/**
- * 把 `evaluatePlugins()` 的单插件判定折成 P1 **四态**。
+ * 把 `evaluatePlugins()` 的单插件判定折成 P1 **两态**：官方声明范围是否覆盖目标版本。
  *
- * 四态与门禁语义对齐：`requirements` 才阻断；`unverified`（没法下结论）与
- * `pending`（门禁放行但只到 L1 / 没记深度）都**只警告**。
- *
- * ⚠️ `ok` 只留给 **L2+**：`evaluatePlugins()` 的 `compatible` 只说明门禁放行，不等于行为验证过；
- * 丢掉 `depth` 会把「可装配」静默升格成「兼容」——`depth` 必须原样带出，L1 / 缺失要降级成
- * `pending`，否则 GUI 的「兼容判定」会把它们算成通过。
+ * 只认官方门禁结论：`compatible === false` 且没被豁免 = `incompatible`（阻断）；其余一律 `ok`。
+ * **不读** `dsh.compatibility.dshReleases` / `dshDepth`：台账没有真实读者，官方安装 / 加载门禁
+ * 也不看它，所以自述 `incompatible` / `unverified` / 验证深度都不影响 P1（#438）。
+ * `manifest` 读不到时 `evaluatePlugins()` 给 `compatible: true`，同样判 `ok`——官方范围本就没法
+ * 判定「不覆盖」，不能拿信息不足当不兼容。
  * @param {object} plugin `evaluatePlugins()` 的插件条目。
- * @returns {{ok:boolean, verdict:'ok'|'pending'|'requirements'|'unverified', requirements:object, declared:string, depth?:string, detail?:string}} P1 判定。
+ * @returns {{ok:boolean, verdict:'ok'|'incompatible', requirements?:object}} P1 判定。
  */
 export function judgeP1(plugin) {
-  const declared = plugin?.declared?.verdict ?? 'unverified'
-  const requirements = plugin?.peers ?? {}
-  const depth = normalizeDepth(plugin?.depth)
-  const withDepth = depth === undefined ? {} : { depth }
-  // 禁用插件不会被新宿主加载，既不算通过也不算待处理。
-  if (plugin?.enabled === false) {
-    return { ok: true, verdict: 'ok', requirements: {}, declared, ...withDepth }
-  }
-  // manifest 读不到不是「不兼容」，是「信息不足」：如实标 unverified，不阻断。
-  if (plugin?.known === false) {
-    return {
-      ok: true,
-      verdict: 'unverified',
-      requirements: {},
-      declared,
-      ...withDepth,
-      ...(typeof plugin.detail === 'string' ? { detail: plugin.detail } : {}),
-    }
-  }
+  // 禁用插件不会被新宿主加载，不阻断。
+  if (plugin?.enabled === false) return { ok: true, verdict: 'ok' }
   if (plugin?.compatible === false && plugin?.exempted !== true) {
-    return {
-      ok: false,
-      verdict: 'requirements',
-      requirements,
-      declared,
-      ...withDepth,
-      ...(typeof plugin.detail === 'string' ? { detail: plugin.detail } : {}),
-    }
+    return { ok: false, verdict: 'incompatible', requirements: plugin?.peers ?? {} }
   }
-  // 门禁已放行，但插件自述从未验证：仍然是「未验证」，不是「兼容」。
-  if (declared === 'unverified') {
-    return { ok: true, verdict: 'unverified', requirements: {}, declared, ...withDepth }
-  }
-  // 门禁放行 + 自述 compatible，还要看验证深度：L1 / 没记深度只能叫「可装配 · 未验证行为」。
-  if (depth === undefined || !VERIFIED_DEPTHS.includes(depth)) {
-    return {
-      ok: true,
-      verdict: 'pending',
-      requirements: {},
-      declared,
-      ...withDepth,
-      detail: depth === undefined ? '没有记录验证深度（可装配 · 未验证行为）' : `只到 ${depth}（可装配 · 未验证行为）`,
-    }
-  }
-  return { ok: true, verdict: 'ok', requirements: {}, declared, ...withDepth }
+  return { ok: true, verdict: 'ok' }
 }
 
 /**
@@ -133,16 +80,6 @@ export function aggregatePreflight(options) {
     const p2 = probe === undefined
       ? { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' }
       : { ok: probe.ok === true, reason: probe.detail ?? (probe.ok === true ? '装配通过' : '装配失败') }
-    if (p1.verdict === 'unverified') {
-      warnings.push({
-        plugin: plugin.name,
-        kind: 'p1-unverified',
-        reason: p1.detail ?? (p1.declared === 'unverified' ? '插件没有记录该版本的验证结论' : '无法读取插件 manifest'),
-      })
-    }
-    if (p1.declared === 'incompatible') {
-      warnings.push({ plugin: plugin.name, kind: 'declared-incompatible', reason: '插件自述已知不兼容（不参与门禁）' })
-    }
     return {
       name: plugin.name,
       version: plugin.version,
@@ -200,7 +137,7 @@ export function blockedPluginNames(result) {
   const names = []
   for (const plugin of result?.plugins ?? []) {
     if (plugin?.enabled === false) continue
-    if (plugin?.p1?.verdict === 'requirements' || (plugin?.p2?.ok === false && plugin?.p2?.skipped !== true)) {
+    if (plugin?.p1?.verdict === 'incompatible' || (plugin?.p2?.ok === false && plugin?.p2?.skipped !== true)) {
       names.push(plugin.name)
     }
   }

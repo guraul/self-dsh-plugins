@@ -722,32 +722,34 @@ const PREFLIGHT_FACTS = {
 }
 
 /**
- * 预检结果四类现场：通过（L2）/ 未验证 / 装不上（P1 要求未满足）/ 装配失败（P2 装不上）。
- * 计数：兼容 2/4（只算 verdict=ok）、待处理 2、试装 1/2、未验证 1 个、blocked。
+ * 预检结果三类现场：声明覆盖 / 装不上（P1 不覆盖）/ 装配失败（P2 装不上）。
+ * 计数：声明覆盖 3/4（只算 verdict=ok）、2 个问题（P1 不覆盖 + P2 装不上）、试装 1/2、blocked。
+ * 其中 `dsh-usage-panel` 故意带一份「台账说未验证」的字段，证明升级卡不再读它（#438）。
  */
 const PREFLIGHT_BLOCKED = {
-  schema: 1,
+  schema: 3,
   at: Date.UTC(2026, 10, 14, 8, 0, 0),
   target: '0.2.2-alpha.2',
   plugins: [
     {
       name: 'dsh-awake', version: '0.1.4', enabled: true,
-      p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth: 'L2' },
+      p1: { ok: true, verdict: 'ok' },
       p2: { ok: true, reason: '装配通过' },
     },
     {
       name: 'dsh-usage-panel', version: '0.2.3-fork.1', enabled: true,
-      p1: { ok: true, verdict: 'unverified', requirements: {}, declared: 'unverified', depth: 'L2' },
+      // 旧结果里可能残留台账字段：预检 / GUI 都必须无视它们。
+      p1: { ok: true, verdict: 'ok', declared: 'unverified', depth: 'L1' },
       p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
     },
     {
       name: 'dsh-subagents', version: '0.5.0', enabled: true,
-      p1: { ok: false, verdict: 'requirements', requirements: { '@deepseek-ai/dsh-tools': '0.2.1-rc.2' }, declared: 'compatible', depth: 'L2' },
+      p1: { ok: false, verdict: 'incompatible', requirements: { '@deepseek-ai/dsh-tools': '0.2.1-rc.2' } },
       p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
     },
     {
       name: 'dsh-plugin-memx', version: '0.3.0', enabled: true,
-      p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth: 'L2' },
+      p1: { ok: true, verdict: 'ok' },
       p2: { ok: false, reason: 'plugin add 退出码 1' },
     },
   ],
@@ -816,13 +818,15 @@ test('升级卡两段式：目标 + 预检分项 + 逐插件待处理；blocked 
   tree = await clickButton(tree, '升级')
   const text = textOf(tree)
   assert.match(text, /目标 0\.2\.2-alpha\.2（当前 0\.2\.1-rc\.2）/, '第一段：目标版本')
-  assert.match(text, /兼容判定 2\/4 · 2 个待处理/, '只有 verdict=ok（L2+）算兼容；未验证不算')
+  assert.match(text, /声明覆盖 3\/4/, '只数 p1.verdict=ok；台账字段（declared/depth）不参与')
+  assert.doesNotMatch(text, /个待处理/, '台账不参与后不再有待处理计数')
+  assert.doesNotMatch(text, /未验证/, '升级卡不再显示台账「未验证」')
   assert.match(text, /试装 1\/2/, '第二段：试装 N/M（跳过的不算进分母）')
   assert.match(text, /启动预演 未接入（P3）/, 'P3 没接入时必须如实显示「未接入」')
-  assert.match(text, /⚠ dsh-usage-panel 未验证：插件没有记录该版本的验证结论/)
   assert.match(text, /⚠ dsh-subagents 装不上：@deepseek-ai\/dsh-tools 精确 0\.2\.1-rc\.2/)
   assert.match(text, /⚠ dsh-plugin-memx 装配失败：plugin add 退出码 1/)
   assert.doesNotMatch(text, /⚠ dsh-awake/, '通过的插件不逐条占位')
+  assert.doesNotMatch(text, /⚠ dsh-usage-panel/, '台账说未验证的插件不再逐条占位')
 
   const planButtons = collect(tree, (node) => node.type === 'button'
     && ['取消', '重新预检', '开始升级', '仍要升级'].includes(textOf(node)))
@@ -872,48 +876,12 @@ test('升级卡：结果通过且未 blocked 时「开始升级」可用，提�
   })
   let tree = await react.mount(Settings, {})
   tree = await clickButton(tree, '升级')
-  assert.match(textOf(tree), /兼容判定 1\/1/)
+  assert.match(textOf(tree), /声明覆盖 1\/1/)
   const start = collect(tree, (node) => node.type === 'button' && textOf(node) === '开始升级')[0]
   assert.equal(start.props.disabled, false, '通过时「开始升级」必须可点')
   tree = await clickButton(tree, '开始升级')
   const updates = calls.filter((call) => call.url === API.update && call.method === 'POST')
   assert.deepEqual(JSON.parse(updates[0].body), { version: '0.2.2-alpha.2', force: false })
-})
-
-test('升级卡：只到 L1 的插件计入待处理、不算兼容，「开始升级」仍可用（它不阻断）', async () => {
-  const result = {
-    ...PREFLIGHT_BLOCKED,
-    blocked: false,
-    plugins: [
-      PREFLIGHT_BLOCKED.plugins[0],
-      {
-        name: 'dsh-awake-l1', version: '0.1.4', enabled: true,
-        p1: {
-          ok: true, verdict: 'pending', requirements: {}, declared: 'compatible',
-          depth: 'L1', detail: '只到 L1（可装配 · 未验证行为）',
-        },
-        p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
-      },
-    ],
-  }
-  stubFetch({
-    ...pluginRoutes,
-    [API.status]: PLAN_STATUS,
-    [API.preflight]: {
-      ok: true,
-      preflight: PREFLIGHT_FACTS,
-      runner: { running: false, startedAt: null, target: null, error: null },
-      result,
-    },
-  })
-  let tree = await react.mount(Settings, {})
-  tree = await clickButton(tree, '升级')
-  const text = textOf(tree)
-  assert.match(text, /兼容判定 1\/2 · 1 个待处理/, 'L1 不能算进兼容判定')
-  assert.match(text, /⚠ dsh-awake-l1 可装配 · 未验证行为：只到 L1：装配通过，但行为没有验证过/)
-  assert.doesNotMatch(text, /⚠ dsh-awake /, 'L2 通过的插件不逐条占位')
-  const start = collect(tree, (node) => node.type === 'button' && textOf(node) === '开始升级')[0]
-  assert.equal(start.props.disabled, false, 'pending 只是警告，不阻断升级')
 })
 
 test('升级卡：缺 blocked 字段（旧 schema / 结果残缺）时「开始升级」也必须禁用', async () => {
@@ -969,7 +937,7 @@ test('升级卡：重新预检走 POST 并轮询 GET，结果回来后才替换�
 
   await new Promise((resolve) => setTimeout(resolve, 1200))
   tree = await react.flush()
-  assert.match(textOf(tree), /兼容判定 1\/1/, '轮询到结论后必须替换卡片')
+  assert.match(textOf(tree), /声明覆盖 1\/1/, '轮询到结论后必须替换卡片')
   assert.doesNotMatch(textOf(tree), /预检正在跑/)
   assert.ok(gets >= 4, `必须轮询到 runner 停下，实际 GET 了 ${String(gets)} 次`)
 })
@@ -987,7 +955,8 @@ test('设置页底部：预检摘要一行可展开，逐插件原因与目标/�
   })
   const tree = await react.mount(Settings, {})
   const text = textOf(tree)
-  assert.match(text, /最近一次预检：3 个问题 · 4 个插件（1 个未验证）/)
+  assert.match(text, /最近一次预检：2 个问题 · 4 个插件/)
+  assert.doesNotMatch(text, /个未验证/, '摘要不再统计台账未验证（#438）')
   const summary = collect(tree, (node) => node.type === 'details' && textOf(node).includes('最近一次预检'))
   assert.equal(summary.length, 1, '摘要必须是一个可展开的 details')
   const body = textOf(summary[0])
@@ -1020,8 +989,8 @@ test('设置页底部：只有 inventory 警告算「清单读取失败」，p3-
   const summary = collect(tree, (node) => node.type === 'details' && textOf(node).includes('最近一次预检'))
   assert.equal(summary.length, 1, '摘要必须是一个可展开的 details')
   const body = textOf(summary[0])
-  // 3 个逐插件待处理 + 1 条 inventory 警告；p3-failed 不计入、也不渲染成清单读取失败。
-  assert.match(body, /最近一次预检：4 个问题 · 4 个插件（1 个未验证）/)
+  // 2 个逐插件待处理 + 1 条 inventory 警告；p3-failed 不计入、也不渲染成清单读取失败。
+  assert.match(body, /最近一次预检：3 个问题 · 4 个插件/)
   assert.match(body, /清单读取失败：ENOENT: preflight\.json/)
   assert.doesNotMatch(body, /启动预演超时/, 'p3-failed 与清单读取无关，不能被误标')
 })

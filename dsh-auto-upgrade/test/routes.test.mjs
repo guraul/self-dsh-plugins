@@ -919,7 +919,7 @@ test('POST /preflight：后台预检落盘，GET 同时给出工具链体检、r
   }
 })
 
-test('POST /preflight：P1 要求未满足 → blocked 并点名；未验证只进 warnings（#421 PR-1）', async (t) => {
+test('POST /preflight：P1 声明不覆盖 → blocked 并点名；台账未验证不影响 P1（#421 / #438）', async (t) => {
   const env = await makeEnvironment({
     omitPreflight: true,
     plugins: [
@@ -948,14 +948,14 @@ test('POST /preflight：P1 要求未满足 → blocked 并点名；未验证只�
     assert.equal(result.blocked, true)
     const blocked = result.plugins.find((plugin) => plugin.name === 'incompatible-plugin')
     assert.equal(blocked.p1.ok, false)
-    assert.equal(blocked.p1.verdict, 'requirements')
+    assert.equal(blocked.p1.verdict, 'incompatible')
     assert.ok(Object.keys(blocked.p1.requirements).length > 0, '未满足项必须原样带出')
     assert.deepEqual(blocked.p2, { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' })
 
-    const unverified = result.plugins.find((plugin) => plugin.name === 'never-verified')
-    assert.equal(unverified.p1.verdict, 'unverified')
-    assert.equal(unverified.p1.ok, true, '未验证不阻断')
-    assert.ok(result.warnings.some((item) => item.plugin === 'never-verified' && item.kind === 'p1-unverified'))
+    // 没有台账记录 = 以前会标 unverified 并进 warnings；现在只按官方声明判，直接 ok。
+    const neverVerified = result.plugins.find((plugin) => plugin.name === 'never-verified')
+    assert.deepEqual(neverVerified.p1, { ok: true, verdict: 'ok' }, '台账缺失不影响 P1')
+    assert.equal(result.warnings.some((item) => item.kind === 'p1-unverified'), false, '不再产出台账告警')
 
     const rejected = await fetch(`${env.host.base}${API.update}`, {
       method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9' }),

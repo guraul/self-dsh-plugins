@@ -136,7 +136,7 @@ test('#423 进度页：内联的 checkLine 在页面上下文里真跑三态，�
     const line = (check) => runInContext(`checkLine(${JSON.stringify(check)})`, sandbox)
     assert.equal(
       line({ state: 'done', skipped: false, problems: 3, disabled: 2, unverified: 1 }),
-      '启动检查：3 个问题 / 已临时禁用 2 个 / 1 个未验证',
+      '启动检查：3 个问题 / 已临时禁用 2 个 / 1 个未写冒烟断言',
     )
     assert.equal(
       line({ state: 'done', skipped: true, problems: 3, disabled: 2, unverified: 1 }),
@@ -365,7 +365,7 @@ test('#423 冒烟检查：未知 schema 当「还没有结果」，不拿读不�
 test('#436 冒烟检查文案：三种结局各自一句话，不叠加矛盾描述', () => {
   assert.equal(
     checkLine({ state: 'done', skipped: false, problems: 3, disabled: 2, unverified: 1 }),
-    '启动检查：3 个问题 / 已临时禁用 2 个 / 1 个未验证',
+    '启动检查：3 个问题 / 已临时禁用 2 个 / 1 个未写冒烟断言',
   )
   assert.equal(
     checkLine({ state: 'done', skipped: true, problems: 3, disabled: 2, unverified: 1 }),

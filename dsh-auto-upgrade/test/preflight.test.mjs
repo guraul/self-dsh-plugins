@@ -21,7 +21,7 @@ import {
 import { probeKey } from '../lib/host/probe.js'
 import { REHEARSAL_DONE, REHEARSAL_MARKER, runRehearsal } from '../lib/host/rehearse.js'
 
-/** 一个 `evaluatePlugins()` 形状的插件条目（默认 L2 = 行为验证过，`judgeP1` 才给 `ok`）。 */
+/** 一个 `evaluatePlugins()` 形状的插件条目。 */
 function plugin(over = {}) {
   return {
     name: 'plugin-a',
@@ -31,89 +31,65 @@ function plugin(over = {}) {
     known: true,
     exempted: false,
     peers: {},
-    declared: { verdict: 'compatible', source: 'self-declared' },
-    depth: 'L2',
     ...over,
   }
 }
 
-test('judgeP1：ok / requirements / unverified 三态，且 disabled 与自述矩阵不参与阻断', () => {
-  assert.deepEqual(judgeP1(plugin()), {
-    ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth: 'L2',
-  })
+test('judgeP1：只有 ok / incompatible 两态，只看官方声明范围', () => {
+  assert.deepEqual(judgeP1(plugin()), { ok: true, verdict: 'ok' })
 
   const requirements = judgeP1(plugin({
     compatible: false,
     peers: { '@deepseek-ai/dsh-tools': '^0.3.0' },
   }))
   assert.equal(requirements.ok, false)
-  assert.equal(requirements.verdict, 'requirements')
+  assert.equal(requirements.verdict, 'incompatible')
   assert.deepEqual(requirements.requirements, { '@deepseek-ai/dsh-tools': '^0.3.0' })
 
-  // manifest 读不到：信息不足，不阻断。
-  const unknown = judgeP1(plugin({ known: false, depth: undefined, detail: 'package.json not found' }))
-  assert.equal(unknown.ok, true)
-  assert.equal(unknown.verdict, 'unverified')
-  assert.match(unknown.detail, /package\.json/)
-  assert.equal('depth' in unknown, false, '没记深度就不写 depth，别编一个')
-
-  // 门禁放行但插件自述从未验证：仍标 unverified（只警告）。
-  const neverVerified = judgeP1(plugin({ declared: { verdict: 'unverified', source: 'self-declared' } }))
-  assert.equal(neverVerified.ok, true)
-  assert.equal(neverVerified.verdict, 'unverified')
-
-  // 自述 incompatible 不改变门禁结论，但原样带出。
-  const declaredBad = judgeP1(plugin({ declared: { verdict: 'incompatible', source: 'self-declared' } }))
-  assert.equal(declaredBad.ok, true)
-  assert.equal(declaredBad.verdict, 'ok')
-  assert.equal(declaredBad.declared, 'incompatible')
-
-  // 已禁用插件不阻断升级（新宿主不会加载它）。
-  const disabled = judgeP1(plugin({ enabled: false, compatible: false }))
-  assert.equal(disabled.ok, true)
-  assert.equal(disabled.verdict, 'ok')
-  assert.deepEqual(disabled.requirements, {})
-})
-
-test('judgeP1：只有 L2+ 算通过，L1 / 缺深度降级 pending 且 depth 必须带出（删掉就红）', () => {
-  // L2 / L3 / L4 才算行为验证过。
-  for (const depth of ['L2', 'L3', 'L4']) {
-    assert.deepEqual(judgeP1(plugin({ depth })), {
-      ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth,
-    }, `${depth} 必须判通过`)
-  }
-
-  // L1 只是装配通过：不是兼容，降到 pending（仍然不阻断）。
-  assert.deepEqual(judgeP1(plugin({ depth: 'L1' })), {
-    ok: true,
-    verdict: 'pending',
-    requirements: {},
-    declared: 'compatible',
-    depth: 'L1',
-    detail: '只到 L1（可装配 · 未验证行为）',
+  // manifest 读不到：信息不足不是不兼容，不阻断。
+  assert.deepEqual(judgeP1(plugin({ known: false, detail: 'package.json not found' })), {
+    ok: true, verdict: 'ok',
   })
 
-  // 没记深度同样不能算通过。
-  const missing = judgeP1(plugin({ depth: undefined }))
-  assert.equal(missing.ok, true)
-  assert.equal(missing.verdict, 'pending')
-  assert.equal('depth' in missing, false)
-  assert.match(missing.detail, /没有记录验证深度/)
+  // 已禁用 / 已豁免插件不阻断升级（新宿主不会加载 / 官方已放行）。
+  assert.deepEqual(judgeP1(plugin({ enabled: false, compatible: false })), { ok: true, verdict: 'ok' })
+  assert.deepEqual(judgeP1(plugin({ compatible: false, exempted: true })), { ok: true, verdict: 'ok' })
 
-  // 非法深度按「没记录」处理，绝不放行成 ok。
-  assert.equal(judgeP1(plugin({ depth: 'L9' })).verdict, 'pending')
-
-  // 守护卫：`judgeP1` 必须原样保留 `evaluatePlugins()` 的 depth；
-  // 去掉透传（本轮修的 bug）这条立刻红。
-  assert.equal(judgeP1(plugin({ depth: 'L3' })).depth, 'L3')
-
-  // 新增 depth / pending 是**可选字段与枚举值**：旧消费方按「不是 ok 就不算通过」读仍然正确，
-  // 所以不为它们再升 schema 版本（2 是 P3 新增 p3 字段时升的，见 #425）；真要升版必须是
-  // 判定口径破坏性变化。
-  assert.equal(PREFLIGHT_SCHEMA, 2, '新增可选字段不该再升 schema 版本')
+  // P1 的两态是封闭集合：不存在 pending / unverified / requirements。
+  const verdicts = new Set([
+    judgeP1(plugin()).verdict,
+    requirements.verdict,
+    judgeP1(plugin({ enabled: false, compatible: false })).verdict,
+  ])
+  assert.deepEqual([...verdicts].sort(), ['incompatible', 'ok'])
 })
 
-test('aggregatePreflight：P1 要求未满足 + P2 装不上都算阻断，未验证 / 仅装配只进 warnings', () => {
+test('judgeP1 不读兼容台账：dshReleases / dshDepth 带什么 verdict 都不影响 P1（#438）', () => {
+  // `evaluatePlugins()` 会把自述矩阵与验证深度挂在条目上；P1 必须完全无视它们。
+  const declaredIncompatible = judgeP1(plugin({
+    declared: { verdict: 'incompatible', source: 'self-declared' },
+    depth: 'L1',
+  }))
+  assert.deepEqual(declaredIncompatible, { ok: true, verdict: 'ok' }, '自述 incompatible 不许改变 P1')
+  assert.equal('declared' in declaredIncompatible, false)
+  assert.equal('depth' in declaredIncompatible, false)
+
+  const declaredUnverified = judgeP1(plugin({
+    declared: { verdict: 'unverified', source: 'self-declared' },
+    depth: undefined,
+  }))
+  assert.deepEqual(declaredUnverified, { ok: true, verdict: 'ok' }, '没写台账 / 没记深度不许降级成 pending')
+
+  // 反方向：台账写 compatible 也不能把官方不兼容洗成 ok。
+  assert.equal(judgeP1(plugin({
+    compatible: false,
+    peers: { '@deepseek-ai/dsh': '^0.5.0' },
+    declared: { verdict: 'compatible', source: 'self-declared' },
+    depth: 'L4',
+  })).verdict, 'incompatible')
+})
+
+test('aggregatePreflight：P1 声明不覆盖 + P2 装不上都算阻断，台账不产生任何 warning', () => {
   const result = aggregatePreflight({
     target: '9.9.9',
     at: 1_700_000_000_000,
@@ -133,6 +109,10 @@ test('aggregatePreflight：P1 要求未满足 + P2 装不上都算阻断，未�
           name: 'never-verified',
           declared: { verdict: 'unverified', source: 'self-declared' },
         }),
+        plugin({
+          name: 'declared-incompatible',
+          declared: { verdict: 'incompatible', source: 'self-declared' },
+        }),
         plugin({ name: 'assembly-only', depth: 'L1' }),
       ],
     },
@@ -149,44 +129,36 @@ test('aggregatePreflight：P1 要求未满足 + P2 装不上都算阻断，未�
   assert.deepEqual(blockedPluginNames(result), ['needs-upgrade', 'probe-fails'])
 
   const byName = new Map(result.plugins.map((item) => [item.name, item]))
-  assert.deepEqual(byName.get('ok-plugin').p1, {
-    ok: true, verdict: 'ok', requirements: {}, declared: 'compatible', depth: 'L2',
-  })
+  assert.deepEqual(byName.get('ok-plugin').p1, { ok: true, verdict: 'ok' })
   assert.deepEqual(byName.get('ok-plugin').p2, { ok: true, reason: '装配通过（新增 ok-plugin）' })
-  assert.equal(byName.get('needs-upgrade').p1.verdict, 'requirements')
+  assert.equal(byName.get('needs-upgrade').p1.verdict, 'incompatible')
   assert.deepEqual(byName.get('probe-fails').p2, { ok: false, reason: 'plugin add 退出码 1' })
-  assert.equal(byName.get('never-verified').p1.verdict, 'unverified')
+
+  // 台账（自述 / 深度）完全不影响 P1：这些插件一律 ok、不阻断。
+  for (const name of ['never-verified', 'declared-incompatible', 'assembly-only']) {
+    assert.deepEqual(byName.get(name).p1, { ok: true, verdict: 'ok' }, `${name} 不该被台账影响`)
+  }
   assert.deepEqual(byName.get('never-verified').p2, { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' })
 
-  // 只到 L1 的插件：depth 落盘、verdict=pending、不进 blocked（不阻断，但也不能算通过）。
-  assert.deepEqual(byName.get('assembly-only').p1, {
-    ok: true,
-    verdict: 'pending',
-    requirements: {},
-    declared: 'compatible',
-    depth: 'L1',
-    detail: '只到 L1（可装配 · 未验证行为）',
-  })
-  assert.equal(blockedPluginNames(result).includes('assembly-only'), false)
-
-  // warnings 只放不阻断的信息：未验证 + 自述 incompatible。
-  const unverified = result.warnings.filter((item) => item.kind === 'p1-unverified')
-  assert.deepEqual(unverified.map((item) => item.plugin), ['probe-fails', 'never-verified'])
-  assert.equal(result.warnings.some((item) => item.kind === 'p2-failed'), false, 'P2 失败已计入 blocked，不再重复警告')
+  // 唯一的 warnings 来源不再包含台账：没有 p1-unverified / declared-incompatible。
+  assert.deepEqual(result.warnings.map((item) => item.kind), [])
 })
 
-test('aggregatePreflight：只有未验证时 blocked=false；清单读取失败进 warnings', () => {
+test('aggregatePreflight：台账未验证 / 自述不兼容都不置 blocked；清单读取失败进 warnings', () => {
   const result = aggregatePreflight({
     target: '9.9.9',
     evaluated: {
-      plugins: [plugin({ name: 'never-verified', declared: { verdict: 'unverified', source: 'self-declared' } })],
+      plugins: [
+        plugin({ name: 'never-verified', declared: { verdict: 'unverified', source: 'self-declared' } }),
+        plugin({ name: 'declared-incompatible', declared: { verdict: 'incompatible', source: 'self-declared' } }),
+      ],
     },
     probes: [],
     inventoryError: '读取 profile 插件清单失败：EACCES',
   })
   assert.equal(result.blocked, false)
   assert.deepEqual(blockedPluginNames(result), [])
-  assert.deepEqual(result.warnings.map((item) => item.kind), ['inventory', 'p1-unverified'])
+  assert.deepEqual(result.warnings.map((item) => item.kind), ['inventory'])
   assert.equal(result.warnings[0].plugin, null)
 })
 
@@ -203,7 +175,7 @@ test('decidePreflightGate：缺失 / blocked / force 三种判定', () => {
     plugins: [{
       name: 'bad',
       enabled: true,
-      p1: { ok: false, verdict: 'requirements', requirements: { x: '^1' }, declared: 'compatible' },
+      p1: { ok: false, verdict: 'incompatible', requirements: { x: '^1' } },
       p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
     }],
   }
@@ -246,7 +218,7 @@ test('force-audit.jsonl：一行一条 JSON，含 at / from / to / blocked / rea
     plugins: [{
       name: 'bad',
       enabled: true,
-      p1: { ok: false, verdict: 'requirements', requirements: { x: '^1' }, declared: 'compatible' },
+      p1: { ok: false, verdict: 'incompatible', requirements: { x: '^1' } },
       p2: { ok: true, skipped: true, reason: '未试装（不是 link:/file: 依赖）' },
     }],
   }
