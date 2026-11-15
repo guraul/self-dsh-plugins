@@ -884,6 +884,53 @@ test('升级卡：结果通过且未 blocked 时「开始升级」可用，提�
   assert.deepEqual(JSON.parse(updates[0].body), { version: '0.2.2-alpha.2', force: false })
 })
 
+test('升级卡：会话确认后只带 confirmSessions，不含 force（#428）', async () => {
+  let attempts = 0
+  const { calls } = stubFetch({
+    ...pluginRoutes,
+    [API.status]: PLAN_STATUS,
+    [API.preflight]: {
+      ok: true,
+      preflight: PREFLIGHT_FACTS,
+      runner: { running: false, startedAt: null, target: null, error: null },
+      result: PREFLIGHT_OK,
+    },
+    [API.update]: () => {
+      attempts += 1
+      if (attempts === 1) {
+        return {
+          status: 200,
+          json: async () => ({
+            ok: false,
+            code: 'E_SESSIONS_RUNNING',
+            error: '有 1 个会话正在执行',
+            detail: { bypassable: true, sessions: [{ id: 'session-1' }] },
+          }),
+        }
+      }
+      return { status: 200, json: async () => ({ ok: false, code: 'E_TEST', error: '测试桩到此为止' }) }
+    },
+  })
+  const confirmed = []
+  globalThis.window.confirm = (message) => {
+    confirmed.push(message)
+    return true
+  }
+  try {
+    let tree = await react.mount(Settings, {})
+    tree = await clickButton(tree, '升级')
+    await clickButton(tree, '开始升级')
+    const updates = calls.filter((call) => call.url === API.update && call.method === 'POST')
+    assert.equal(updates.length, 2, '会话确认必须重新提交一次')
+    const body = JSON.parse(updates[1].body)
+    assert.deepEqual(body, { version: '0.2.2-alpha.2', confirmSessions: true })
+    assert.equal(Object.hasOwn(body, 'force'), false, '会话确认不许复用 force（否则会跳过预检并留痕）')
+    assert.equal(confirmed.length, 1, '必须弹一次会话警告')
+  } finally {
+    delete globalThis.window.confirm
+  }
+})
+
 test('升级卡：缺 blocked 字段（旧 schema / 结果残缺）时「开始升级」也必须禁用', async () => {
   const { blocked: _blocked, ...legacy } = PREFLIGHT_OK
   stubFetch({

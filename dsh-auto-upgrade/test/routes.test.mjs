@@ -1044,6 +1044,73 @@ test('预检门禁：blocked=true 时 409 并点名插件；force 写留痕后�
   }
 })
 
+test('会话确认：confirmSessions 只跳过会话门禁，不写 force-audit（#428）', async (t) => {
+  const agents = {
+    list: () => [{ status: 'running', session: { id: 'session-1' } }],
+  }
+  const env = await makeEnvironment({ agents })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const confirmed = await fetch(`${env.host.base}${API.update}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9', confirmSessions: true }),
+    })
+    assert.equal(confirmed.status, 202, 'confirmSessions 可以跳过会话门禁')
+    const accepted = await confirmed.json()
+    assert.equal(accepted.handoff, true)
+    await waitFor(() => env.host.scheduled.length === 1, 'the helper to be scheduled')
+    assert.equal(env.host.scheduled[0].mode, 'update')
+    assert.equal(
+      existsSync(join(env.stateDir, 'force-audit.jsonl')),
+      false,
+      '会话确认不是强制升级，不许留下 force-audit',
+    )
+  } finally {
+    await env.close()
+  }
+})
+
+test('会话确认：confirmSessions 不能绕过预检 blocked（仍 409 且不留痕，#428）', async (t) => {
+  const preflight = {
+    schema: 1,
+    at: Date.now(),
+    target: '9.9.9',
+    blocked: true,
+    plugins: [
+      {
+        name: 'probe-fails',
+        version: '1.0.0',
+        enabled: true,
+        p1: { ok: true, verdict: 'ok', requirements: {}, declared: 'compatible' },
+        p2: { ok: false, reason: 'plugin add 退出码 1' },
+      },
+    ],
+    warnings: [],
+  }
+  const agents = {
+    list: () => [{ status: 'running', session: { id: 'session-1' } }],
+  }
+  const env = await makeEnvironment({ omitPreflight: true, preflight, agents })
+  if (env.skip !== undefined) return t.skip(env.skip)
+  try {
+    const rejected = await fetch(`${env.host.base}${API.update}`, {
+      method: 'POST', headers: TOKEN, body: JSON.stringify({ version: '9.9.9', confirmSessions: true }),
+    })
+    assert.equal(rejected.status, 409, '会话确认不碰预检门禁')
+    const body = await rejected.json()
+    assert.equal(body.code, 'E_PREFLIGHT')
+    assert.equal(body.detail.reason, 'blocked')
+    assert.deepEqual(body.detail.blocked, ['probe-fails'])
+    assert.equal(env.host.scheduled.length, 0, '被预检拦下时不许交接')
+    assert.equal(
+      existsSync(join(env.stateDir, 'force-audit.jsonl')),
+      false,
+      'confirmSessions 不写 force-audit',
+    )
+  } finally {
+    await env.close()
+  }
+})
+
 test('POST /probe：没有可试装项时早退，且不泄漏占位（否则后续永久 409）', async (t) => {
   // 没有 link:/file: 插件 → 走 skipped 早退分支（这条路径曾漏释放 probeRun，见 #300 review 轮 2）
   const env = await makeEnvironment()
