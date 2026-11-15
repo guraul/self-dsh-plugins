@@ -1,0 +1,8 @@
+- insert:
+    - id: go-quota
+      name: dsh-go-quota
+      config:
+        apiKeyEnv: OPENCODE_GO_API_KEY
+        baseUrl: https://opencode.ai/zen/go/v1/usage
+        timeoutMs: 15000
+        cacheMs: 30000

@@ -16,6 +16,7 @@
 | `dsh-subagents/` | [`dsh-subagents.md`](./dsh-subagents.md) | `dsh-plugin-subagents` | 原创（替代 fork `dsh-plugin-product-subagents`） |
 | `dsh-prompt-optimizer/` | [`dsh-prompt-optimizer.md`](./dsh-prompt-optimizer.md) | `@y1x1n/dsh-prompt-optimizer` | fork（npm `@y1x1n/dsh-prompt-optimizer@0.6.1`） |
 | `dsh-usage-panel/` | [`dsh-usage-panel.md`](./dsh-usage-panel.md) | `dsh-usage-panel` | fork（`AlfredChaos/dsh-usage-panel` v0.2.3，`0.2.3-fork.1`） |
+| `dsh-go-quota/` | [`dsh-go-quota.md`](./dsh-go-quota.md) | `dsh-go-quota` | 原创 |
 
 各插件目录内仍保留面向**使用者**的 `README.md`（安装 / 配置 / 已知限制）；
 本目录的文档面向**在此仓库动手的 agent**，与 README 互补，不重复整篇内容。

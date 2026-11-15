@@ -1,0 +1,20 @@
+{
+  "name": "dsh-go-quota",
+  "version": "0.1.0",
+  "description": "OpenCode GO quota pill under the DSH composer: rolling 5h / weekly / monthly usage from the official usage endpoint",
+  "type": "module",
+  "main": "./index.js",
+  "exports": { ".": "./index.js", "./client": "./client.js", "./package.json": "./package.json" },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "README.md"],
+  "scripts": { "test": "node --test \"test/*.test.mjs\"" },
+  "license": "MIT",
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "peerDependencies": { "react": "^18.2.0" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "inject": ["@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-locale"]
+    }
+  }
+}
