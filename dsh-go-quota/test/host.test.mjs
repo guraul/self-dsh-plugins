@@ -12,7 +12,7 @@ function harness(options) {
   const ctx = {
     credentials: { resolve: async () => (options.key === null ? undefined : { value: options.key ?? 'test-key' }) },
     inject(_deps, callback) {
-      callback({ webServer: { register: (route) => { handler = route.handler; return () => {} } } })
+      callback({ webServer: { register: (route) => { handler = route.handler; return () => {} } }, credentials: ctx.credentials })
     },
     effect(run) { run() },
   }
@@ -126,4 +126,23 @@ test('失败不写缓存，下一次会重试', async () => {
   const second = await h.call()
   assert.equal(second.body.ok, true)
   assert.equal(calls, 2)
+})
+
+test('凭据服务抛错时回 no-key，且不请求上游', async () => {
+  let called = false
+  let captured
+  const credentials = { resolve: async () => { throw new Error('credentials unavailable') } }
+  const ctx = {
+    credentials,
+    inject(_deps, callback) {
+      callback({ webServer: { register: (route) => { captured = route.handler; return () => {} } }, credentials })
+    },
+    effect(run) { run() },
+  }
+  apply(ctx, { fetch: async () => { called = true; throw new Error('should not fetch') } })
+  let body = ''
+  const res = { statusCode: 0, headers: {}, setHeader() {}, writeHead(code) { this.statusCode = code }, end(text) { body = text } }
+  await captured({ method: 'GET', socket: { remoteAddress: '127.0.0.1' } }, res)
+  assert.equal(JSON.parse(body).code, 'no-key')
+  assert.equal(called, false)
 })
