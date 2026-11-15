@@ -133,28 +133,32 @@ export function apply(ctx, config = {}) {
   }
 
   /**
-   * 路由处理器：方法 → 回环地址 → 取 key → 上游 / 缓存。
-   * @param {import('node:http').IncomingMessage} req 请求。
-   * @param {import('node:http').ServerResponse} res 响应。
-   * @returns {Promise<void>}
+   * 路由处理器工厂：接注入的凭据服务，返回「方法 → 回环地址 → 取 key → 上游 / 缓存」处理器。
+   * @param {{resolve: (name: string) => Promise<{value?: string} | undefined>}} credentials 注入的凭据服务。
+   * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void>}
    */
-  const handler = async (req, res) => {
+  const handler = (credentials) => async (req, res) => {
     if (req.method !== 'GET') return send(res, 405, { ok: false, code: 'method-not-allowed' })
     if (!LOOPBACK.has(req.socket.remoteAddress)) return send(res, 403, { ok: false, code: 'forbidden' })
 
     let body
     try {
-      const hit = await ctx.credentials.resolve(apiKeyEnv)
+      const hit = await credentials.resolve(apiKeyEnv)
       body = hit?.value ? await load(hit.value) : { ok: false, code: 'no-key' }
     } catch {
-      // 凭据服务出错：只给稳定码，不带任何错误细节。
-      body = { ok: false, code: 'internal' }
+      // 凭据服务不可用与「没配 key」对用户是同一件事：都给可操作的 no-key。
+      // 只有离谱的异常才落到 internal，且不带任何细节。
+      body = { ok: false, code: 'no-key' }
     }
     send(res, 200, body)
   }
 
-  ctx.inject(['webServer'], (webCtx) => {
-    const dispose = webCtx.webServer.register({ kind: 'exact', path: '/plugins/go-quota/usage', handler })
+  ctx.inject(['webServer', 'credentials'], (scope) => {
+    const dispose = scope.webServer.register({
+      kind: 'exact',
+      path: '/plugins/go-quota/usage',
+      handler: handler(scope.credentials),
+    })
     // 卸载 / disable / 重启：先摘路由，避免「路由还在但插件已死」。
     ctx.effect(() => {
       return () => {
@@ -166,4 +170,4 @@ export function apply(ctx, config = {}) {
 
 export const name = 'dsh-go-quota'
 
-export const inject = ['webServer']
+export const inject = ['webServer', 'credentials']
