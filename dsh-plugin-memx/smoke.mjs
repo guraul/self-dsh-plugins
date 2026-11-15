@@ -11,11 +11,18 @@
  *
  * 为什么能抓漂移：设置面只认 volatile 字段（字段丢了整页消失）、记忆写盘全靠路径解析，
  * 两者坏掉在运行时都是「静默不工作」，只有断言能立刻发现。
+ *
+ * 环境缺 memx 源码时（CI）：`MEMX_ROOT` 是写死的本机绝对路径，CI（Linux）上连父目录都没有。
+ * 这种环境里 `memx-module` / `memory-dir` 一律记 `ok:true` + `skipped: …`——**不假装验证过**，
+ * 但也不制造与改动无关的红灯。只有「父目录在、入口文件却没了」才算真漂移（`ok:false`）。
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+
+/** memx 源码不在本环境时的统一 detail：明确写 skipped，不冒充通过。 */
+const SKIP_DETAIL = 'skipped: memx 源码不在本环境'
 
 /** 四个设置字段的期望形状：类型 + `.default()` + `.volatile()`。 */
 const EXPECTED_FIELDS = {
@@ -38,13 +45,51 @@ function readMemxRoot() {
 }
 
 /**
+ * 判定 memx 源码在本环境的状态。
+ *
+ * - `absent`：`MEMX_ROOT` 的**父目录**都不存在 → 本环境没有 memx 源码（CI），跳过；
+ * - `missing`：父目录在、`src/hosts/dsh/index.ts` 缺失 → 真漂移（路径被改了），必须红；
+ * - `present`：入口在 → 做真验证；
+ * - `broken`：连 `MEMX_ROOT` 常量都读不出来（接线入口被改写），也算红。
+ * @param {string} root memx 仓根目录。
+ * @returns {{state: 'absent' | 'missing' | 'present' | 'broken', dir?: string, entry?: string, detail?: string}} 状态。
+ */
+function memxSourceState(root) {
+  const dir = resolve(root)
+  const entry = join(dir, 'src/hosts/dsh/index.ts')
+  if (!existsSync(dirname(dir))) return { state: 'absent', dir, entry }
+  if (!existsSync(entry)) return { state: 'missing', dir, entry }
+  return { state: 'present', dir, entry }
+}
+
+/**
+ * 把「源码不在 / 路径漂移」翻译成断言结果；`present` 返回 `undefined` 表示继续真验证。
+ * @param {{state: string, entry?: string, detail?: string}} source `memxSourceState` 的结果。
+ * @returns {{ok: boolean, detail: string} | undefined} 直接作为该条断言的结果。
+ */
+function skipUnlessPresent(source) {
+  if (source.state === 'absent') return { ok: true, detail: SKIP_DETAIL }
+  if (source.state === 'broken') return { ok: false, detail: source.detail }
+  if (source.state === 'missing') return { ok: false, detail: `memx 入口缺失（路径漂移）：${source.entry}` }
+  return undefined
+}
+
+/**
  * 跑一遍断言。
- * @param {{name?: string, dshDir?: string, dshVersion?: string}} [_ctx] 宿主事实（本插件不需要）。
+ * @param {{name?: string, dshDir?: string, dshVersion?: string, memxRoot?: string}} [ctx] 宿主事实；
+ *   `memxRoot` 仅供自测覆盖 memx 仓位置（默认从 `lib/index.js` 读硬编码常量）。
  * @returns {Promise<{ok: boolean, checks: {name: string, ok: boolean, detail?: string}[]}>} 结果。
  */
-export async function run(_ctx = {}) {
+export async function run(ctx = {}) {
   /** @type {{name: string, ok: boolean, detail?: string}[]} */
   const checks = []
+  /** memx 源码位置：读不出常量时记 `broken`，由各条断言自行报红。 */
+  let source
+  try {
+    source = memxSourceState(ctx.memxRoot ?? readMemxRoot())
+  } catch (error) {
+    source = { state: 'broken', detail: error instanceof Error ? error.message : String(error) }
+  }
   /**
    * 跑一条断言：抛错也算失败。
    * @param {string} name 断言名。
@@ -61,6 +106,8 @@ export async function run(_ctx = {}) {
   }
 
   await check('memx-module', async () => {
+    const skip = skipUnlessPresent(source)
+    if (skip !== undefined) return skip
     const memx = await import('./lib/index.js')
     const missing = ['apply', 'name', 'inject', 'Config'].filter((key) => memx[key] === undefined)
     return {
@@ -70,7 +117,15 @@ export async function run(_ctx = {}) {
   })
 
   await check('config-schema', async () => {
-    const shell = await import('./lib/index.js')
+    // 四个字段本身只依赖本包的 lib/config.js；但「lib/index.js 转发的就是本包 Config」这条要加载入口，
+    // 而入口顶层就 import 了 memx 的 TS 适配器 → 环境里没有 memx 源码时只有这一子断言 skip。
+    let shell
+    let shellError
+    try {
+      shell = await import('./lib/index.js')
+    } catch (error) {
+      shellError = error instanceof Error ? error.message : String(error)
+    }
     const { Config } = await import('./lib/config.js')
     const fields = Object.keys(Config.dict ?? {})
     const wrong = []
@@ -87,19 +142,29 @@ export async function run(_ctx = {}) {
     if (JSON.stringify(fields) !== JSON.stringify(Object.keys(EXPECTED_FIELDS))) {
       wrong.push(`fields=${JSON.stringify(fields)}`)
     }
-    if (shell.Config !== Config) wrong.push('lib/index.js 转发的不是本包 Config')
+    if (shell === undefined) {
+      // `absent` 是环境限制（CI），`missing` / `broken` 是真漂移，由 memx-module 报红，这里也不放过。
+      if (source.state !== 'absent') wrong.push(`lib/index.js 加载失败：${shellError}`)
+    } else if (shell.Config !== Config) {
+      wrong.push('lib/index.js 转发的不是本包 Config')
+    }
     return {
       ok: wrong.length === 0,
-      detail: wrong.length === 0
-        ? `四字段齐全且全 volatile：${fields.join(', ')}`
-        : `设置面契约漂移：${wrong.join('; ')}`,
+      detail: wrong.length !== 0
+        ? `设置面契约漂移：${wrong.join('; ')}`
+        : `四字段齐全且全 volatile：${fields.join(', ')}${
+          shell === undefined ? `（shell 身份断言 ${SKIP_DETAIL}）` : ''
+        }`,
     }
   })
 
   await check('memory-dir', async () => {
+    const skip = skipUnlessPresent(source)
+    if (skip !== undefined) return skip
     // 先加载本包入口，顺带装上 memx 源码目录的 load 钩子。
     await import('./lib/index.js')
-    const root = readMemxRoot()
+    const root = source.dir
+
     const store = await import(pathToFileURL(join(root, 'src/core/store/memory-md.ts')).href)
     const types = await import(pathToFileURL(join(root, 'src/core/memory-types.ts')).href)
     const slug = types.deriveSlug('/Users/alice/work/proj')
