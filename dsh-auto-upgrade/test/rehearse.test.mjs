@@ -20,6 +20,7 @@ import {
   rehearsalPatchSource,
   rehearsalProbeSource,
   runRehearsal,
+  tailText,
 } from '../lib/host/rehearse.js'
 
 /** 一个 `evaluatePlugins()` 形状的插件条目。 */
@@ -272,6 +273,88 @@ test('installTargetDsh：只用 npm --prefix 装到临时目录，bin 不存在�
   assert.equal(ok.dshBin, join(target, 'node_modules', '.bin', process.platform === 'win32' ? 'dsh.cmd' : 'dsh'))
 })
 
+test('installTargetDsh：prefix 不存在时先建目录再交给 npm（#442）', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-au-install-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+  // 连父目录都不存在：npm 自己不会建，会直接 ENOENT lstat。
+  const dir = join(home, 'missing', REHEARSAL_TARGET_DIR)
+  await assert.rejects(stat(dir))
+
+  let existedBeforeRun = false
+  const ok = await installTargetDsh({
+    version: '0.2.2-rc.3',
+    dir,
+    run: async () => {
+      existedBeforeRun = (await stat(dir)).isDirectory()
+      await mkdir(join(dir, 'node_modules', '.bin'), { recursive: true })
+      await writeFile(join(dir, 'node_modules', '.bin', process.platform === 'win32' ? 'dsh.cmd' : 'dsh'), '')
+      return { status: 0, stdout: '', stderr: '' }
+    },
+  })
+  assert.equal(existedBeforeRun, true)
+  assert.equal(ok.ok, true)
+})
+
+test('installTargetDsh：prefix 已存在时按 mkdir -p 语义照常安装（不报 EEXIST）', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-au-install-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+  const dir = join(home, 'target')
+  await mkdir(dir, { recursive: true })
+
+  const ok = await installTargetDsh({
+    version: '0.2.2-rc.3',
+    dir,
+    run: async () => {
+      assert.equal((await stat(dir)).isDirectory(), true)
+      await mkdir(join(dir, 'node_modules', '.bin'), { recursive: true })
+      await writeFile(join(dir, 'node_modules', '.bin', process.platform === 'win32' ? 'dsh.cmd' : 'dsh'), '')
+      return { status: 0, stdout: '', stderr: '' }
+    },
+  })
+  assert.equal(ok.ok, true)
+})
+
+test('installTargetDsh：失败时把 npm stderr 的尾部带进 error（#442）', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-au-install-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+  const stderr = [
+    'npm error early-line-that-must-not-survive',
+    'npm error code ENOENT',
+    'npm error syscall lstat',
+    'npm error path /private/tmp/dsh-au-preflight-x/.dsh-rehearsal-target',
+    'npm error errno -2',
+    'npm error enoent ENOENT: no such file or directory, lstat \'/private/tmp/dsh-au-preflight-x/.dsh-rehearsal-target\'',
+    'npm error A complete log of this run can be found in: /Users/x/.npm/_logs/debug-0.log',
+  ].join('\n')
+
+  const failed = await installTargetDsh({
+    version: '0.2.2-rc.3',
+    dir: join(home, 'target'),
+    run: async () => ({ status: 1, stdout: '', stderr }),
+  })
+  assert.equal(failed.ok, false)
+  assert.match(failed.error, /npm 退出码 1/)
+  // 尾部（最后 4 行）在文案里：syscall / path / errno / enoent / log 之后的内容不能被截掉。
+  assert.match(failed.error, /lstat/)
+  assert.match(failed.error, /debug-0\.log/)
+  // 开头那行按「只留尾部」被丢掉。
+  assert.doesNotMatch(failed.error, /early-line-that-must-not-survive/)
+  assert.ok(tailText(stderr).length <= 300)
+})
+
+test('tailText：只留最后几行，超长从左边裁、结尾保留', () => {
+  const lines = Array.from({ length: 10 }, (_, index) => `line-${index}`)
+  const kept = tailText(lines.join('\n'))
+  assert.match(kept, /line-9/)
+  assert.match(kept, /line-6/)
+  assert.doesNotMatch(kept, /line-5/)
+
+  const long = `${'x'.repeat(400)}-TAIL`
+  const cut = tailText(long)
+  assert.ok(cut.length <= 300)
+  assert.match(cut, /-TAIL$/)
+})
+
 test('installTargetDsh：非法版本号直接拒绝，不跑 npm', async () => {
   let called = false
   const result = await installTargetDsh({
@@ -351,11 +434,18 @@ test('runRehearsal：默认安装器失败时也不启动（接线级不回退�
     dshHome: home,
     profileName: 'probe',
     entries: ['plugin-a'],
-    run: async () => ({ status: 1, stdout: '', stderr: 'npm ERR! network' }),
+    run: async () => ({
+      status: 1,
+      stdout: '',
+      stderr: 'npm error first-line-dropped\nnpm error code ENOENT\nnpm error syscall lstat\nnpm error A complete log of this run can be found in: /Users/x/.npm/_logs/debug-1.log',
+    }),
     launch: async () => { launched += 1; return fakeHandle('') },
   })
   assert.equal(p3.launch, 'failed')
   assert.match(p3.error, /安装目标版本/)
+  // 接线级：npm 的 stderr 尾部要进 p3.error，而不是只有「退出码 1」。
+  assert.match(p3.error, /ENOENT/)
+  assert.match(p3.error, /debug-1\.log/)
   assert.equal(launched, 0)
 })
 

@@ -229,20 +229,51 @@ function runCommand(command, args, options) {
   })
 }
 
+/** 错误文案里保留的 stderr 行数（只留尾部：npm 的结论在最后几行）。 */
+const STDERR_TAIL_LINES = 4
+/** 错误文案里 stderr 尾部的字符上限。 */
+const STDERR_TAIL_MAX = 300
+
 /**
- * 错误文案里的 stderr 截断（不把整段 npm 日志塞进 `preflight.json`）。
+ * 取 stderr 的**尾部**并截断（不把整段 npm 日志塞进 `preflight.json`）。
+ *
+ * 只留最后几行而不是开头：npm 的 `code` / `syscall` / `path` / `errno` 结论都在尾部，
+ * 从开头截会把真正的原因切掉（#442 真机上只剩「退出码 1」就是这个坑）。
+ * 超长时从**左边**裁掉，保证结尾那条错误仍在文案里。
  * @param {unknown} text 文本。
- * @returns {string} 单行、最多 300 字符。
+ * @param {number} [lines] 保留的最大行数。
+ * @param {number} [max] 字符上限。
+ * @returns {string} 单行、最多 `max` 字符。
  */
-function shortText(text) {
-  return String(text ?? '').split('\n').map((line) => line.trim()).filter((line) => line !== '').join(' / ').slice(0, 300)
+export function tailText(text, lines = STDERR_TAIL_LINES, max = STDERR_TAIL_MAX) {
+  const kept = String(text ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .slice(-Math.max(1, lines))
+    .join(' | ')
+  if (kept.length <= max) return kept
+  return `…${kept.slice(-(max - 1))}`
+}
+
+/**
+ * 按 `mkdir -p` 语义建出安装前缀目录（已存在不报错）。
+ *
+ * npm 的 `--prefix` **不会**自动建目录：prefix 不存在时它直接 `ENOENT: lstat <prefix>`
+ * 退出（#442 真机复现）。所以必须先建好再交给 npm。
+ * @param {string} dir 前缀目录。
+ * @returns {Promise<void>} 建好即返回。
+ */
+async function ensureInstallDir(dir) {
+  await mkdir(dir, { recursive: true })
 }
 
 /**
  * 在一次性目录里装出**目标版本**的 dsh。
  *
- * 只用 `npm install --prefix` 装到临时目录，不碰全局安装。失败一律返回
- * `{ok:false, error}`，由调用方落成 `launch: 'failed'`——**没有回退**。
+ * 只用 `npm install --prefix` 装到临时目录，不碰全局安装。安装前按 `mkdir -p` 建好
+ * 前缀目录（npm 不建，不存在会 `ENOENT lstat`）。失败一律返回 `{ok:false, error}`
+ * （error 带 npm stderr 的尾部），由调用方落成 `launch: 'failed'`——**没有回退**。
  * @param {object} options 输入。
  * @param {string} options.version 目标版本（精确版本号）。
  * @param {string} options.dir 安装前缀（`<dir>/node_modules/...`）。
@@ -262,14 +293,22 @@ export async function installTargetDsh(options) {
   const npmBin = options.npmBin ?? defaultNpmBinary()
   const run = options.run ?? runCommand
   try {
-    await mkdir(dir, { recursive: true })
+    // npm 不会替我们建 `--prefix` 目录（不存在就是 ENOENT lstat），先在 npm 之前建好。
+    await ensureInstallDir(dir)
+  } catch (error) {
+    return {
+      ok: false,
+      error: `无法创建安装目录 ${dir}：${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+  try {
     const result = await run(
       npmBin,
       ['install', '--prefix', dir, '--no-audit', '--no-fund', '--loglevel', 'error', spec],
       { timeoutMs: options.timeoutMs ?? REHEARSAL_INSTALL_TIMEOUT_MS, env: options.env },
     )
     if (result?.status !== 0) {
-      const detail = shortText(result?.stderr)
+      const detail = tailText(result?.stderr ?? result?.stdout)
       return {
         ok: false,
         error: `安装目标版本 ${version} 失败（npm 退出码 ${String(result?.status ?? 'null')}）${detail === '' ? '' : `：${detail}`}`,
