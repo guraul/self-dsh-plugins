@@ -82,11 +82,12 @@ window.__ModuleLoader__.load({
         '.dsh-gq-pill{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;padding:1px 8px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-variant-numeric:tabular-nums;line-height:inherit;white-space:nowrap;cursor:pointer;}',
         '.dsh-gq-pill[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);}',
         '@media (hover:hover){.dsh-gq-pill:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);}}',
-        '.dsh-gq-panel{position:fixed;z-index:1100;box-sizing:border-box;width:min(264px,calc(100vw - 24px));padding:12px;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary);cursor:default;max-width:calc(100vw - 24px);max-height:calc(100dvh - 12px - max(12px,var(--dsh-frame-overlay-top,12px)));overflow-y:auto;position-area:none;top:max(12px,var(--dsh-frame-overlay-top,12px));bottom:max(12px,calc(anchor(top) + 8px));left:max(12px,anchor(left));right:12px;position-try-fallbacks:--dsh-gq-window,--dsh-gq-opposite,--dsh-gq-wide-opposite,--dsh-gq-tall;align-self:end;justify-self:start;height:fit-content;margin:0;}',
+        '.dsh-gq-panel{position:fixed;z-index:1100;box-sizing:border-box;width:min(264px,calc(100vw - 24px));padding:12px;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary);cursor:default;max-width:calc(100vw - 24px);max-height:calc(100dvh - 12px - max(12px,var(--dsh-frame-overlay-top,12px)));overflow-y:auto;position-area:none;top:max(12px,var(--dsh-frame-overlay-top,12px));bottom:max(12px,calc(anchor(top) + 8px));left:max(12px,anchor(left));right:12px;position-try-fallbacks:--dsh-gq-window,--dsh-gq-opposite,--dsh-gq-wide-opposite,--dsh-gq-tall,--dsh-gq-viewport;align-self:end;justify-self:start;height:fit-content;margin:0;}',
         '@position-try --dsh-gq-window{position-area:none;top:max(12px,var(--dsh-frame-overlay-top,12px));bottom:max(12px,calc(anchor(top) + 8px));left:12px;right:12px;margin:0;align-self:safe end;justify-self:safe end;}',
         '@position-try --dsh-gq-opposite{top:max(12px,calc(anchor(bottom) + 8px));bottom:12px;align-self:start;}',
         '@position-try --dsh-gq-wide-opposite{top:max(12px,calc(anchor(bottom) + 8px));bottom:12px;left:12px;right:12px;align-self:start;justify-self:safe end;}',
         '@position-try --dsh-gq-tall{position-area:none;top:max(12px,var(--dsh-frame-overlay-top,12px));bottom:12px;left:max(12px,anchor(left));right:12px;margin:0;align-self:safe start;justify-self:start;}',
+        '@position-try --dsh-gq-viewport{position-area:none;inset:max(12px,var(--dsh-frame-overlay-top,12px)) 12px 12px;margin:0;align-self:safe start;justify-self:safe end;}',
         '.dsh-gq-title{display:flex;align-items:center;gap:6px;}',
         '.dsh-gq-title-label{display:inline-flex;align-items:center;gap:6px;color:var(--dsw-alias-label-primary);font-weight:500;}',
         '.dsh-gq-title-meta{margin-left:auto;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;font-size:11px;}',
@@ -101,6 +102,7 @@ window.__ModuleLoader__.load({
         '.dsh-gq-fill.is-danger{background:var(--dsw-alias-state-error-primary);}',
         '.dsh-gq-meta{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:17px;}',
         '.dsh-gq-foot{margin-top:6px;padding-top:6px;border-top:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:17px;}',
+        '.dsh-gq-empty{color:var(--dsw-alias-label-tertiary);padding:8px 0 2px;}',
       ].join('')
       document.head.appendChild(tag)
     }
@@ -237,7 +239,15 @@ window.__ModuleLoader__.load({
         h('span', null, t('pill.label') + ' ' + reading),
       )
 
-      const panel = open && windows.length > 0
+      const stateText = () => {
+        if (state.busy && state.data === null) return t('state.loading')
+        if (state.error === 'no-key') return t('state.nokey')
+        if (state.error === 'unauthorized') return t('state.unauthorized')
+        if (state.error === null) return ''
+        return t('state.unavailable')
+      }
+
+      const panel = open
         ? reactDom.createPortal(
           h(
             'div',
@@ -255,26 +265,28 @@ window.__ModuleLoader__.load({
               h('span', { className: 'dsh-gq-title-meta' }, state.fetchedAt === 0 ? '' : t('updated', { time: new Date(state.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })),
             ),
             h('div', { className: 'dsh-gq-rule' }),
-            windows.map((item) => h(
-              'div',
-              { key: item.key, className: 'dsh-gq-row' },
-              h(
+            windows.length > 0
+              ? windows.map((item) => h(
                 'div',
-                { className: 'dsh-gq-head' },
-                h('span', { className: 'dsh-gq-win' }, t('window.' + item.key)),
-                h('span', { className: 'dsh-gq-val' }, t('used', { percent: Math.round(item.percent) })),
-              ),
-              h(
-                'div',
-                { className: 'dsh-gq-bar' },
-                h('div', { className: 'dsh-gq-fill ' + tone(item.percent), style: { width: item.percent + '%' } }),
-              ),
-              h('div', { className: 'dsh-gq-meta' }, relative(item.resetsAt, t)),
-            )),
+                { key: item.key, className: 'dsh-gq-row' },
+                h(
+                  'div',
+                  { className: 'dsh-gq-head' },
+                  h('span', { className: 'dsh-gq-win' }, t('window.' + item.key)),
+                  h('span', { className: 'dsh-gq-val' }, t('used', { percent: Math.round(item.percent) })),
+                ),
+                h(
+                  'div',
+                  { className: 'dsh-gq-bar' },
+                  h('div', { className: 'dsh-gq-fill ' + tone(item.percent), style: { width: item.percent + '%' } }),
+                ),
+                h('div', { className: 'dsh-gq-meta' }, relative(item.resetsAt, t)),
+              ))
+              : h('div', { className: 'dsh-gq-empty' }, stateText()),
             h(
               'div',
               { className: 'dsh-gq-foot' },
-              state.error === null ? (state.busy ? t('state.busy') : '') : t('state.failed'),
+              state.error !== null && state.data !== null ? t('state.failed') : (state.busy ? t('state.busy') : ''),
             ),
           ),
           document.body,

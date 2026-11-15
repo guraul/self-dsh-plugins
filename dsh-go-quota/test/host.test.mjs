@@ -17,19 +17,21 @@ function harness(options) {
     effect(run) { run() },
   }
   apply(ctx, { fetch: options.fetch, cacheMs: options.cacheMs ?? 30000 })
+  const callWith = async (remoteAddress, method = 'GET') => {
+    let body = ''
+    const res = {
+      statusCode: 0,
+      headers: {},
+      setHeader(name, value) { this.headers[name] = value },
+      writeHead(code) { this.statusCode = code },
+      end(text) { body = text },
+    }
+    await handler({ method, socket: { remoteAddress } }, res)
+    return { status: res.statusCode, headers: res.headers, body: body === '' ? null : JSON.parse(body) }
+  }
   return {
-    async call(method = 'GET') {
-      let body = ''
-      const res = {
-        statusCode: 0,
-        headers: {},
-        setHeader(name, value) { this.headers[name] = value },
-        writeHead(code) { this.statusCode = code },
-        end(text) { body = text },
-      }
-      await handler({ method, socket: { remoteAddress: '127.0.0.1' } }, res)
-      return { status: res.statusCode, headers: res.headers, body: body === '' ? null : JSON.parse(body) }
-    },
+    call: (method = 'GET') => callWith('127.0.0.1', method),
+    callFrom: (addr, method = 'GET') => callWith(addr, method),
   }
 }
 
@@ -84,4 +86,44 @@ test('没有 key 时回 no-key', async () => {
   const h = harness({ key: null, fetch: async () => { throw new Error('should not fetch') } })
   const { body } = await h.call()
   assert.equal(body.code, 'no-key')
+})
+
+test('并发两次调用只打一次上游', async () => {
+  let calls = 0
+  const h = harness({
+    fetch: async () => {
+      calls += 1
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      return { ok: true, status: 200, json: async () => payload() }
+    },
+    cacheMs: 60000,
+  })
+  await Promise.all([h.call(), h.call()])
+  assert.equal(calls, 1)
+})
+
+test('非 GET 回 405，非回环回 403', async () => {
+  const h = harness({ fetch: async () => ({ ok: true, status: 200, json: async () => payload() }) })
+  const post = await h.call('POST')
+  assert.equal(post.status, 405)
+  const remote = await h.callFrom('10.0.0.7')
+  assert.equal(remote.status, 403)
+})
+
+test('失败不写缓存，下一次会重试', async () => {
+  let calls = 0
+  const h = harness({
+    fetch: async () => {
+      calls += 1
+      return calls === 1
+        ? { ok: false, status: 500, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => payload() }
+    },
+    cacheMs: 60000,
+  })
+  const first = await h.call()
+  assert.equal(first.body.ok, false)
+  const second = await h.call()
+  assert.equal(second.body.ok, true)
+  assert.equal(calls, 2)
 })
