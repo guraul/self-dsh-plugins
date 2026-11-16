@@ -42,9 +42,9 @@
 | 术语口径（角色 / 接入形态 / provider） | [`GLOSSARY.md`](./GLOSSARY.md) |
 | 历史归档（已废弃的方案，仅存档） | [`docs/archive/`](./docs/archive/README.md) |
 | 某插件的安装 / 配置 / 已知限制（面向使用者） | 各插件目录的 `README.md` |
-| dsh web 重启（命令行） | [`dsh-web-restart.sh`](./dsh-web-restart.sh)（唯一重启入口：默认/`--force`/`--check`；**禁止在 dsh 会话里真跑**） |
-| dsh web 重启（双击） | [`重启 dsh-web.command`](./重启%20dsh-web.command)（Finder 双击即跑，无参数，等价 `dsh-web-restart.sh --force`；成功后自动用浏览器打开新地址） |
-| dsh 升级 / 回滚 / 备份恢复（重启走 dsh-web-restart.sh） | [`upgrade-dsh.sh`](./upgrade-dsh.sh) + dsh-auto-upgrade 插件 |
+| dsh web 重启（命令行） | [`ops/dsh-web-restart.sh`](./ops/dsh-web-restart.sh)（唯一重启入口：默认/`--force`/`--check`；**禁止在 dsh 会话里真跑**） |
+| dsh web 重启（双击） | [`ops/重启 dsh-web.command`](./ops/重启%20dsh-web.command)（Finder 双击即跑，无参数，等价 `dsh-web-restart.sh --force`；成功后自动用浏览器打开新地址） |
+| dsh 升级 / 回滚 / 备份恢复（重启走 ops/dsh-web-restart.sh） | [`ops/upgrade-dsh.sh`](./ops/upgrade-dsh.sh) + dsh-auto-upgrade 插件 |
 | DSH 版本兼容与版本豁免 | [`docs/plugins/dsh-plugin-product-subagents.md`](./docs/plugins/dsh-plugin-product-subagents.md)（发版纪律）+ [版本豁免](./docs/pipeline/README.md#版本豁免) |
 
 ## 插件索引
@@ -63,10 +63,10 @@
 | [`dsh-usage-panel/`](./dsh-usage-panel) | `dsh-usage-panel` | 用量面板：设置页「消耗统计」展示 Token 用量 KPI、活跃热力图、按模型堆叠柱状图与模型环形图，只读聚合会话日志、不回写 | **fork**（`AlfredChaos/dsh-usage-panel` v0.2.3，本地 `0.2.3-fork.1`） |
 | [`dsh-go-quota/`](./dsh-go-quota) | `dsh-go-quota` | 输入框下方统计行里的额度 pill：直查 OpenCode GO 官方用量接口（`/zen/go/v1/usage`），点开显示 5 小时 / 本周 / 本月三个窗口 | **原创** |
 
-顶层其它文件：[`README.md`](./README.md)（对外说明）、[`dsh-web-restart.sh`](./dsh-web-restart.sh)（dsh web 唯一重启入口）、
-[`重启 dsh-web.command`](./重启%20dsh-web.command)（双击重启，无参数；macOS 里 .sh 双击只会开编辑器，.command 才会执行）、
-[`upgrade-dsh.sh`](./upgrade-dsh.sh)（全局 dsh 升级 / 回滚 / 备份恢复，重启走 dsh-web-restart.sh）、
-[`dsh-web-stop.sh`](./dsh-web-stop.sh)（停服）、[`.dsh-web/`](./.dsh-web)（LaunchAgent 与既有重启脚本）、
+顶层其它文件：[`README.md`](./README.md)（对外说明）、
+[`ops/`](./ops)（宿主运维脚本，不进任何插件包：`dsh-web-restart.sh` 唯一重启入口、`重启 dsh-web.command` 双击入口、
+`upgrade-dsh.sh` 升级 / 回滚 / 备份恢复、`dsh-web-stop.sh` 停服）、
+[`.dsh-web/`](./.dsh-web)（LaunchAgent 与既有重启脚本）、
 [`docs/`](./docs)（插件文档 / pipeline / 归档）、[`scripts/pipeline/`](./scripts/pipeline)（共享包生成的 6 个交付入口，禁止手改）。
 
 ## 强制规定

@@ -4,7 +4,7 @@
 #
 # 为什么是 .command：macOS 里双击 .sh 只会用编辑器打开，双击 .command 才会交给终端执行。
 #
-# 行为：等价于在同目录执行 ./dsh-web-restart.sh --force
+# 行为：等价于执行同目录的 ./dsh-web-restart.sh --force
 #   * job 在管 → launchctl kickstart -k
 #   * job 不在管 → 补 plist 后 bootstrap
 #   * 端口被非 launchd 进程占着 / 还有别的野宿主 → 先结束它们（野进程判定只认 dsh 入口）
@@ -15,8 +15,9 @@ set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd -P)"
 MAIN="${DIR}/dsh-web-restart.sh"
-# .dsh-web/ 始终在主工作区：在 worktree 里双击时，按 git-common-dir 回推主仓根
-ROOT="${DIR}"
+# .dsh-web/ 始终在主工作区：脚本在 ops/ 下，仓库根是上一层；
+# 在 worktree 里双击时，再按 git-common-dir 回推主仓根
+ROOT="$(cd "${DIR}/.." && pwd -P)"
 COMMON="$(git -C "${DIR}" rev-parse --git-common-dir 2>/dev/null || true)"
 case "${COMMON}" in
   */.git) ROOT="$(cd "$(dirname "${COMMON}")" && pwd -P)" ;;

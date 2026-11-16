@@ -7,10 +7,10 @@
 #    会话内只允许 --check（只打印、不操作）。
 #
 # 用法：
-#   ./dsh-web-restart.sh --check    # 只打印现状与建议动作（含「其它 dsh 宿主」），不做任何操作
-#   ./dsh-web-restart.sh            # 重启：job 在管 → kickstart；job 不在管 → bootstrap
-#   ./dsh-web-restart.sh --force    # 结束所有非 launchd 的 dsh 进程（占 3080 的 + 其它端口的）再重启
-#   ./dsh-web-restart.sh --help
+#   ops/dsh-web-restart.sh --check    # 只打印现状与建议动作（含「其它 dsh 宿主」），不做任何操作
+#   ops/dsh-web-restart.sh            # 重启：job 在管 → kickstart；job 不在管 → bootstrap
+#   ops/dsh-web-restart.sh --force    # 结束所有非 launchd 的 dsh 进程（占 3080 的 + 其它端口的）再重启
+#   ops/dsh-web-restart.sh --help
 #
 # 行为要点：
 #   * LABEL / PORT / ROOT 都从本脚本推导，日志追加 .dsh-web/restart.log（带时间戳）；
@@ -34,7 +34,9 @@ set -u
 
 LABEL="com.deepseek.dsh-web.self-dsh-plugins"
 PORT=3080
-ROOT="$(cd "$(dirname "$0")" && pwd -P)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+# ROOT 是仓库根：脚本在 ops/ 下，.dsh-web/ 与源码都在上一层
+ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 UID_N="$(id -u)"
 DOMAIN="gui/${UID_N}"
 PLIST_DST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
@@ -228,7 +230,7 @@ do_check() {
   say "${C_B}=== dsh-web-restart.sh --check（只打印，不做任何操作）${C_0}"
   say "  LABEL       : ${LABEL}"
   say "  PORT        : ${PORT}"
-  say "  脚本目录    : ${ROOT}"
+  say "  脚本目录    : ${SCRIPT_DIR}"
 
   pids="$(port_pids)"
   jpid=""

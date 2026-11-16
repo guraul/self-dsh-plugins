@@ -3,15 +3,16 @@
 # upgrade-dsh.sh — DeepSeek Harness (dsh) npm 全局安装版：一键升级 / 回滚 / 恢复数据
 #
 # 用法：
-#   ./upgrade-dsh.sh                       # 交互式升级到 npm latest
-#   ./upgrade-dsh.sh --check               # 只检查（不改动任何东西）
-#   ./upgrade-dsh.sh --version 0.2.0-rc.2  # 升级到指定版本
-#   ./upgrade-dsh.sh --yes --no-restart    # 无人值守，不自动重启
-#   ./upgrade-dsh.sh --rollback 0.1.5-rc.3 # 回滚到旧版
-#   ./upgrade-dsh.sh --restore-backup      # 用最近一次备份覆盖 ~/.dsh
-#   ./upgrade-dsh.sh --help
+#   ops/upgrade-dsh.sh                       # 交互式升级到 npm latest
+#   ops/upgrade-dsh.sh --check               # 只检查（不改动任何东西）
+#   ops/upgrade-dsh.sh --version 0.2.0-rc.2  # 升级到指定版本
+#   ops/upgrade-dsh.sh --yes --no-restart    # 无人值守，不自动重启
+#   ops/upgrade-dsh.sh --rollback 0.1.5-rc.3 # 回滚到旧版
+#   ops/upgrade-dsh.sh --restore-backup      # 用最近一次备份覆盖 ~/.dsh
+#   ops/upgrade-dsh.sh --allow-downgrade     # 允许把已装版本降下来（默认拒绝，--yes 也不会替你答应）
+#   ops/upgrade-dsh.sh --help
 #
-#   纯重启请用 ./dsh-web-restart.sh，不要用本脚本：本脚本只管升级 / 回滚 / 备份恢复，
+#   纯重启请用 ops/dsh-web-restart.sh，不要用本脚本：本脚本只管升级 / 回滚 / 备份恢复，
 #   重启一律交给同目录的 dsh-web-restart.sh（launchd 口径，不会起野进程）。
 #
 # 设计要点：
@@ -20,7 +21,7 @@
 #   * 停服务前会打印将要杀掉的进程并要求确认；
 #   * 未指定 --version 时按已装版本所在渠道选目标（rc/beta→next、alpha→alpha、正式→latest），
 #     不再默认取 latest（预发布版会被静默降级）；目标低于已装版本会显式打印「这是降级」并要求确认；
-#   * 重启不自己 spawn 进程，只调用 ./dsh-web-restart.sh；
+#   * 重启不自己 spawn 进程，只调用 ops/dsh-web-restart.sh；
 #   * 全程日志落在 ~/.dsh-upgrade-logs/ 。
 #
 # 兼容性：macOS 自带的 bash 3.2 在 UTF-8 locale 下会把紧跟变量的多字节字符
@@ -31,14 +32,18 @@ set -euo pipefail
 
 PKG="@deepseek-ai/dsh"
 PORT="${DSH_PORT:-3080}"
-# 与 .dsh-web/ 里的 LaunchAgent plist 一致；重启走 ./dsh-web-restart.sh，本脚本不 spawn 进程
+# 与 .dsh-web/ 里的 LaunchAgent plist 一致；重启走 ops/dsh-web-restart.sh，本脚本不 spawn 进程
 LABEL="com.deepseek.dsh-web.self-dsh-plugins"
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+# 脚本在 ops/ 下；ROOT_DIR 保留仓库根语义（备份/日志提示用）
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 TARGET=""
 ROLLBACK=""
 RESTORE_BACKUP=0
 LIST_VERSIONS=0
 ASSUME_YES=0
+# 降级必须显式允许：--yes 不能代替这个开关（2026-11-16 事故：一条 latest 把 rc.3 降成 rc.1）
+ALLOW_DOWNGRADE=0
 DO_BACKUP=1
 DO_RESTART=1
 CHECK_ONLY=0
@@ -87,6 +92,7 @@ while [ $# -gt 0 ]; do
     --no-backup) DO_BACKUP=0; shift ;;
     --no-restart) DO_RESTART=0; shift ;;
     --yes|-y)    ASSUME_YES=1; shift ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
     --help|-h)   usage ;;
     *) die "未知参数：$1（用 --help 查看用法）" ;;
   esac
@@ -251,9 +257,9 @@ stop_server() {
 }
 
 start_server() {
-  # 重启职责已整体交给 ./dsh-web-restart.sh：本脚本不再 nohup spawn 进程
+  # 重启职责已整体交给 ops/dsh-web-restart.sh：本脚本不再 nohup spawn 进程
   # （nohup 起来的进程不归 launchd 管，会把 LaunchAgent job 顶成 not running）。
-  local restart="${ROOT_DIR}/dsh-web-restart.sh"
+  local restart="${SCRIPT_DIR}/dsh-web-restart.sh"
 
   if [ "${DO_RESTART}" -eq 0 ]; then
     warn "按参数要求不自动重启；需要时在终端运行：${restart}"
@@ -381,7 +387,7 @@ if [ "${LIST_VERSIONS}" -eq 1 ]; then list_versions; fi
 if [ "${RESTORE_BACKUP}" -eq 1 ]; then
   do_restore_backup
   say ""
-  say "完成。如需重启：在终端运行 ${ROOT_DIR}/dsh-web-restart.sh"
+  say "完成。如需重启：在终端运行 ${SCRIPT_DIR}/dsh-web-restart.sh"
   exit 0
 fi
 
@@ -421,10 +427,10 @@ if [ "${CHECK_ONLY}" -eq 1 ]; then
   step "检查模式（不做任何改动）"
   say "  计划：${PKG}  ${CURRENT:-未知} → ${TARGET}"
   [ -n "${TARGET_CHANNEL}" ] && say "  目标渠道：${TARGET_CHANNEL}（按已装版本推断）"
-  say "  降级：$([ "${DOWNGRADE}" -eq 1 ] && echo "是（${CURRENT:-未知} → ${TARGET}）" || echo "否")"
+  say "  降级：$([ "${DOWNGRADE}" -eq 1 ] && echo "是（${CURRENT:-未知} → ${TARGET}，需要 --allow-downgrade）" || echo "否")"
   say "  备份：$([ "${DO_BACKUP}" -eq 1 ] && echo "是（${DSH_HOME:-${HOME}/.dsh}.bak-${TS}）" || echo "否")"
   say "  停服务：端口 ${PORT}（如被占用）"
-  say "  重启：$([ "${DO_RESTART}" -eq 1 ] && echo "是（./dsh-web-restart.sh）" || echo "否")"
+  say "  重启：$([ "${DO_RESTART}" -eq 1 ] && echo "是（ops/dsh-web-restart.sh）" || echo "否")"
   say "  安装命令：${NPM_BIN} install -g --allow-scripts=${ALLOW_SCRIPTS} ${PKG}@${TARGET}"
   say ""
   say "去掉 --check 即可真正执行。"
@@ -438,6 +444,10 @@ case "${TARGET}" in
 esac
 if [ "${DOWNGRADE}" -eq 1 ]; then
   warn "这是降级：${CURRENT:-未知} → ${TARGET}"
+  # 降级是独立闸门：--yes 只免除交互确认，不能代替「我确实要降级」
+  if [ "${ASSUME_YES}" -eq 1 ] && [ "${ALLOW_DOWNGRADE}" -ne 1 ]; then
+    die "无人值守模式（--yes）拒绝降级；确需降级请显式加 --allow-downgrade"
+  fi
   confirm "确认执行降级安装？" || die "已取消，未做任何改动"
 else
   confirm "开始升级？" || die "已取消，未做任何改动"
@@ -455,7 +465,7 @@ if ! install_version "${TARGET}"; then
 fi
 if ! verify_install "${TARGET}"; then
   warn "安装已完成但冒烟测试未通过；服务不会自动重启，避免带病运行"
-  say "  手动重启：在终端运行 ${ROOT_DIR}/dsh-web-restart.sh"
+  say "  手动重启：在终端运行 ${SCRIPT_DIR}/dsh-web-restart.sh"
   say "  修复建议见上方输出；数据备份：${BACKUP:-无}"
   exit 1
 fi
