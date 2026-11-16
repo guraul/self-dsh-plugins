@@ -7,13 +7,17 @@
 #    会话内只允许 --check（只打印、不操作）。
 #
 # 用法：
-#   ./dsh-web-restart.sh --check    # 只打印现状与建议动作，不做任何操作
+#   ./dsh-web-restart.sh --check    # 只打印现状与建议动作（含「其它 dsh 宿主」），不做任何操作
 #   ./dsh-web-restart.sh            # 重启：job 在管 → kickstart；job 不在管 → bootstrap
-#   ./dsh-web-restart.sh --force    # 端口被非 launchd 进程占着时，先 TERM → KILL 再起
+#   ./dsh-web-restart.sh --force    # 结束所有非 launchd 的 dsh 进程（占 3080 的 + 其它端口的）再重启
 #   ./dsh-web-restart.sh --help
 #
 # 行为要点：
 #   * LABEL / PORT / ROOT 都从本脚本推导，日志追加 .dsh-web/restart.log（带时间戳）；
+#   * 野宿主：命令含 `dsh` 与 `--port`、pid ≠ launchd 声明的 pid、ppid ≠ 1 的 LISTEN 进程，
+#     --check 单列一节（没有就写「无」）。默认模式**不给 --force 就不杀**它们：重启照常进行，
+#     就绪后打印告警，退出码仍是 0；给了 --force 才按「先清 3080 占用者 → 再清其它野宿主 →
+#     再启动」的顺序一并结束。只有「3080 被野进程占着且没给 --force」才退 2；
 #   * 就绪判定：curl 打 / 拿到 200 或 401 都算活，最多等 90 秒；超时打印
 #     .dsh-web/web.err.log 末尾 20 行；
 #   * 就绪后刷新 .dsh-web/url.txt（chmod 600），只打印「地址已写入」，绝不回显令牌。
@@ -37,6 +41,10 @@ PLIST_SRC="${ROOT}/.dsh-web/${LABEL}.plist"
 LOG=""
 URL_TXT=""
 OLD_PID=""
+# 野宿主扫描结果（stray_hosts 填）：个数 / pid 列表 / 展示文本
+STRAY_N=0
+STRAY_PIDS=""
+STRAY_OUT=""
 
 LAUNCHCTL="/bin/launchctl"
 PS_BIN="/bin/ps"
@@ -120,6 +128,68 @@ pid_ppid() {
   "${PS_BIN}" -p "$1" -o ppid= 2>/dev/null | tr -d ' ' || true
 }
 
+# ---------------------------------------------------------------- 野宿主探测
+# 三条口径（挑的是「命令里含 dsh 且含 --port 的 LISTEN 进程」）：
+#   ① 启动命令含 `dsh` 且含 `--port`；
+#   ② pid ≠ launchd 声明的 pid；
+#   ③ ppid ≠ 1。
+# ② ③ 是「怎么判定不在 launchd 管辖下」，两者按情况二选一：launchd 声明得出 pid 就直接比 pid
+# （能抓到被过继给 launchd 的孤儿野宿主——nohup 出来的宿主 ppid 也是 1，只看 ppid 会漏）；
+# 只有「job 在跑却读不到声明 pid」这种解析异常时才退回 ③ 的保守口径，宁可漏报也不误杀宿主。
+# 只读，不杀任何进程。
+consider_stray() { # $1=pid  $2=lsof 的短命令名（仅兜底）  $3=端口列表  $4=launchd 声明的 pid
+  local p="$1" name="$2" ports="$3" jp="$4" c ppid cwd
+  # 判定用 ps 的完整命令行：lsof 的 c 字段只是短进程名（如 node），里面没有 --port
+  c="$(pid_cmd "${p}")"
+  [ -n "${c}" ] || c="${name}"
+  case "${c}" in *dsh*) ;; *) return 0 ;; esac
+  case "${c}" in *--port*) ;; *) return 0 ;; esac
+  if [ -n "${jp}" ]; then
+    if [ "${p}" = "${jp}" ]; then return 0; fi
+  elif job_exists; then
+    ppid="$(pid_ppid "${p}")"
+    if [ "${ppid}" = "1" ]; then return 0; fi
+  fi
+  cwd="$(pid_cwd "${p}")"
+  STRAY_N=$((STRAY_N + 1))
+  STRAY_PIDS="${STRAY_PIDS} ${p}"
+  STRAY_OUT="${STRAY_OUT}    pid=${p}  端口:${ports# }
+      命令: ${c}
+      cwd : ${cwd}
+"
+}
+
+stray_hosts() { # 扫一遍所有 LISTEN 的 TCP 进程，结果进 STRAY_N / STRAY_PIDS / STRAY_OUT
+  STRAY_N=0
+  STRAY_PIDS=""
+  STRAY_OUT=""
+  [ -n "${LSOF}" ] || return 0
+
+  local listing jpid line pid cmd ports port
+  listing="$("${LSOF}" -nP -iTCP -sTCP:LISTEN -Fpcfn 2>/dev/null || true)"
+  [ -n "${listing}" ] || return 0
+  jpid="$(job_field pid)"
+
+  pid=""; cmd=""; ports=""
+  while IFS= read -r line; do
+    case "${line}" in
+      p[0-9]*)
+        if [ -n "${pid}" ]; then consider_stray "${pid}" "${cmd}" "${ports}" "${jpid}"; fi
+        pid="${line#p}"; cmd=""; ports="" ;;
+      c*) cmd="${line#c}" ;;
+      n*)
+        # lsof -P：IPv4 写成 127.0.0.1:3080，IPv6 写成 *.8080，端口一律取最后一段
+        port="$(printf '%s\n' "${line#n}" | sed -E 's/.*[:.]([0-9]+)$/\1/')"
+        case " ${ports} " in
+          *" ${port} "*) ;;
+          *) ports="${ports} ${port}" ;;
+        esac ;;
+    esac
+  done <<< "${listing}"
+  if [ -n "${pid}" ]; then consider_stray "${pid}" "${cmd}" "${ports}" "${jpid}"; fi
+  return 0
+}
+
 # 日志路径以 launchd plist 声明的为准（worktree 里脚本与真机日志不同目录），
 # 读不到再退回脚本所在目录的 .dsh-web/。
 plist_log_path() { # $1 = StandardOutPath | StandardErrorPath
@@ -190,6 +260,13 @@ do_check() {
   say "    mtime     : $(mtime_of "${WEB_OUT}")"
   say "  url.txt     : ${URL_TXT}"
   say "    mtime     : $(mtime_of "${URL_TXT}")  权限 $(mode_of "${URL_TXT}")"
+  say "  其它 dsh 宿主:"
+  stray_hosts
+  if [ "${STRAY_N}" -eq 0 ]; then
+    say "    无"
+  else
+    printf '%s' "${STRAY_OUT}"
+  fi
   say ""
 
   # 结论（建议动作）
@@ -201,6 +278,9 @@ do_check() {
     ok "结论：宿主由 launchd 在管且在监听 ${PORT}；需要重启时在【终端】运行 ./dsh-web-restart.sh"
   else
     warn "结论：${PORT} 被非 launchd 进程占着 → ./dsh-web-restart.sh --force（默认不杀，退出码 2）"
+  fi
+  if [ "${STRAY_N}" -gt 0 ]; then
+    warn "⚠ 另有 ${STRAY_N} 个非 launchd 的 dsh 宿主在跑（可能抢企微连接）；重启时加 --force 可一并结束"
   fi
   say ""
   say "${C_D}本命令不重启、不杀进程、不写文件。${C_0}"
@@ -248,6 +328,41 @@ kill_unmanaged() { # $1 = 1 表示允许杀（--force）
     exit 1
   fi
   ok "占用者已结束，端口 ${PORT} 空闲"
+}
+
+strays_alive() { # $1 = 空格分隔的 pid；打印其中还活着的
+  local p out=""
+  for p in $1; do
+    if kill -0 "${p}" 2>/dev/null; then out="${out} ${p}"; fi
+  done
+  printf '%s' "${out}"
+}
+
+kill_strays() { # 结束「其它端口上的野宿主」，只在 --force 时调用；3080 的归 kill_unmanaged
+  local targets="$1" p i rest
+  [ -n "${targets}" ] || return 0
+
+  log "按 --force 结束 ${STRAY_N} 个非 launchd 的 dsh 宿主：${targets}"
+  for p in ${targets}; do kill -TERM "${p}" 2>/dev/null || true; done
+  i=0
+  rest="$(strays_alive "${targets}")"
+  while [ -n "${rest}" ] && [ "${i}" -lt 15 ]; do
+    sleep 1
+    i=$((i + 1))
+    rest="$(strays_alive "${targets}")"
+  done
+  if [ -n "${rest}" ]; then
+    warn "TERM 15 秒未退出，改用 KILL：${rest}"
+    for p in ${rest}; do kill -KILL "${p}" 2>/dev/null || true; done
+    sleep 1
+    rest="$(strays_alive "${targets}")"
+  fi
+  if [ -n "${rest}" ]; then
+    warn "仍有进程没退出，请手动处理：${rest}"
+  else
+    ok "野宿主已全部结束"
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------- 重启
@@ -333,12 +448,20 @@ refresh_url() { # 从 web.out.log 取最后一条带令牌的地址写入 url.tx
 
 do_restart() {
   log "=== 重启开始 label=${LABEL} port=${PORT} force=${FORCE} ==="
-  OLD_PID="$(port_pids)" # 重启前占用端口的 pid，用来确认起来的是新进程
-  kill_unmanaged "${FORCE}"
-  start_service
+  OLD_PID="$(port_pids)"        # 重启前占用端口的 pid，用来确认起来的是新进程
+  kill_unmanaged "${FORCE}"     # ① 3080 的占用者（野进程 + 没给 --force → 这里就退 2）
+  stray_hosts                   # ② 扫其它端口上的野宿主（只读）
+  if [ "${FORCE}" -eq 1 ] && [ "${STRAY_N}" -gt 0 ]; then
+    kill_strays "${STRAY_PIDS}" # ③ --force 才把它们一并结束
+  fi
+  start_service                 # ④ 启动（kickstart / bootstrap）
   wait_ready
   refresh_url
   ok "dsh web 已就绪：http://127.0.0.1:${PORT}/"
+  # 没给 --force：不杀野宿主，重启本身照常算成功，只告警，退出码仍是 0
+  if [ "${FORCE}" -eq 0 ] && [ "${STRAY_N}" -gt 0 ]; then
+    warn "另有 ${STRAY_N} 个野宿主在跑，会抢企微；确认后可加 --force 一并结束"
+  fi
   log "=== 重启完成（退出码 0）==="
 }
 
