@@ -33,10 +33,7 @@
 /tools/pnpm-lock.yaml
 
 # —— 运维脚本与 LaunchAgent ——
-!/upgrade-dsh.sh
-!/dsh-web-restart.sh
-!/重启 dsh-web.command
-!/dsh-web-stop.sh
+!/ops/
 !/.dsh-web/
 
 # —— 插件（每个子目录是一个独立插件，包名见各自 package.json）——
