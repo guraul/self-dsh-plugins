@@ -42,7 +42,8 @@
 | 术语口径（角色 / 接入形态 / provider） | [`GLOSSARY.md`](./GLOSSARY.md) |
 | 历史归档（已废弃的方案，仅存档） | [`docs/archive/`](./docs/archive/README.md) |
 | 某插件的安装 / 配置 / 已知限制（面向使用者） | 各插件目录的 `README.md` |
-| dsh web 重启 | [`dsh-web-restart.sh`](./dsh-web-restart.sh)（唯一重启入口，`--check` 只读体检；**禁止在 dsh 会话里真跑**） |
+| dsh web 重启（命令行） | [`dsh-web-restart.sh`](./dsh-web-restart.sh)（唯一重启入口：默认/`--force`/`--check`；**禁止在 dsh 会话里真跑**） |
+| dsh web 重启（双击） | [`重启 dsh-web.command`](./重启%20dsh-web.command)（Finder 双击即跑，无参数，等价 `dsh-web-restart.sh --force`；成功后自动用浏览器打开新地址） |
 | dsh 升级 / 回滚 / 备份恢复（重启走 dsh-web-restart.sh） | [`upgrade-dsh.sh`](./upgrade-dsh.sh) + dsh-auto-upgrade 插件 |
 | DSH 版本兼容与版本豁免 | [`docs/plugins/dsh-plugin-product-subagents.md`](./docs/plugins/dsh-plugin-product-subagents.md)（发版纪律）+ [版本豁免](./docs/pipeline/README.md#版本豁免) |
 
@@ -63,6 +64,7 @@
 | [`dsh-go-quota/`](./dsh-go-quota) | `dsh-go-quota` | 输入框下方统计行里的额度 pill：直查 OpenCode GO 官方用量接口（`/zen/go/v1/usage`），点开显示 5 小时 / 本周 / 本月三个窗口 | **原创** |
 
 顶层其它文件：[`README.md`](./README.md)（对外说明）、[`dsh-web-restart.sh`](./dsh-web-restart.sh)（dsh web 唯一重启入口）、
+[`重启 dsh-web.command`](./重启%20dsh-web.command)（双击重启，无参数；macOS 里 .sh 双击只会开编辑器，.command 才会执行）、
 [`upgrade-dsh.sh`](./upgrade-dsh.sh)（全局 dsh 升级 / 回滚 / 备份恢复，重启走 dsh-web-restart.sh）、
 [`dsh-web-stop.sh`](./dsh-web-stop.sh)（停服）、[`.dsh-web/`](./.dsh-web)（LaunchAgent 与既有重启脚本）、
 [`docs/`](./docs)（插件文档 / pipeline / 归档）、[`scripts/pipeline/`](./scripts/pipeline)（共享包生成的 6 个交付入口，禁止手改）。
