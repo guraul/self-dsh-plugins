@@ -14,7 +14,9 @@
 #
 # 行为要点：
 #   * LABEL / PORT / ROOT 都从本脚本推导，日志追加 .dsh-web/restart.log（带时间戳）；
-#   * 野宿主：命令含 `dsh` 与 `--port`、pid ≠ launchd 声明的 pid、ppid ≠ 1 的 LISTEN 进程，
+#   * 野宿主：argv[0] 是 `*/dsh`（或 argv[0] 是 node 且 argv[1] 是 `*/dsh`）、带 `--port`、
+#     且不是 launchd 声明的那个 pid 的 LISTEN 进程——**不做「命令行含 dsh 字样」的子串匹配**，
+#     否则提示词里提到 dsh 的无关进程会被误判（2026-11-16 实测），--force 下就被误杀。
 #     --check 单列一节（没有就写「无」）。默认模式**不给 --force 就不杀**它们：重启照常进行，
 #     就绪后打印告警，退出码仍是 0；给了 --force 才按「先清 3080 占用者 → 再清其它野宿主 →
 #     再启动」的顺序一并结束。只有「3080 被野进程占着且没给 --force」才退 2；
@@ -41,6 +43,8 @@ PLIST_SRC="${ROOT}/.dsh-web/${LABEL}.plist"
 LOG=""
 URL_TXT=""
 OLD_PID=""
+# 重启开始时的 web.out.log 行数：刷新 url.txt 只认这之后追加的行
+WEB_OUT_BASE=0
 # 野宿主扫描结果（stray_hosts 填）：个数 / pid 列表 / 展示文本
 STRAY_N=0
 STRAY_PIDS=""
@@ -138,11 +142,22 @@ pid_ppid() {
 # 只有「job 在跑却读不到声明 pid」这种解析异常时才退回 ③ 的保守口径，宁可漏报也不误杀宿主。
 # 只读，不杀任何进程。
 consider_stray() { # $1=pid  $2=lsof 的短命令名（仅兜底）  $3=端口列表  $4=launchd 声明的 pid
-  local p="$1" name="$2" ports="$3" jp="$4" c ppid cwd
+  local p="$1" name="$2" ports="$3" jp="$4" c ppid cwd a0 a1
   # 判定用 ps 的完整命令行：lsof 的 c 字段只是短进程名（如 node），里面没有 --port
   c="$(pid_cmd "${p}")"
   [ -n "${c}" ] || c="${name}"
-  case "${c}" in *dsh*) ;; *) return 0 ;; esac
+  # 只认「dsh 作为入口被调用」：argv[0] 是 */dsh，或 argv[0] 是 node/nodejs 且 argv[1] 是 */dsh。
+  # 不能用「命令行含 dsh 且含 --port」的子串判定——2026-11-16 实测会把只是命令行里提到这两个词的
+  # 无关进程（如提示词里带这些字样的审核会话）误判成野宿主，--force 下就被误杀。
+  set -- ${c}
+  a0="${1:-}"
+  a1="${2:-}"
+  case "${a0##*/}" in
+    node|nodejs)
+      case "${a1##*/}" in dsh) ;; *) return 0 ;; esac ;;
+    dsh) ;;
+    *) return 0 ;;
+  esac
   case "${c}" in *--port*) ;; *) return 0 ;; esac
   if [ -n "${jp}" ]; then
     if [ "${p}" = "${jp}" ]; then return 0; fi
@@ -292,9 +307,17 @@ kill_unmanaged() { # $1 = 1 表示允许杀（--force）
   pids="$(port_pids)"
   [ -n "${pids}" ] || return 0
 
-  local unmanaged=""
+  local jp unmanaged=""
+  jp="$(job_field pid)"
   for p in ${pids}; do
-    [ "${p}" = "$(job_field pid)" ] || unmanaged="${unmanaged} ${p}"
+    if [ -n "${jp}" ]; then
+      [ "${p}" = "${jp}" ] || unmanaged="${unmanaged} ${p}"
+    elif [ "$(job_field state)" = "running" ] && [ "$(pid_ppid "${p}")" = "1" ]; then
+      # 解析不出声明 pid、但 job 确实在跑且该进程 ppid=1：按在 launchd 名下处理，宁可漏杀
+      :
+    else
+      unmanaged="${unmanaged} ${p}"
+    fi
   done
   [ -n "${unmanaged}" ] || return 0
 
@@ -342,7 +365,12 @@ kill_strays() { # 结束「其它端口上的野宿主」，只在 --force 时�
   local targets="$1" p i rest
   [ -n "${targets}" ] || return 0
 
-  log "按 --force 结束 ${STRAY_N} 个非 launchd 的 dsh 宿主：${targets}"
+  log "按 --force 结束 ${STRAY_N} 个非 launchd 的 dsh 宿主："
+  for p in ${targets}; do
+    say "  pid=${p}"
+    say "    命令: $(pid_cmd "${p}")"
+    say "    cwd : $(pid_cwd "${p}")"
+  done
   for p in ${targets}; do kill -TERM "${p}" 2>/dev/null || true; done
   i=0
   rest="$(strays_alive "${targets}")"
@@ -431,15 +459,31 @@ wait_ready() { # 最多 90 秒；200 / 401 都算活
   exit 1
 }
 
-refresh_url() { # 从 web.out.log 取最后一条带令牌的地址写入 url.txt；绝不回显令牌
-  local url=""
-  if [ -f "${WEB_OUT}" ]; then
-    url="$(grep -o "http://127\.0\.0\.1:${PORT}/?token=[A-Za-z0-9._~-]*" "${WEB_OUT}" 2>/dev/null | tail -n 1)"
-  fi
-  if [ -z "${url}" ]; then
-    warn "未在 ${WEB_OUT} 找到带令牌的地址，跳过刷新 ${URL_TXT}"
+refresh_url() { # 只认本次重启之后追加的日志行；绝不回显令牌
+  local url="" code="" from total
+  if [ ! -f "${WEB_OUT}" ]; then
+    warn "找不到 ${WEB_OUT}，跳过刷新 ${URL_TXT}"
     return 0
   fi
+  from="$((WEB_OUT_BASE + 1))"
+  total="$(wc -l <"${WEB_OUT}" | tr -d ' ')"
+  # 日志轮转过（当前行数比基线少）时退回全文，避免 tail 取空
+  if [ "${total}" -lt "${from}" ]; then from=1; fi
+  url="$(tail -n "+${from}" "${WEB_OUT}" 2>/dev/null \
+    | grep -o "http://127\.0\.0\.1:${PORT}/?token=[A-Za-z0-9._~%+=/-]*" | tail -n 1)"
+  if [ -z "${url}" ]; then
+    warn "本次重启后 ${WEB_OUT} 没有新的带令牌地址，保留原 ${URL_TXT}"
+    return 0
+  fi
+  # 候选地址必须真能认证（200/301/302/303），否则不覆盖现有 url.txt —— 免得把过期令牌写进去
+  code="$("${CURL}" -s -o /dev/null -w '%{http_code}' --max-time 5 "${url}" 2>/dev/null || true)"
+  case "${code}" in
+    200|301|302|303) ;;
+    *)
+      warn "候选地址校验失败（http_code=${code:-无}），未覆盖 ${URL_TXT}"
+      return 0
+      ;;
+  esac
   mkdir -p "$(dirname "${URL_TXT}")"
   printf '%s\n' "${url}" >"${URL_TXT}"
   "${CHMOD_BIN}" 600 "${URL_TXT}"
@@ -449,6 +493,9 @@ refresh_url() { # 从 web.out.log 取最后一条带令牌的地址写入 url.tx
 do_restart() {
   log "=== 重启开始 label=${LABEL} port=${PORT} force=${FORCE} ==="
   OLD_PID="$(port_pids)"        # 重启前占用端口的 pid，用来确认起来的是新进程
+  if [ -f "${WEB_OUT}" ]; then  # 日志基线：只从这之后追加的行里取新令牌地址
+    WEB_OUT_BASE="$(wc -l <"${WEB_OUT}" | tr -d ' ')"
+  fi
   kill_unmanaged "${FORCE}"     # ① 3080 的占用者（野进程 + 没给 --force → 这里就退 2）
   stray_hosts                   # ② 扫其它端口上的野宿主（只读）
   if [ "${FORCE}" -eq 1 ] && [ "${STRAY_N}" -gt 0 ]; then

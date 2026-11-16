@@ -286,6 +286,8 @@ start_server() {
   else
     warn "dsh-web-restart.sh 退出码 ${rc}，请在终端运行它查看详细输出：${restart}"
   fi
+  # 把失败往上抛：无人值守（--yes）跑升级时，web 没重启不能报成功
+  return "${rc}"
 }
 
 # ---------------------------------------------------------------- 备份
@@ -457,7 +459,8 @@ if ! verify_install "${TARGET}"; then
   say "  修复建议见上方输出；数据备份：${BACKUP:-无}"
   exit 1
 fi
-start_server
+RESTART_RC=0
+start_server || RESTART_RC=$?
 
 step "完成"
 say "  版本：${CURRENT:-未知} → ${TARGET}"
@@ -465,3 +468,8 @@ say "  备份：${BACKUP:-未做}"
 say "  日志：${LOG}"
 say "  回滚：$0 --rollback ${CURRENT:-<旧版本>}"
 say "  ${C_D}提示：本机若用 nvm，请确认新开的终端里 node -v 仍是 $("${NODE_BIN}" -v)${C_0}"
+
+if [ "${RESTART_RC}" -ne 0 ]; then
+  warn "dsh web 未按预期重启（dsh-web-restart.sh 退出码 ${RESTART_RC}）；版本安装与校验已完成"
+  exit "${RESTART_RC}"
+fi
