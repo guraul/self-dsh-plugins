@@ -35,6 +35,7 @@
 # —— 运维脚本与 LaunchAgent ——
 !/upgrade-dsh.sh
 !/dsh-web-restart.sh
+!/重启 dsh-web.command
 !/dsh-web-stop.sh
 !/.dsh-web/
 
