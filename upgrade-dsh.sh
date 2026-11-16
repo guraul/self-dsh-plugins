@@ -11,10 +11,16 @@
 #   ./upgrade-dsh.sh --restore-backup      # 用最近一次备份覆盖 ~/.dsh
 #   ./upgrade-dsh.sh --help
 #
+#   纯重启请用 ./dsh-web-restart.sh，不要用本脚本：本脚本只管升级 / 回滚 / 备份恢复，
+#   重启一律交给同目录的 dsh-web-restart.sh（launchd 口径，不会起野进程）。
+#
 # 设计要点：
 #   * 用「当前 dsh 所在的那个 Node」的 npm 来安装，避免 nvm 多版本装错目录；
 #   * 升级前备份 ~/.dsh，升级后校验版本号并做 profile 组合冒烟测试；
 #   * 停服务前会打印将要杀掉的进程并要求确认；
+#   * 未指定 --version 时按已装版本所在渠道选目标（rc/beta→next、alpha→alpha、正式→latest），
+#     不再默认取 latest（预发布版会被静默降级）；目标低于已装版本会显式打印「这是降级」并要求确认；
+#   * 重启不自己 spawn 进程，只调用 ./dsh-web-restart.sh；
 #   * 全程日志落在 ~/.dsh-upgrade-logs/ 。
 #
 # 兼容性：macOS 自带的 bash 3.2 在 UTF-8 locale 下会把紧跟变量的多字节字符
@@ -25,7 +31,9 @@ set -euo pipefail
 
 PKG="@deepseek-ai/dsh"
 PORT="${DSH_PORT:-3080}"
-WORKDIR="${DSH_WORKDIR:-}"
+# 与 .dsh-web/ 里的 LaunchAgent plist 一致；重启走 ./dsh-web-restart.sh，本脚本不 spawn 进程
+LABEL="com.deepseek.dsh-web.self-dsh-plugins"
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 TARGET=""
 ROLLBACK=""
 RESTORE_BACKUP=0
@@ -76,7 +84,6 @@ while [ $# -gt 0 ]; do
     --list)      LIST_VERSIONS=1; shift ;;
     --check|--dry-run) CHECK_ONLY=1; shift ;;
     --port)      [ $# -ge 2 ] || die "--port 需要端口号"; PORT="$2"; shift 2 ;;
-    --workdir)   [ $# -ge 2 ] || die "--workdir 需要目录"; WORKDIR="$2"; shift 2 ;;
     --no-backup) DO_BACKUP=0; shift ;;
     --no-restart) DO_RESTART=0; shift ;;
     --yes|-y)    ASSUME_YES=1; shift ;;
@@ -167,6 +174,35 @@ list_versions() {
     | "${NODE_BIN}" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s);process.stdout.write(v.slice(-12).join("\n")+"\n")}catch(e){process.stdout.write("(查询失败)\n")}})'
 }
 
+version_lt() { # version_lt A B → A 低于 B 时退出码 0；解析不了返回 2（不算降级）
+  "${NODE_BIN}" -e '
+    const parse = v => {
+      const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(v).trim());
+      return m ? { core: [+m[1], +m[2], +m[3]], pre: m[4] ? m[4].split(".") : null } : null;
+    };
+    const cmpPre = (a, b) => {
+      if (a === null && b === null) return 0;
+      if (a === null) return 1;   // 正式版高于任何预发布版
+      if (b === null) return -1;
+      for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        if (a[i] === undefined) return -1;
+        if (b[i] === undefined) return 1;
+        if (a[i] === b[i]) continue;
+        const na = /^\d+$/.test(a[i]), nb = /^\d+$/.test(b[i]);
+        if (na && nb) return +a[i] < +b[i] ? -1 : 1;
+        if (na) return -1;
+        if (nb) return 1;
+        return a[i] < b[i] ? -1 : 1;
+      }
+      return 0;
+    };
+    const A = parse(process.argv[1]), B = parse(process.argv[2]);
+    if (!A || !B) process.exit(2);
+    for (let i = 0; i < 3; i++) if (A.core[i] !== B.core[i]) process.exit(A.core[i] < B.core[i] ? 0 : 1);
+    process.exit(cmpPre(A.pre, B.pre) === -1 ? 0 : 1);
+  ' "$1" "$2"
+}
+
 # ---------------------------------------------------------------- 端口 / 进程
 PORT_PIDS=""
 
@@ -177,6 +213,10 @@ find_port_pids() {
   elif command -v ss >/dev/null 2>&1; then
     PORT_PIDS="$(ss -H -tlnp "sport = :${PORT}" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u || true)"
   fi
+}
+
+launchd_job_exists() { # LaunchAgent job 是否在 launchd 里（存在 ≠ 在跑）
+  /bin/launchctl print "gui/$(id -u)/${LABEL}" >/dev/null 2>&1
 }
 
 stop_server() {
@@ -211,30 +251,43 @@ stop_server() {
 }
 
 start_server() {
-  [ "${DO_RESTART}" -eq 1 ] || { warn "按参数要求不自动重启，请手动执行： cd ${WORKDIR:-${PWD}} && dsh web"; return 0; }
-  step "重启 dsh web"
-  local dir="${WORKDIR}"
-  if [ -z "${dir}" ]; then
-    if [ -d "${HOME}/workspace" ]; then dir="${HOME}/workspace"; else dir="${PWD}"; fi
-  fi
-  [ -d "${dir}" ] || die "工作目录不存在：${dir}"
-  local web_log="${LOG_DIR}/dsh-web-${TS}.log"
-  ( cd "${dir}" && nohup "${DSH_BIN}" web --no-open --port "${PORT}" >>"${web_log}" 2>&1 & echo $! >"${LOG_DIR}/dsh-web.pid" )
-  say "  工作目录：${dir}"
-  say "  服务日志：${web_log}"
+  # 重启职责已整体交给 ./dsh-web-restart.sh：本脚本不再 nohup spawn 进程
+  # （nohup 起来的进程不归 launchd 管，会把 LaunchAgent job 顶成 not running）。
+  local restart="${ROOT_DIR}/dsh-web-restart.sh"
 
-  local i=0 up=0
-  while [ ${i} -lt 60 ]; do
-    if command -v curl >/dev/null 2>&1 && curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:${PORT}/" 2>/dev/null; then up=1; break; fi
-    find_port_pids
-    [ -n "${PORT_PIDS}" ] && { up=1; break; }
-    sleep 1; i=$((i+1))
-  done
-  if [ "${up}" -eq 1 ]; then
-    ok "服务已起来：http://127.0.0.1:${PORT}/"
-  else
-    warn "60 秒内没探测到服务；请看日志：${web_log}"
+  if [ "${DO_RESTART}" -eq 0 ]; then
+    warn "按参数要求不自动重启；需要时在终端运行：${restart}"
+    return 0
   fi
+
+  step "重启 dsh web（交给 dsh-web-restart.sh）"
+
+  if [ ! -x "${restart}" ]; then
+    warn "找不到可执行的 ${restart}，本脚本不自己 spawn 进程"
+    say "  请在终端运行：${restart}"
+    return 0
+  fi
+
+  if ! launchd_job_exists; then
+    warn "launchd job 不存在（${LABEL}），本脚本不再自己 spawn 进程"
+    say "  请在终端运行：${restart} #会按需 bootstrap LaunchAgent 并等就绪"
+    say "  版本：${CURRENT:-未知} → ${TARGET:-未知}（安装与校验已完成）"
+    say "  备份：${BACKUP:-未做}    日志：${LOG}"
+    exit 0
+  fi
+
+  local rc=0
+  "${restart}" || rc=$?
+  if [ "${rc}" -eq 0 ]; then
+    ok "dsh web 已重启并就绪（dsh-web-restart.sh 退出码 0）"
+  elif [ "${rc}" -eq 2 ]; then
+    warn "端口 ${PORT} 被非 launchd 进程占着，dsh-web-restart.sh 默认不杀（退出码 2）"
+    say "  确认无误后在终端运行：${restart} --force"
+  else
+    warn "dsh-web-restart.sh 退出码 ${rc}，请在终端运行它查看详细输出：${restart}"
+  fi
+  # 把失败往上抛：无人值守（--yes）跑升级时，web 没重启不能报成功
+  return "${rc}"
 }
 
 # ---------------------------------------------------------------- 备份
@@ -328,7 +381,7 @@ if [ "${LIST_VERSIONS}" -eq 1 ]; then list_versions; fi
 if [ "${RESTORE_BACKUP}" -eq 1 ]; then
   do_restore_backup
   say ""
-  say "完成。如需重启：cd ${WORKDIR:-${HOME}/workspace} && dsh web"
+  say "完成。如需重启：在终端运行 ${ROOT_DIR}/dsh-web-restart.sh"
   exit 0
 fi
 
@@ -338,7 +391,18 @@ if [ -n "${ROLLBACK}" ]; then
   warn "回滚模式：目标 ${TARGET}（当前 ${CURRENT:-未知}）"
 fi
 
-[ -n "${TARGET}" ] || TARGET="${DIST_LATEST}"
+# 未指定 --version 时不再默认取 latest：按已装版本所在渠道选目标，
+# 否则预发布版（rc / alpha）会被 latest 静默降级。
+TARGET_CHANNEL=""
+if [ -z "${TARGET}" ]; then
+  case "${CURRENT:-}" in
+    *-rc.*|*-beta.*) TARGET_CHANNEL="next";   TARGET="${DIST_NEXT}" ;;
+    *-alpha.*)       TARGET_CHANNEL="alpha";  TARGET="${DIST_ALPHA}" ;;
+    *)               TARGET_CHANNEL="latest"; TARGET="${DIST_LATEST}" ;;
+  esac
+  [ -n "${TARGET}" ] || die "无法按已装版本渠道（${TARGET_CHANNEL}）确定目标版本（npm 查询失败）；可用 --version 手动指定"
+  say "  目标渠道：${TARGET_CHANNEL}（按已装版本 ${CURRENT:-未知} 推断，未指定 --version）"
+fi
 [ -n "${TARGET}" ] || die "无法确定目标版本（npm 查询失败）；可用 --version 手动指定"
 
 if [ "${TARGET}" = "${CURRENT:-}" ]; then
@@ -347,12 +411,20 @@ if [ "${TARGET}" = "${CURRENT:-}" ]; then
   confirm "仍要强制重装 ${TARGET} 吗？" || exit 0
 fi
 
+# 降级判定先算不问：--check 里也要显示，真正执行时才要求确认
+DOWNGRADE=0
+if [ -n "${CURRENT:-}" ] && version_lt "${TARGET}" "${CURRENT}"; then
+  DOWNGRADE=1
+fi
+
 if [ "${CHECK_ONLY}" -eq 1 ]; then
   step "检查模式（不做任何改动）"
   say "  计划：${PKG}  ${CURRENT:-未知} → ${TARGET}"
+  [ -n "${TARGET_CHANNEL}" ] && say "  目标渠道：${TARGET_CHANNEL}（按已装版本推断）"
+  say "  降级：$([ "${DOWNGRADE}" -eq 1 ] && echo "是（${CURRENT:-未知} → ${TARGET}）" || echo "否")"
   say "  备份：$([ "${DO_BACKUP}" -eq 1 ] && echo "是（${DSH_HOME:-${HOME}/.dsh}.bak-${TS}）" || echo "否")"
   say "  停服务：端口 ${PORT}（如被占用）"
-  say "  重启：$([ "${DO_RESTART}" -eq 1 ] && echo "是" || echo "否")"
+  say "  重启：$([ "${DO_RESTART}" -eq 1 ] && echo "是（./dsh-web-restart.sh）" || echo "否")"
   say "  安装命令：${NPM_BIN} install -g --allow-scripts=${ALLOW_SCRIPTS} ${PKG}@${TARGET}"
   say ""
   say "去掉 --check 即可真正执行。"
@@ -364,7 +436,12 @@ say "  ${PKG}  ${CURRENT:-未知} → ${TARGET}"
 case "${TARGET}" in
   *-*) warn "目标是预发布版本（含 -rc/-alpha 后缀），确认这是你要的渠道" ;;
 esac
-confirm "开始升级？" || die "已取消，未做任何改动"
+if [ "${DOWNGRADE}" -eq 1 ]; then
+  warn "这是降级：${CURRENT:-未知} → ${TARGET}"
+  confirm "确认执行降级安装？" || die "已取消，未做任何改动"
+else
+  confirm "开始升级？" || die "已取消，未做任何改动"
+fi
 
 do_backup
 stop_server
@@ -378,11 +455,12 @@ if ! install_version "${TARGET}"; then
 fi
 if ! verify_install "${TARGET}"; then
   warn "安装已完成但冒烟测试未通过；服务不会自动重启，避免带病运行"
-  say "  手动启动：cd ${WORKDIR:-${HOME}/workspace} && dsh web"
+  say "  手动重启：在终端运行 ${ROOT_DIR}/dsh-web-restart.sh"
   say "  修复建议见上方输出；数据备份：${BACKUP:-无}"
   exit 1
 fi
-start_server
+RESTART_RC=0
+start_server || RESTART_RC=$?
 
 step "完成"
 say "  版本：${CURRENT:-未知} → ${TARGET}"
@@ -390,3 +468,8 @@ say "  备份：${BACKUP:-未做}"
 say "  日志：${LOG}"
 say "  回滚：$0 --rollback ${CURRENT:-<旧版本>}"
 say "  ${C_D}提示：本机若用 nvm，请确认新开的终端里 node -v 仍是 $("${NODE_BIN}" -v)${C_0}"
+
+if [ "${RESTART_RC}" -ne 0 ]; then
+  warn "dsh web 未按预期重启（dsh-web-restart.sh 退出码 ${RESTART_RC}）；版本安装与校验已完成"
+  exit "${RESTART_RC}"
+fi
