@@ -43,20 +43,27 @@ printf '\r\033[K'
 RC=$?
 
 echo
+# 运行态文件路径与重启脚本同源：问它要，而不是自己拼（日志目录可能不在仓根 .dsh-web/）
+URL_FILE="$("${MAIN}" --print-url-file 2>/dev/null || true)"
+if [ -z "${URL_FILE}" ]; then
+  URL_FILE="${ROOT}/.dsh-web/url.txt"
+fi
+LOG_DIR="$(dirname "${URL_FILE}")"
+
 if [ "${RC}" -eq 0 ]; then
-  URL="$(/bin/cat "${ROOT}/.dsh-web/url.txt" 2>/dev/null || true)"
+  URL="$(/bin/cat "${URL_FILE}" 2>/dev/null || true)"
   if [ -n "${URL}" ]; then
     if /usr/bin/open "${URL}"; then
       echo "== 已在浏览器里打开新地址（令牌不回显）"
     else
-      echo "== 打开浏览器失败，手动打开：${ROOT}/.dsh-web/url.txt"
+      echo "== 打开浏览器失败，手动打开：${URL_FILE}"
     fi
   else
-    echo "== 重启成功，但没取到新地址：看 ${ROOT}/.dsh-web/web.out.log 最后一行"
+    echo "== 重启成功，但没取到新地址：看 ${LOG_DIR}/web.out.log 最后一行"
   fi
 else
   echo "== 重启未完全成功（退出码 ${RC}）"
-  echo "   日志：${ROOT}/.dsh-web/restart.log"
+  echo "   日志：${LOG_DIR}/restart.log"
   echo "   排障：在终端运行 ./dsh-web-restart.sh --check"
 fi
 
