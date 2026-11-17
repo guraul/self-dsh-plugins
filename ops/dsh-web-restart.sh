@@ -10,6 +10,7 @@
 #   ops/dsh-web-restart.sh --check    # 只打印现状与建议动作（含「其它 dsh 宿主」），不做任何操作
 #   ops/dsh-web-restart.sh            # 重启：job 在管 → kickstart；job 不在管 → bootstrap
 #   ops/dsh-web-restart.sh --force    # 结束所有非 launchd 的 dsh 进程（占 3080 的 + 其它端口的）再重启
+#   ops/dsh-web-restart.sh --print-url-file   # 只打印 .dsh-web/url.txt 的绝对路径（双击入口用它定位）
 #   ops/dsh-web-restart.sh --help
 #
 # 行为要点：
@@ -17,6 +18,8 @@
 #   * 野宿主：argv[0] 是 `*/dsh`（或 argv[0] 是 node 且 argv[1] 是 `*/dsh`）、带 `--port`、
 #     且不是 launchd 声明的那个 pid 的 LISTEN 进程——**不做「命令行含 dsh 字样」的子串匹配**，
 #     否则提示词里提到 dsh 的无关进程会被误判（2026-11-16 实测），--force 下就被误杀。
+#     只认入口也会保守漏报：`node --inspect …/dsh`、`bash -lc 'dsh …'`、包装脚本启动的宿主识别不到
+#     （宁漏不误杀；拿不准就人工复核：`ps -p <pid> -o command=`）。
 #     --check 单列一节（没有就写「无」）。默认模式**不给 --force 就不杀**它们：重启照常进行，
 #     就绪后打印告警，退出码仍是 0；给了 --force 才按「先清 3080 占用者 → 再清其它野宿主 →
 #     再启动」的顺序一并结束。只有「3080 被野进程占着且没给 --force」才退 2；
@@ -144,16 +147,17 @@ pid_ppid() {
 # 只有「job 在跑却读不到声明 pid」这种解析异常时才退回 ③ 的保守口径，宁可漏报也不误杀宿主。
 # 只读，不杀任何进程。
 consider_stray() { # $1=pid  $2=lsof 的短命令名（仅兜底）  $3=端口列表  $4=launchd 声明的 pid
-  local p="$1" name="$2" ports="$3" jp="$4" c ppid cwd a0 a1
+  local p="$1" name="$2" ports="$3" jp="$4" c ppid cwd a0 a1 rest
   # 判定用 ps 的完整命令行：lsof 的 c 字段只是短进程名（如 node），里面没有 --port
   c="$(pid_cmd "${p}")"
   [ -n "${c}" ] || c="${name}"
   # 只认「dsh 作为入口被调用」：argv[0] 是 */dsh，或 argv[0] 是 node/nodejs 且 argv[1] 是 */dsh。
   # 不能用「命令行含 dsh 且含 --port」的子串判定——2026-11-16 实测会把只是命令行里提到这两个词的
   # 无关进程（如提示词里带这些字样的审核会话）误判成野宿主，--force 下就被误杀。
-  set -- ${c}
-  a0="${1:-}"
-  a1="${2:-}"
+  # 用 read 切分：未加引号的 set -- 会在命令行含 * ? [ 时触发 glob 展开
+  a0=""
+  a1=""
+  read -r a0 a1 rest <<<"${c}"
   case "${a0##*/}" in
     node|nodejs)
       case "${a1##*/}" in dsh) ;; *) return 0 ;; esac ;;
@@ -462,23 +466,30 @@ wait_ready() { # 最多 90 秒；200 / 401 都算活
 }
 
 refresh_url() { # 只认本次重启之后追加的日志行；绝不回显令牌
-  local url="" code="" from total
+  local url="" code="" from total i=0
   if [ ! -f "${WEB_OUT}" ]; then
     warn "找不到 ${WEB_OUT}，跳过刷新 ${URL_TXT}"
     return 0
   fi
   from="$((WEB_OUT_BASE + 1))"
-  total="$(wc -l <"${WEB_OUT}" | tr -d ' ')"
-  # 日志轮转过（当前行数比基线少）时退回全文，避免 tail 取空
-  if [ "${total}" -lt "${from}" ]; then from=1; fi
-  url="$(tail -n "+${from}" "${WEB_OUT}" 2>/dev/null \
-    | grep -o "http://127\.0\.0\.1:${PORT}/?token=[A-Za-z0-9._~%+=/-]*" | tail -n 1)"
+  # 带令牌的 banner 可能晚于「就绪」落盘：最多轮询 20 秒再放弃
+  while [ "${i}" -lt 20 ]; do
+    total="$(wc -l <"${WEB_OUT}" | tr -d ' ')"
+    # 日志轮转过（当前行数比基线少）时退回全文，避免 tail 取空
+    if [ "${total}" -lt "${from}" ]; then from=1; fi
+    url="$(tail -n "+${from}" "${WEB_OUT}" 2>/dev/null \
+      | grep -o "http://127\.0\.0\.1:${PORT}/?token=[A-Za-z0-9._~%+=/-]*" | tail -n 1)"
+    if [ -n "${url}" ]; then break; fi
+    sleep 1
+    i=$((i + 1))
+  done
   if [ -z "${url}" ]; then
-    warn "本次重启后 ${WEB_OUT} 没有新的带令牌地址，保留原 ${URL_TXT}"
+    warn "本次重启后 20 秒内没等到带令牌的新地址，保留原 ${URL_TXT}"
     return 0
   fi
+  # 令牌不进 argv：用 curl 的 -K -（配置从 stdin 读），本机其它用户 ps 看不到；
   # 候选地址必须真能认证（200/301/302/303），否则不覆盖现有 url.txt —— 免得把过期令牌写进去
-  code="$("${CURL}" -s -o /dev/null -w '%{http_code}' --max-time 5 "${url}" 2>/dev/null || true)"
+  code="$(printf 'url = "%s"\n' "${url}" | "${CURL}" -s -o /dev/null -w '%{http_code}' --max-time 5 -K - 2>/dev/null || true)"
   case "${code}" in
     200|301|302|303) ;;
     *)
@@ -519,6 +530,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --check) CHECK_ONLY=1; shift ;;
     --force) FORCE=1; shift ;;
+    --print-url-file) say "${URL_TXT}"; exit 0 ;;
     --help|-h) usage ;;
     *) err "未知参数：$1（用 --help 查看用法）"; exit 1 ;;
   esac

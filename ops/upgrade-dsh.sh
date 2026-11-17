@@ -7,7 +7,7 @@
 #   ops/upgrade-dsh.sh --check               # 只检查（不改动任何东西）
 #   ops/upgrade-dsh.sh --version 0.2.0-rc.2  # 升级到指定版本
 #   ops/upgrade-dsh.sh --yes --no-restart    # 无人值守，不自动重启
-#   ops/upgrade-dsh.sh --rollback 0.1.5-rc.3 # 回滚到旧版
+#   ops/upgrade-dsh.sh --rollback 0.1.5-rc.3 # 回滚到旧版（回滚本质是降级：--yes 下必须再加 --allow-downgrade）
 #   ops/upgrade-dsh.sh --restore-backup      # 用最近一次备份覆盖 ~/.dsh
 #   ops/upgrade-dsh.sh --allow-downgrade     # 允许把已装版本降下来（默认拒绝，--yes 也不会替你答应）
 #   ops/upgrade-dsh.sh --help
@@ -35,8 +35,6 @@ PORT="${DSH_PORT:-3080}"
 # 与 .dsh-web/ 里的 LaunchAgent plist 一致；重启走 ops/dsh-web-restart.sh，本脚本不 spawn 进程
 LABEL="com.deepseek.dsh-web.self-dsh-plugins"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-# 脚本在 ops/ 下；ROOT_DIR 保留仓库根语义（备份/日志提示用）
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 TARGET=""
 ROLLBACK=""
 RESTORE_BACKUP=0
