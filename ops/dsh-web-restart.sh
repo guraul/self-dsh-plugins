@@ -10,6 +10,7 @@
 #   ops/dsh-web-restart.sh --check    # 只打印现状与建议动作（含「其它 dsh 宿主」），不做任何操作
 #   ops/dsh-web-restart.sh            # 重启：job 在管 → kickstart；job 不在管 → bootstrap
 #   ops/dsh-web-restart.sh --force    # 结束所有非 launchd 的 dsh 进程（占 3080 的 + 其它端口的）再重启
+#   ops/dsh-web-restart.sh --print-url-file   # 只打印 .dsh-web/url.txt 的绝对路径（双击入口用它定位）
 #   ops/dsh-web-restart.sh --help
 #
 # 行为要点：
@@ -146,7 +147,7 @@ pid_ppid() {
 # 只有「job 在跑却读不到声明 pid」这种解析异常时才退回 ③ 的保守口径，宁可漏报也不误杀宿主。
 # 只读，不杀任何进程。
 consider_stray() { # $1=pid  $2=lsof 的短命令名（仅兜底）  $3=端口列表  $4=launchd 声明的 pid
-  local p="$1" name="$2" ports="$3" jp="$4" c ppid cwd a0 a1
+  local p="$1" name="$2" ports="$3" jp="$4" c ppid cwd a0 a1 rest
   # 判定用 ps 的完整命令行：lsof 的 c 字段只是短进程名（如 node），里面没有 --port
   c="$(pid_cmd "${p}")"
   [ -n "${c}" ] || c="${name}"
@@ -156,7 +157,7 @@ consider_stray() { # $1=pid  $2=lsof 的短命令名（仅兜底）  $3=端口�
   # 用 read 切分：未加引号的 set -- 会在命令行含 * ? [ 时触发 glob 展开
   a0=""
   a1=""
-  read -r a0 a1 _ <<<"${c}"
+  read -r a0 a1 rest <<<"${c}"
   case "${a0##*/}" in
     node|nodejs)
       case "${a1##*/}" in dsh) ;; *) return 0 ;; esac ;;
