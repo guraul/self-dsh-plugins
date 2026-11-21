@@ -1,0 +1,29 @@
+{
+  "name": "dsh-plugin-speech-mimo",
+  "version": "0.1.0",
+  "description": "DSH voice input provider: transcribe 16 kHz WAV with mimo-v2.6-flash through the opencode-go gateway; no local model",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "check": "node --check index.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
