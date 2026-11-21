@@ -25,8 +25,9 @@ export const PRODUCTS = {
   },
   codebuddy: {
     bin: 'codebuddy',
-    // plan 模式会去读仓库核对，5k+ diff 的审核实测超过 300s，给到 600s
-    defaultTimeoutMs: 600000,
+    // plan 模式会去读仓库核对：5k+ diff 实测超 300s，成功的审核常态落在 250~580s，
+    // 600s 会顶穿（issue #459：一周 9/119 超时），给到 900s
+    defaultTimeoutMs: 900000,
     // json 输出里带 modelUsage，可以用来核对「实际用的模型」
     argv: ({ model, task, sessionId }) => [
       '-p',

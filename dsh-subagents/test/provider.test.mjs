@@ -326,7 +326,7 @@ test('实际模型与请求一致 -> 正常返回', async () => {
 
 test('defaultTimeout 按产品区分且可覆盖', async () => {
   const { defaultTimeout } = await import('../lib/provider.js')
-  assert.equal(defaultTimeout('codebuddy'), 600000)
+  assert.equal(defaultTimeout('codebuddy'), 900000)
   assert.equal(defaultTimeout('opencode'), 300000)
   assert.throws(() => defaultTimeout('nope'), /未支持的 product/)
 })
