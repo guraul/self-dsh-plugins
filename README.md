@@ -16,6 +16,7 @@
 | [`dsh-subagents/`](./dsh-subagents) | `dsh-plugin-subagents` | 角色化子代理层：角色（`executor` / `reviewer`）× 接入形态（A 原生 / B 委派 CLI / C 伪模型），三种形态共享同一份判定契约 | 开发中（PR2 交付骨架 + 角色层 + 契约层；宿主侧注册与挂载在 PR4） |
 | [`dsh-prompt-optimizer/`](./dsh-prompt-optimizer) | `@y1x1n/dsh-prompt-optimizer` | 发送栏纯图标按钮：一键优化提示词，完成后直接写回输入框（fork：线性图标 / 去文案 / 内联 loading，无弹出面板） | 可用（`0.6.1-fork.1`，门禁全绿；真机 GUI 手点未做） |
 | [`dsh-go-quota/`](./dsh-go-quota) | `dsh-go-quota` | 输入框下方统计行里的额度 pill：直查 OpenCode GO 官方用量接口，点开显示 5 小时 / 本周 / 本月三个窗口 | 开发中（宿主单测全绿；真机 GUI 未验收） |
+| [`dsh-speech-mimo/`](./dsh-speech-mimo) | `dsh-plugin-speech-mimo` | 语音输入云端识别提供方：把 16 kHz WAV 交给 opencode-go 的 `mimo-v2.6-flash`，本机不跑模型、不下载模型 | 待验收（单测全绿；重启后做真机语音验收） |
 
 ## 文档地图
 
@@ -101,6 +102,17 @@
 而不是 0%。
 
 只在挂载与展开时查询（宿主缓存 30 秒），不做后台轮询；不消耗套餐额度。
+
+## dsh-speech-mimo
+
+**来源：纯原创。**
+
+给 DSH 语音输入注册第二个识别提供方：录音仍是 16 kHz 单声道 PCM16 WAV，改由 opencode-go 网关的
+`mimo-v2.6-flash` 转成文字，**本机不加载、不下载任何模型**。凭据复用 `refs.OPENCODE_GO_API_KEY`，
+key 只在宿主进程内使用。
+
+PCM 的 RMS 低于 `silenceRmsDb`（默认 -50 dBFS）时直接返回空文字、不发请求；`content` 为空时回退
+`reasoning` / `reasoning_content`；错误只给状态码与简要原因，不打印 key、响应体全文或音频字节。
 
 ## dsh-external-discuss
 

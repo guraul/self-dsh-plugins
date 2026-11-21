@@ -1,0 +1,10 @@
+- insert:
+    - id: speech-mimo
+      name: dsh-plugin-speech-mimo
+      config:
+        baseURL: https://opencode.ai/zen/go/v1/chat/completions
+        model: mimo-v2.6-flash
+        apiKeyEnv: OPENCODE_GO_API_KEY
+        sessionHeader: x-opencode-session
+        silenceRmsDb: -50
+        timeoutMs: 120000

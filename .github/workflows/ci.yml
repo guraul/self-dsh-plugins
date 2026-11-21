@@ -65,6 +65,11 @@ jobs:
             entry: |
               index.js
               client.js
+          - dir: dsh-speech-mimo
+            install: true
+            fresh: true
+            entry: |
+              index.js
           - dir: dsh-im-bridge-workspaces
             install: true
             # 构建产物不可复现（绝对路径 + CSS 哈希），不做新鲜度检查。
